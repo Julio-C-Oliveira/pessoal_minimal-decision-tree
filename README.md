@@ -4,7 +4,7 @@ Esse repositório vai servir para estudar e desenvolver um modelo de árvore lev
 - [ ] Estudar sobre Hoeffding Tree:
     -[ ] Mining High-Speed Data Streams - Pedro Domingos e Geoff Hulten. Apresenta a ideia de desigualdade de hoeffding para fazer os splits.
     - [ ] Very Fast Decision Tree Learner - Hulten, Spencer e Domingos. Melhorias em consumo de memória.
-    - [] Adaptive Strategies for Learning Classifiers from Data Streams - Albert Bifet. Fala sobre o tratamento de dados categóricos e numéricos.
+    - [ ] Adaptive Strategies for Learning Classifiers from Data Streams - Albert Bifet. Fala sobre o tratamento de dados categóricos e numéricos.
     - [ ] Learning from Time-Changing Data Streams with Adaptive Hoeffding Trees - Albert Bifet e Ricard Gavaldà. Fala sobre COncept Drift.
 - [ ] Estudar a implementação do River (https://github.com/online-ml/river):
     - [ ] /river/tree
