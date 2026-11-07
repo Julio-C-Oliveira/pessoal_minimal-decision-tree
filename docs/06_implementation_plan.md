@@ -21,6 +21,7 @@
 | **1.4** | **Fase 1:** Critérios de Impureza & Hoeffding Bound | `code/include/ht_criterion.h`, `code/src/ht_criterion.c`, `code/tests/test_criterion.c`, `code/tests/test_e2e_flow.c` | **N1:** Gini (1 divisão), InfoGain (base 2), `min_branch_fraction`, $\epsilon(R, \delta, n)$<br/>**N2:** busca do melhor `ht_split_candidate_t` entre observadores + desempate $\tau$<br/>**N3:** decisão completa de split sobre dados sintéticos no E2E | `[x]` | `c196934` |
 | **1.5** | **Fase 1:** Árvore VFDT Completa (MC/NB/NBA, Memória, Save/Load) | `code/include/ht_tree.h`, `code/src/ht_tree.c`, `code/tests/test_tree.c`, `code/tests/test_e2e_flow.c` | **N1:** roteamento iterativo (`NaN` $\to$ filho mais populoso), predição MC/NB/NBA, `Promise(l)`<br/>**N2:** split com reciclagem de `stats_idx` + desativação de folhas quando pool enche<br/>**N3:** treino *prequential* completo + `ht_save`/`ht_load` bit-a-bit | `[x]` | `e0b9739` |
 | **2.1** | **Fase 2:** Paridade Prequential e Benchmark vs River | `benchmarks/generate_streams.py`, `benchmarks/bench_c_runner.c`, `benchmarks/compare_river.py`, `benchmarks/benchmark_report.md` | Comparação *Apples-to-Apples* (SEA, Agrawal, Hyperplane, LED, STAGGER) em `double` e `float`: Acurácia, Splits, Nós, RAM ($\le 1\text{ MB}$) e Tempo ($\mu\text{s}$/amostra) | `[x]` | `678bc1c` |
+| **2.2** | **Fase 2:** Benchmark Triplo MNIST (C11 vs River vs Scikit-Learn) com Profiling de RAM | `benchmarks/generate_mnist.py`, `benchmarks/compare_triple.py`, `benchmarks/triple_benchmark_report.md`, `code/Makefile`, `Makefile` | Avaliação tripla no MNIST (10 classes, 4 classes, binário): Holdout & Prequential Acc, Topologia (Nós), Profiling de RAM (Estrutura, Pico Heap Tracemalloc, RSS) e Throughput (Speedup >240x) | `[x]` | `fd61a5c` |
 | **3.1** | **Fase 3:** Detector ADWIN com Histograma Exponencial Fixo | `code/include/ht_drift.h`, `code/src/ht_drift.c`, `code/tests/test_drift.c` | **N1:** inserção, compressão de buckets $2^k$ ($M=5$), corte $\epsilon_{\text{cut}}$<br/>**N2:** pool estático de detectores ADWIN + detecção de salto de média | `[ ]` | — |
 | **3.2** | **Fase 3:** Hoeffding Adaptive Tree (HAT) | `code/include/ht_tree.h`, `code/src/ht_tree.c`, `code/src/ht_drift.c`, `code/tests/test_drift.c`, `code/tests/test_e2e_flow.c` | **N1:** filtro unilateral de erro, `bound` de troca/poda, votação $1/\hat{e}^2$<br/>**N2:** substituição de subárvore com reciclagem iterativa de nós antigos<br/>**N3:** stream E2E com drift abrupto recuperando acurácia | `[ ]` | — |
 | **3.3** | **Fase 3:** Benchmark de Concept Drift vs River HAT | `benchmarks/compare_river.py`, `benchmarks/bench_c_runner.c` | Paridade contra `HoeffdingAdaptiveTreeClassifier` em streams com drift abrupto e gradual | `[ ]` | — |
@@ -316,3 +317,23 @@ flowchart LR
    - **Nível 1:** Roteamento com e sem `NaN`, predição MC, NB (com *Log-Sum-Exp*) e NBA (ordem *prequential*), cálculo de `Promise(l)`.
    - **Nível 2:** Crescimento automático de árvore com múltiplos splits, desativação automática da folha de menor `Promise(l)` quando `stats_pool` lota.
    - **Nível 3 (`test_e2e_flow.c`):** Treinamento *prequential* ponta a ponta em dataset sintético multiclasse comprovando ganho de acurácia, seguido de `ht_tree_save` $\to$ `ht_tree_load` (modo completo e somente-inferência) com 100% de igualdade nas predições.
+
+---
+
+## 5. Baterias de Benchmarks e Validação Experimental (`benchmarks/`)
+
+### Entrega 2.1: Paridade Prequential vs River (`make bench`)
+- Validação em 5 geradores clássicos de stream (SEA, Agrawal, Hyperplane, LED, STAGGER) e estudos de ablação (Gini vs InfoGain, MC vs NB vs NBA).
+- Margem de tolerância: $\Delta \le 0.1\%$ em acurácia e topologia de nós idêntica.
+- Consumo estático: $\le 1\text{ MB}$ de RAM e zero chamadas a `malloc` em runtime.
+
+### Entrega 2.2: Benchmark Triplo no MNIST vs River e Scikit-Learn (`make bench-triple`)
+- Comparação abrangente em dados reais (*downsampled TinyML* $4 \times 4$ pooling $\to$ 16 atributos):
+  1. **MNIST-10Class** (10 dígitos, 20.000 amostras)
+  2. **MNIST-4Class** (dígitos 0..3, 10.000 amostras)
+  3. **MNIST-Binary** (dígitos pares vs ímpares, 20.000 amostras)
+- Profiling completo de memória:
+  - Tamanho estrutural do modelo (`sizeof` / `tree_size`)
+  - Pico de heap dinâmico em runtime via `tracemalloc` (C11: **0.0 KB**, Scikit-Learn: 314–653 KB, River: 215–659 KB)
+- Throughput e latência por amostra: Speedups de **$240\times$ a $350\times$** da solução C11 em relação ao River.
+- Relatório consolidado gerado automaticamente em [`benchmarks/triple_benchmark_report.md`](file:///home/julio/Documentos/pessoal_minimal-decision-tree/benchmarks/triple_benchmark_report.md).
