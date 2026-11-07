@@ -134,46 +134,6 @@ pessoal_minimal-decision-tree/
 
 ---
 
-## Roadmap e Tarefas (TO-DO)
+## Plano de Implementação e Roadmap
 
-### Fase 0: Estudo Teórico e Mapeamento (`docs/`)
-- [x] **Estudar sobre Hoeffding Tree (`references/papers/`):**
-  - [x] *Mining High-Speed Data Streams* (Pedro Domingos & Geoff Hulten, 2000) — Derivação do limite de Hoeffding, algoritmo base, `grace_period` ($n_{\min}$) e *tie-breaking* ($\tau$).
-  - [x] *Very Fast Decision Tree Learner* (Hulten, Spencer & Domingos, 2001) — Desativação/reativação de folhas menos promissoras ($p_l \cdot e_l$), descarte de atributos ruins e controle de memória.
-  - [x] *Adaptive Strategies for Learning Classifiers from Data Streams* (Albert Bifet, 2009) — Tratamento de atributos numéricos (aproximação Gaussiana vs quantis/EBST) e categóricos, além de *Naive Bayes Adaptive* (NBA) nas folhas.
-  - [x] *Learning from Time-Changing Data Streams with Adaptive Hoeffding Trees* (Albert Bifet & Ricard Gavaldà, 2009) — Detecção de *Concept Drift* com ADWIN em cada nó e treinamento de subárvores alternativas.
-- [x] **Estudar a implementação do River (`references/river_tree/`):**
-  - [x] [`hoeffding_tree_classifier.py`](file:///home/julio/Documentos/pessoal_minimal-decision-tree/references/river_tree/hoeffding_tree_classifier.py) (Fluxo de `learn_one`, `predict_proba_one`, tentativa de split e gestão de memória).
-  - [x] [`nodes/branch.py`](file:///home/julio/Documentos/pessoal_minimal-decision-tree/references/river_tree/nodes/branch.py) e [`nodes/htc_nodes.py`](file:///home/julio/Documentos/pessoal_minimal-decision-tree/references/river_tree/nodes/htc_nodes.py) (Diferença entre folhas MC, NB e NBA).
-  - [x] [`splitter/gaussian_splitter.py`](file:///home/julio/Documentos/pessoal_minimal-decision-tree/references/river_tree/splitter/gaussian_splitter.py) e [`utils.py`](file:///home/julio/Documentos/pessoal_minimal-decision-tree/references/river_tree/utils.py) (Como o River calcula os pontos de corte candidatos a partir da distribuição normal por classe).
-  - [x] [`split_criterion/gini.py`](file:///home/julio/Documentos/pessoal_minimal-decision-tree/references/river_tree/split_criterion/gini.py) e [`split_criterion/info_gain.py`](file:///home/julio/Documentos/pessoal_minimal-decision-tree/references/river_tree/split_criterion/info_gain.py) (Cálculo do mérito, normalização do range $R$ e penalidade por fração mínima de ramo).
-- [x] **Estudar a arquitetura do Scikit-Learn (`references/sklearn_tree/`):**
-  - [x] [`_tree.pxd`](file:///home/julio/Documentos/pessoal_minimal-decision-tree/references/sklearn_tree/_tree.pxd) / [`_utils.pxd`](file:///home/julio/Documentos/pessoal_minimal-decision-tree/references/sklearn_tree/_utils.pxd) (Representação da árvore como array plano contíguo de structs `Node` indexado por inteiros e separação do buffer `value`).
-  - [x] [`_criterion.pxd`](file:///home/julio/Documentos/pessoal_minimal-decision-tree/references/sklearn_tree/_criterion.pxd) / [`_criterion.pyx`](file:///home/julio/Documentos/pessoal_minimal-decision-tree/references/sklearn_tree/_criterion.pyx) (Design modular dos critérios de impureza e avaliação incremental de partições).
-  - [x] [`_splitter.pxd`](file:///home/julio/Documentos/pessoal_minimal-decision-tree/references/sklearn_tree/_splitter.pxd) / [`_splitter.pyx`](file:///home/julio/Documentos/pessoal_minimal-decision-tree/references/sklearn_tree/_splitter.pyx) (Registro `SplitRecord` para retorno de candidatos a ponto de corte).
-
-### Fase 1: Núcleo VFDT em C11 + Gestão de Memória (`<= 1MB`) + Testes Progressivos (`code/tests/`)
-> **Protocolo de Testes em 3 Níveis:** Cada módulo implementado abaixo deve vir imediatamente acompanhado de seus testes de **Nível 1 (Função/Unidade)**, **Nível 2 (Integração com camadas anteriores)** e **Nível 3 (Fluxo Total Acumulado em `test_e2e_flow.c`)**, validados em `float` e `double` antes de avançar ao próximo item.
-
-- [x] Configurar `Makefile`, `code/include/ht_config.h` e `code/tests/test_harness.h` (suporte a `float`/`double`, `ht_value_t`, `stdint.h`, compilação limpa com `-Wall -Wextra -Werror -std=c11`).
-- [x] Implementar `ht_memory` + `code/tests/test_memory.c`: Pool/Slab allocator estático baseado em índices `uint16_t` para `ht_node_t` e `ht_leaf_stats_t` (zero `malloc` em runtime, medição exata de bytes usados, stress test de reciclagem).
-- [x] Implementar `ht_observer` + `code/tests/test_observer.c`:
-  - [x] Observador numérico Gaussiano incremental (Welford) + avaliação de $k$ thresholds candidatos usando PDF/CDF normal.
-  - [x] Observador categórico nominal com busca do melhor split binário ($x_i == c$ vs $x_i \neq c$).
-- [x] Implementar `ht_criterion` + `code/tests/test_criterion.c`:
-  - [x] Vtable (`ht_criterion_vtable_t`) + implementações de *Gini Impurity* e *Information Gain (Entropia)*.
-  - [x] Cálculo do *Hoeffding Bound* ($\epsilon$) e verificação de split ($\Delta G > \epsilon$ ou $\epsilon < \tau$) integrado aos observadores.
-- [x] Implementar `ht_tree` (VFDT) + `code/tests/test_tree.c` + `code/tests/test_e2e_flow.c`:
-  - [x] Roteamento de amostras da raiz até a folha (incluindo fallback para filho mais populoso em caso de `NaN`).
-  - [x] Predição nas folhas via *Majority Class* (MC), *Naive Bayes* (NB) e *Naive Bayes Adaptive* (NBA).
-  - [x] Ciclo `learn_one`: atualização de estatísticas, checagem a cada `grace_period`, execução de split e reciclagem do `ht_leaf_stats_t`.
-  - [x] Gestão de memória VFDT: cálculo de folha menos promissora ($p_l \cdot e_l$) e desativação automática quando o `stats_pool` encher.
-  - [x] Serialização binária (`ht_save` / `ht_load` em modo completo ou somente-inferência) e validação do fluxo ponta a ponta completo.
-
-### Fase 2: Validação Prequential e Benchmark contra o River (`benchmarks/`)
-- [ ] Criar script Python com `river` para gerar streams clássicos (ex: *SEA*, *Agrawal*, *Hyperplane*) e comparar curva de acurácia *prequential*, número de nós, número de splits e consumo de RAM entre o River e nossa implementação em C.
-
-### Fase 3: Concept Drift — Hoeffding Adaptive Tree (HAT)
-- [ ] Implementar detector **ADWIN** em C com lista de buckets estática (alocada a partir de um pool dedicado) + testes unitários em `tests/test_drift.c`.
-- [ ] Adicionar suporte a subárvores alternativas (`alternate_tree`) nos nós internos da árvore quando o ADWIN detectar mudança de distribuição, substituindo a subárvore antiga caso a alternativa atinja menor erro + teste de fluxo total com drift em `tests/test_e2e_flow.c`.
-- [ ] Validar em streams com *Concept Drift* abrupto e gradual contra `river.tree.HoeffdingAdaptiveTreeClassifier`.
+O acompanhamento detalhado das fases, tarefas, especificações de módulos e checklist de progresso do projeto está centralizado em [`docs/06_implementation_plan.md`](file:///home/julio/Documentos/pessoal_minimal-decision-tree/docs/06_implementation_plan.md).
