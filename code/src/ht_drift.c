@@ -429,3 +429,160 @@ size_t ht_adwin_pool_bytes_used(const ht_adwin_pool_t *pool) {
     }
     return sizeof(ht_adwin_pool_t);
 }
+
+/* --- HAT Concept Drift Helpers Implementation --- */
+
+ht_float_t ht_hat_calculate_switch_bound(ht_float_t e_old,
+                                         uint32_t n_old,
+                                         uint32_t n_alt,
+                                         ht_float_t alpha)
+{
+    if (n_old == 0U || n_alt == 0U || alpha <= (ht_float_t)0.0 || alpha >= (ht_float_t)1.0) {
+        return HT_INFINITY;
+    }
+
+    ht_float_t var = e_old * ((ht_float_t)1.0 - e_old);
+    if (var < (ht_float_t)0.0) {
+        var = (ht_float_t)0.0;
+    }
+
+    ht_float_t ln_term = HT_LOG(((ht_float_t)2.0) / alpha);
+    ht_float_t inv_n = ((ht_float_t)1.0 / (ht_float_t)n_alt) + ((ht_float_t)1.0 / (ht_float_t)n_old);
+
+    return HT_SQRT((ht_float_t)2.0 * var * ln_term * inv_n);
+}
+
+ht_hat_action_t ht_hat_evaluate_alternate(ht_float_t e_old,
+                                          uint32_t n_old,
+                                          ht_float_t e_alt,
+                                          uint32_t n_alt,
+                                          uint32_t min_obs,
+                                          ht_float_t alpha)
+{
+    if (n_old <= min_obs || n_alt <= min_obs) {
+        return HT_HAT_ACTION_NONE;
+    }
+
+    ht_float_t bound = ht_hat_calculate_switch_bound(e_old, n_old, n_alt, alpha);
+    if (bound == HT_INFINITY) {
+        return HT_HAT_ACTION_NONE;
+    }
+
+    if (bound < (e_old - e_alt)) {
+        return HT_HAT_ACTION_SWITCH;
+    }
+    if (bound < (e_alt - e_old)) {
+        return HT_HAT_ACTION_PRUNE;
+    }
+
+    return HT_HAT_ACTION_NONE;
+}
+
+bool ht_hat_check_error_drift(ht_adwin_t *adwin,
+                              ht_float_t *mean_error,
+                              uint32_t *error_count,
+                              uint8_t detec_in)
+{
+    if (adwin == NULL || mean_error == NULL || error_count == NULL) {
+        return false;
+    }
+
+    ht_float_t old_err = *mean_error;
+    bool drift = ht_adwin_update(adwin, (ht_float_t)detec_in);
+
+    /* Update incremental mean: mean += (val - mean) / n */
+    (*error_count)++;
+    *mean_error += ((ht_float_t)detec_in - *mean_error) / (ht_float_t)(*error_count);
+
+    if (drift) {
+        if (*mean_error <= old_err) {
+            /* Error is decreasing or unchanged: false alarm for drift adaptation, reset estimator */
+            *mean_error = (ht_float_t)0.0;
+            *error_count = 0U;
+            return false;
+        }
+        /* Error is strictly increasing: genuine drift detected */
+        *mean_error = (ht_float_t)0.0;
+        *error_count = 0U;
+        return true;
+    }
+
+    return false;
+}
+
+void ht_hat_combine_leaf_predictions(const ht_float_t *leaf_probas,
+                                     const ht_float_t *mean_errors,
+                                     uint16_t n_leaves,
+                                     uint8_t n_classes,
+                                     ht_float_t out_proba[HT_MAX_CLASSES])
+{
+    if (out_proba == NULL || n_classes == 0U) {
+        return;
+    }
+
+    for (uint8_t c = 0; c < HT_MAX_CLASSES; ++c) {
+        out_proba[c] = (ht_float_t)0.0;
+    }
+
+    if (leaf_probas == NULL || mean_errors == NULL || n_leaves == 0U) {
+        ht_float_t uniform = (ht_float_t)1.0 / (ht_float_t)n_classes;
+        for (uint8_t c = 0; c < n_classes; ++c) {
+            out_proba[c] = uniform;
+        }
+        return;
+    }
+
+    if (n_leaves == 1U) {
+        ht_float_t sum = (ht_float_t)0.0;
+        for (uint8_t c = 0; c < n_classes; ++c) {
+            sum += leaf_probas[c];
+        }
+        if (sum > (ht_float_t)0.0) {
+            for (uint8_t c = 0; c < n_classes; ++c) {
+                out_proba[c] = leaf_probas[c] / sum;
+            }
+        } else {
+            ht_float_t uniform = (ht_float_t)1.0 / (ht_float_t)n_classes;
+            for (uint8_t c = 0; c < n_classes; ++c) {
+                out_proba[c] = uniform;
+            }
+        }
+        return;
+    }
+
+    ht_float_t total_weight = (ht_float_t)0.0;
+    for (uint16_t i = 0; i < n_leaves; ++i) {
+        ht_float_t err = mean_errors[i];
+        ht_float_t w;
+        if (err <= (ht_float_t)1e-6) {
+            w = (ht_float_t)1e12;
+        } else {
+            w = ((ht_float_t)1.0) / (err * err);
+        }
+
+        const ht_float_t *dist = &leaf_probas[(size_t)i * HT_MAX_CLASSES];
+        ht_float_t leaf_sum = (ht_float_t)0.0;
+        for (uint8_t c = 0; c < n_classes; ++c) {
+            leaf_sum += dist[c];
+        }
+
+        if (leaf_sum > (ht_float_t)0.0) {
+            for (uint8_t c = 0; c < n_classes; ++c) {
+                ht_float_t p_norm = dist[c] / leaf_sum;
+                out_proba[c] += w * p_norm;
+                total_weight += w * p_norm;
+            }
+        }
+    }
+
+    if (total_weight > (ht_float_t)0.0) {
+        for (uint8_t c = 0; c < n_classes; ++c) {
+            out_proba[c] /= total_weight;
+        }
+    } else {
+        ht_float_t uniform = (ht_float_t)1.0 / (ht_float_t)n_classes;
+        for (uint8_t c = 0; c < n_classes; ++c) {
+            out_proba[c] = uniform;
+        }
+    }
+}

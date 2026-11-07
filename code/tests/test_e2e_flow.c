@@ -714,6 +714,100 @@ static void test_e2e_drift_stream_pipeline(void) {
     HT_ASSERT_EQ(adwin_pool.allocated_count, 0U);
 }
 
+static void test_e2e_hat_abrupt_drift_recovery(void) {
+    static ht_adwin_pool_t adwin_pool;
+    HT_ASSERT_EQ(ht_adwin_pool_init(&adwin_pool), HT_OK);
+
+    ht_config_params_t params;
+    ht_default_hat_params(&params, 2, 2);
+    params.grace_period = 50;
+    params.delta = (ht_float_t)1e-3;
+    params.drift_window_threshold = 50;
+    params.switch_significance = (ht_float_t)0.05;
+
+    ht_tree_t tree;
+    HT_ASSERT_EQ(ht_tree_init_hat(&tree, &params, &adwin_pool), HT_OK);
+
+    uint32_t lcg = 42;
+    uint32_t correct_a = 0;
+    uint32_t total_a = 0;
+
+    /* Concept A: samples 0..999 (x0 > 0 -> class 1, else class 0) */
+    for (uint32_t t = 0; t < 1000; ++t) {
+        lcg = lcg * 1664525U + 1013904223U;
+        ht_float_t x0 = ((ht_float_t)(lcg & 0xFFFFU) / (ht_float_t)32768.0) - (ht_float_t)1.0;
+        lcg = lcg * 1664525U + 1013904223U;
+        ht_float_t x1 = ((ht_float_t)(lcg & 0xFFFFU) / (ht_float_t)32768.0) - (ht_float_t)1.0;
+
+        uint8_t y = (x0 > (ht_float_t)0.0) ? 1 : 0;
+        ht_value_t x[HT_MAX_FEATURES];
+        memset(x, 0, sizeof(x));
+        x[0].num = x0;
+        x[1].num = x1;
+
+        if (t >= 500) {
+            uint8_t pred = ht_tree_predict(&tree, x);
+            if (pred == y) {
+                correct_a++;
+            }
+            total_a++;
+        }
+
+        HT_ASSERT_EQ(ht_tree_learn_one(&tree, x, y, (ht_float_t)1.0), HT_OK);
+    }
+
+    /* Concept A prequential accuracy in late stage must be > 90% */
+    ht_float_t acc_a = (ht_float_t)correct_a / (ht_float_t)total_a;
+    HT_ASSERT(acc_a > (ht_float_t)0.90);
+    HT_ASSERT(tree.memory.nodes_allocated > 1U); /* Tree has split */
+
+    /* Concept B: samples 1000..2999 (abrupt concept inversion: x0 > 0 -> class 0, else 1) */
+    uint32_t correct_b_late = 0;
+    uint32_t total_b_late = 0;
+
+    for (uint32_t t = 1000; t < 3000; ++t) {
+        lcg = lcg * 1664525U + 1013904223U;
+        ht_float_t x0 = ((ht_float_t)(lcg & 0xFFFFU) / (ht_float_t)32768.0) - (ht_float_t)1.0;
+        lcg = lcg * 1664525U + 1013904223U;
+        ht_float_t x1 = ((ht_float_t)(lcg & 0xFFFFU) / (ht_float_t)32768.0) - (ht_float_t)1.0;
+
+        uint8_t y = (x0 > (ht_float_t)0.0) ? 0 : 1;
+        ht_value_t x[HT_MAX_FEATURES];
+        memset(x, 0, sizeof(x));
+        x[0].num = x0;
+        x[1].num = x1;
+
+        if (t >= 2500) {
+            uint8_t pred = ht_tree_predict(&tree, x);
+            if (pred == y) {
+                correct_b_late++;
+            }
+            total_b_late++;
+        }
+
+        HT_ASSERT_EQ(ht_tree_learn_one(&tree, x, y, (ht_float_t)1.0), HT_OK);
+    }
+
+    /* Concept B prequential accuracy in late stage must recover to > 85% */
+    ht_float_t acc_b_late = (ht_float_t)correct_b_late / (ht_float_t)total_b_late;
+    HT_ASSERT(acc_b_late > (ht_float_t)0.85);
+
+    /* Assert alternate tree lifecycle events occurred */
+    HT_ASSERT(tree.n_alternate_trees > 0U);
+    HT_ASSERT(tree.n_switch_alternate_trees > 0U);
+
+    /* Memory budget verification: tree memory + adwin pool <= 1 MB */
+    size_t tree_bytes = ht_memory_bytes_used(&tree.memory);
+    size_t adwin_bytes = ht_adwin_pool_bytes_used(&adwin_pool);
+    HT_ASSERT((tree_bytes + adwin_bytes) <= (1024U * 1024U));
+
+    /* Clean up entire tree and assert 0 leaks in all pools */
+    HT_ASSERT_EQ(ht_tree_free_subtree(&tree, tree.root_idx), HT_OK);
+    HT_ASSERT_EQ(tree.memory.nodes_allocated, 0U);
+    HT_ASSERT_EQ(tree.memory.stats_allocated, 0U);
+    HT_ASSERT_EQ(adwin_pool.allocated_count, 0U);
+}
+
 void test_e2e_flow_run(void) {
     HT_TEST_SUITE_BEGIN("Nivel 3: Fluxo Ponta a Ponta Acumulado (E2E)");
     HT_RUN_TEST(test_e2e_sample_vector_ingestion);
@@ -723,4 +817,5 @@ void test_e2e_flow_run(void) {
     HT_RUN_TEST(test_e2e_split_decision_pipeline);
     HT_RUN_TEST(test_e2e_full_tree_prequential_and_serialization);
     HT_RUN_TEST(test_e2e_drift_stream_pipeline);
+    HT_RUN_TEST(test_e2e_hat_abrupt_drift_recovery);
 }

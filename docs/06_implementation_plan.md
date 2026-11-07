@@ -23,7 +23,7 @@
 | **2.1** | **Fase 2:** Paridade Prequential e Benchmark Triplo vs River e Scikit-Learn | `benchmarks/generate_streams.py`, `benchmarks/bench_c_runner.c`, `benchmarks/compare_river.py`, `benchmarks/benchmark_report.md` | Comparação Tripla *Apples-to-Apples* (SEA, Agrawal, Hyperplane, LED, STAGGER) em `double` e `float`: Acurácia Holdout (70/30), Macro F1-Score, Acurácia Prequential, Topologia (Nós), RAM ($\le 1\text{ MB}$, heap 0.0 KB) e Speedup vs River (>110x a 397x) | `[x]` | `b151090` |
 | **2.2** | **Fase 2:** Benchmark Triplo MNIST (C11 vs River vs Scikit-Learn) com Profiling de RAM | `benchmarks/generate_mnist.py`, `benchmarks/compare_triple.py`, `benchmarks/bench_c_runner.c`, `benchmarks/triple_benchmark_report.md`, `code/Makefile`, `Makefile` | Avaliação tripla no MNIST (10 classes, 4 classes, binário): Holdout Acc, F1-Score Macro, Prequential Acc, Topologia (Nós), Profiling de RAM (Estrutura, Pico Heap Tracemalloc) e Throughput (Speedup >240x) | `[x]` | `45e20a5` |
 | **3.1** | **Fase 3:** Detector ADWIN com Histograma Exponencial Fixo | `code/include/ht_drift.h`, `code/src/ht_drift.c`, `code/tests/test_drift.c`, `code/tests/test_e2e_flow.c` | **N1:** inserção, compressão de buckets $2^k$ ($M=5$), corte $\epsilon_{\text{cut}}$<br/>**N2:** pool estático de detectores ADWIN + detecção de salto de média | `[x]` | `41ab845` |
-| **3.2** | **Fase 3:** Hoeffding Adaptive Tree (HAT) | `code/include/ht_tree.h`, `code/src/ht_tree.c`, `code/src/ht_drift.c`, `code/tests/test_drift.c`, `code/tests/test_e2e_flow.c` | **N1:** filtro unilateral de erro, `bound` de troca/poda, votação $1/\hat{e}^2$<br/>**N2:** substituição de subárvore com reciclagem iterativa de nós antigos<br/>**N3:** stream E2E com drift abrupto recuperando acurácia | `[ ]` | — |
+| **3.2** | **Fase 3:** Hoeffding Adaptive Tree (HAT) | `code/include/ht_tree.h`, `code/src/ht_tree.c`, `code/src/ht_drift.c`, `code/tests/test_drift.c`, `code/tests/test_e2e_flow.c` | **N1:** filtro unilateral de erro, `bound` de troca/poda, votação $1/\hat{e}^2$<br/>**N2:** substituição de subárvore com reciclagem iterativa de nós antigos<br/>**N3:** stream E2E com drift abrupto recuperando acurácia | `[x]` | `feat(tree)` |
 | **3.3** | **Fase 3:** Benchmark de Concept Drift vs River HAT | `benchmarks/compare_river.py`, `benchmarks/bench_c_runner.c` | Paridade contra `HoeffdingAdaptiveTreeClassifier` em streams com drift abrupto e gradual | `[ ]` | — |
 
 ---
@@ -352,6 +352,37 @@ typedef struct {
 
 ---
 
+### Entrega 3.2: Hoeffding Adaptive Tree (HAT) (`include/ht_tree.h`, `src/ht_tree.c`, `include/ht_drift.h`, `src/ht_drift.c`)
+
+Integra detecção de drift via ADWIN2 nos nós da árvore, monitoramento unilateral do erro de classificação, criação de subárvores alternativas em ramos com aumento de erro, transição adaptativa (*Switch*) e poda (*Prune*) baseados no bound de Bernstein / Hoeffding, bootstrap sampling via Poisson(1), roteamento multi-folha com ponderação $1/\hat{e}^2$ e reciclagem iterativa de memória sem fragmentação:
+
+```c
+typedef enum {
+    HT_HAT_ACTION_NONE   = 0,
+    HT_HAT_ACTION_SWITCH = 1,
+    HT_HAT_ACTION_PRUNE  = 2
+} ht_hat_action_t;
+
+typedef struct {
+    uint16_t   adwin_idx;    /* Índice do detector ADWIN no pool (HT_INVALID_IDX se inativo) */
+    uint16_t   alt_tree_idx; /* Índice da raiz da subárvore alternativa (HT_INVALID_IDX se ausente) */
+    ht_float_t mean_error;   /* Média incremental do erro observada neste nó */
+    uint32_t   error_count;  /* Total de avaliações de erro observadas neste nó */
+} ht_node_drift_t;
+```
+
+#### API de Apoio ao HAT (`ht_drift.h` e `ht_tree.h`):
+- `ht_float_t ht_hat_calculate_switch_bound(ht_float_t e_old, uint32_t n_old, uint32_t n_alt, ht_float_t alpha)`
+- `ht_hat_action_t ht_hat_evaluate_alternate(ht_float_t e_old, uint32_t n_old, ht_float_t e_alt, uint32_t n_alt, uint32_t min_obs, ht_float_t alpha)`
+- `bool ht_hat_check_error_drift(ht_adwin_t *adwin, ht_float_t *mean_error, uint32_t *error_count, uint8_t detec_in)`
+- `void ht_hat_combine_leaf_predictions(const ht_float_t *leaf_probas, const ht_float_t *mean_errors, uint16_t n_leaves, uint8_t n_classes, ht_float_t out_proba[HT_MAX_CLASSES])`
+- `void ht_default_hat_params(ht_config_params_t *params, uint8_t n_features, uint8_t n_classes)`
+- `ht_status_t ht_tree_init_hat(ht_tree_t *tree, const ht_config_params_t *params, ht_adwin_pool_t *adwin_pool)`
+- `ht_status_t ht_tree_set_adwin_pool(ht_tree_t *tree, ht_adwin_pool_t *adwin_pool)`
+- `ht_status_t ht_tree_free_subtree(ht_tree_t *tree, uint16_t subtree_root_idx)`
+
+---
+
 ## 4. Matriz de Testes Progressivos em 3 Níveis (`tests/`)
 
 Conforme a skill [`embedded-c-tree`](file:///home/julio/Documentos/pessoal_minimal-decision-tree/.agents/skills/embedded-c-tree/SKILL.md), **nenhuma entrega avança para a próxima sem passar nos 3 níveis de testes abaixo**, compilados e executados tanto em `float` quanto em `double`:
@@ -385,6 +416,14 @@ flowchart LR
    - **Nível 1:** Roteamento com e sem `NaN`, predição MC, NB (com *Log-Sum-Exp*) e NBA (ordem *prequential*), cálculo de `Promise(l)`.
    - **Nível 2:** Crescimento automático de árvore com múltiplos splits, desativação automática da folha de menor `Promise(l)` quando `stats_pool` lota.
    - **Nível 3 (`test_e2e_flow.c`):** Treinamento *prequential* ponta a ponta em dataset sintético multiclasse comprovando ganho de acurácia, seguido de `ht_tree_save` $\to$ `ht_tree_load` (modo completo e somente-inferência) com 100% de igualdade nas predições.
+6. **Entrega 3.1 (`ht_drift` + `test_drift.c` + `test_e2e_flow.c`):**
+   - **Nível 1:** Inserção, compressão de buckets $2^k$ ($M=5$), corte $\epsilon_{\text{cut}}$, variância e média incremental.
+   - **Nível 2:** Pool estático de detectores ADWIN (`ht_adwin_pool_t`) com alocação e liberação em $O(1)$, paridade contra River em saltos de média abruptos.
+   - **Nível 3 (`test_e2e_flow.c`):** Pipeline de stream detectando múltiplos regimes de drift e adaptando a estimativa mantendo-se estritamente dentro do orçamento de RAM.
+7. **Entrega 3.2 (`ht_tree` + `ht_drift` + `test_drift.c` + `test_e2e_flow.c`):**
+   - **Nível 1:** Filtro unilateral de erro (supressão quando erro decresce ou empata), bound analítico de troca/poda, avaliação de Switch e Prune, votação ponderada normalizada $1/\hat{e}^2$.
+   - **Nível 2:** Substituição de subárvore (*Switch*) com reciclagem iterativa em pilha de nós, blocos de estatísticas e detectores ADWIN; poda de árvore alternativa (*Prune*).
+   - **Nível 3 (`test_e2e_flow.c`):** Stream sintético com drift abrupto invertendo o conceito gerador, comprovando geração de árvore alternativa, substituição automática (*Switch*), recuperação de acurácia prequential ($> 85\%$) e desalocação com zero vazamentos e conformidade com o limite de 1 MB.
 
 ---
 

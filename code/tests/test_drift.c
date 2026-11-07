@@ -8,6 +8,7 @@
 
 #include "test_harness.h"
 #include "ht_drift.h"
+#include "ht_tree.h"
 
 /* --- Level 1: Unit Tests --- */
 
@@ -431,6 +432,288 @@ static void test_adwin_pool_bytes_budget(void) {
     HT_ASSERT_EQ(bytes, sizeof(ht_adwin_pool_t));
 }
 
+/* --- Level 1: HAT Unit Tests (Filter, Bound, Voting) --- */
+
+static void test_hat_unilateral_error_filter(void) {
+    ht_adwin_t adwin;
+    HT_ASSERT_EQ(ht_adwin_init(&adwin, NULL), HT_OK);
+
+    ht_float_t mean_err = (ht_float_t)0.0;
+    uint32_t err_count = 0;
+
+    /* Case A: Null checks */
+    HT_ASSERT(!ht_hat_check_error_drift(NULL, &mean_err, &err_count, 1));
+    HT_ASSERT(!ht_hat_check_error_drift(&adwin, NULL, &err_count, 1));
+    HT_ASSERT(!ht_hat_check_error_drift(&adwin, &mean_err, NULL, 1));
+
+    /* Case B: Error is decreasing (improving accuracy)
+     * Start with high error: 40 samples of 1 (error rate 1.0)
+     */
+    for (int i = 0; i < 40; ++i) {
+        ht_hat_check_error_drift(&adwin, &mean_err, &err_count, 1);
+    }
+    HT_ASSERT(mean_err > (ht_float_t)0.8);
+
+    /* Now feed 100 accurate predictions (0s): error drops sharply.
+     * When ADWIN triggers drift, it represents error decreasing!
+     */
+    bool decreasing_drift_reported = false;
+    for (int i = 0; i < 100; ++i) {
+        if (ht_hat_check_error_drift(&adwin, &mean_err, &err_count, 0)) {
+            decreasing_drift_reported = true;
+        }
+    }
+    /* The unilateral filter must suppress the drift because error decreased! */
+    HT_ASSERT(!decreasing_drift_reported);
+
+    /* Case C: Error is increasing (degrading accuracy)
+     * Start with low error: 40 samples of 0 (error rate ~0.0)
+     */
+    ht_adwin_reset(&adwin);
+    mean_err = (ht_float_t)0.0;
+    err_count = 0;
+
+    for (int i = 0; i < 40; ++i) {
+        ht_hat_check_error_drift(&adwin, &mean_err, &err_count, 0);
+    }
+    HT_ASSERT_FLOAT_NEAR(mean_err, (ht_float_t)0.0, 1e-5);
+
+    /* Now feed 100 errors (1s): error rises sharply.
+     * When ADWIN triggers drift, error is increasing!
+     */
+    bool increasing_drift_reported = false;
+    for (int i = 0; i < 100; ++i) {
+        if (ht_hat_check_error_drift(&adwin, &mean_err, &err_count, 1)) {
+            increasing_drift_reported = true;
+        }
+    }
+    /* The unilateral filter must report genuine drift! */
+    HT_ASSERT(increasing_drift_reported);
+}
+
+static void test_hat_switch_prune_bound_analytical(void) {
+    /* Exact analytical test:
+     * e_old = 0.40, n_old = 400, n_alt = 400, alpha = 0.05
+     * var = 0.40 * 0.60 = 0.24
+     * ln(2 / 0.05) = ln(40) = 3.6888794541
+     * 1/400 + 1/400 = 0.005
+     * 2 * 0.24 * 3.6888794541 * 0.005 = 0.0088533107
+     * bound = sqrt(0.0088533107) = 0.09409203
+     */
+    ht_float_t bound = ht_hat_calculate_switch_bound(
+        (ht_float_t)0.40, 400U, 400U, (ht_float_t)0.05
+    );
+    HT_ASSERT_FLOAT_NEAR(bound, (ht_float_t)0.09409203, 1e-4);
+
+    /* Test equal sample sizes with different error */
+    /* e_old = 0.50, n_old = 500, n_alt = 500, alpha = 0.05 */
+    /* var = 0.25, ln(40) = 3.688879, inv_n = 0.004 */
+    /* bound = sqrt(2 * 0.25 * 3.688879 * 0.004) = sqrt(0.00737776) = 0.0858939 */
+    bound = ht_hat_calculate_switch_bound(
+        (ht_float_t)0.50, 500U, 500U, (ht_float_t)0.05
+    );
+    HT_ASSERT_FLOAT_NEAR(bound, (ht_float_t)0.0858939, 1e-4);
+
+    /* Edge cases */
+    HT_ASSERT_EQ(ht_hat_calculate_switch_bound((ht_float_t)0.5, 0U, 500U, (ht_float_t)0.05), HT_INFINITY);
+    HT_ASSERT_EQ(ht_hat_calculate_switch_bound((ht_float_t)0.5, 500U, 0U, (ht_float_t)0.05), HT_INFINITY);
+    HT_ASSERT_EQ(ht_hat_calculate_switch_bound((ht_float_t)0.5, 500U, 500U, (ht_float_t)0.0), HT_INFINITY);
+    HT_ASSERT_EQ(ht_hat_calculate_switch_bound((ht_float_t)0.5, 500U, 500U, (ht_float_t)1.0), HT_INFINITY);
+
+    /* Extreme errors e = 0.0 and e = 1.0 yield bound = 0.0 */
+    HT_ASSERT_FLOAT_EQ(ht_hat_calculate_switch_bound((ht_float_t)0.0, 500U, 500U, (ht_float_t)0.05), (ht_float_t)0.0);
+    HT_ASSERT_FLOAT_EQ(ht_hat_calculate_switch_bound((ht_float_t)1.0, 500U, 500U, (ht_float_t)0.05), (ht_float_t)0.0);
+}
+
+static void test_hat_evaluate_alternate_switch_and_prune(void) {
+    /* 1. min_obs rejection: if observations < threshold (300), action must be NONE */
+    ht_hat_action_t act = ht_hat_evaluate_alternate(
+        (ht_float_t)0.60, 250U, (ht_float_t)0.10, 250U, 300U, (ht_float_t)0.05
+    );
+    HT_ASSERT_EQ(act, HT_HAT_ACTION_NONE);
+
+    /* 2. SWITCH condition:
+     * n_old = 500, n_alt = 500, min_obs = 300, alpha = 0.05 -> bound ~ 0.0859
+     * e_old = 0.50, e_alt = 0.20 -> diff = 0.30 > bound
+     */
+    act = ht_hat_evaluate_alternate(
+        (ht_float_t)0.50, 500U, (ht_float_t)0.20, 500U, 300U, (ht_float_t)0.05
+    );
+    HT_ASSERT_EQ(act, HT_HAT_ACTION_SWITCH);
+
+    /* 3. PRUNE condition:
+     * e_old = 0.20, e_alt = 0.50 -> diff e_alt - e_old = 0.30 > bound
+     */
+    act = ht_hat_evaluate_alternate(
+        (ht_float_t)0.20, 500U, (ht_float_t)0.50, 500U, 300U, (ht_float_t)0.05
+    );
+    HT_ASSERT_EQ(act, HT_HAT_ACTION_PRUNE);
+
+    /* 4. KEEP condition:
+     * e_old = 0.35, e_alt = 0.33 -> diff = 0.02 < bound ~ 0.088
+     */
+    act = ht_hat_evaluate_alternate(
+        (ht_float_t)0.35, 500U, (ht_float_t)0.33, 500U, 300U, (ht_float_t)0.05
+    );
+    HT_ASSERT_EQ(act, HT_HAT_ACTION_NONE);
+
+    /* 5. Zero error in old tree never switches (bound = 0.0 < 0 - e_alt is false) */
+    act = ht_hat_evaluate_alternate(
+        (ht_float_t)0.0, 500U, (ht_float_t)0.10, 500U, 300U, (ht_float_t)0.05
+    );
+    HT_ASSERT_EQ(act, HT_HAT_ACTION_PRUNE);
+}
+
+static void test_hat_weighted_voting_one_over_error_squared(void) {
+    /* 1. Single leaf: probability must be identical to base */
+    ht_float_t leaf1_p[HT_MAX_CLASSES] = {(ht_float_t)0.7, (ht_float_t)0.3, (ht_float_t)0.0, (ht_float_t)0.0};
+    ht_float_t leaf1_err = (ht_float_t)0.25;
+    ht_float_t out[HT_MAX_CLASSES];
+
+    ht_hat_combine_leaf_predictions(leaf1_p, &leaf1_err, 1U, 2U, out);
+    HT_ASSERT_FLOAT_NEAR(out[0], (ht_float_t)0.7, 1e-5);
+    HT_ASSERT_FLOAT_NEAR(out[1], (ht_float_t)0.3, 1e-5);
+
+    /* 2. Two leaves:
+     * Leaf 0: err = 0.50 -> weight = 1 / 0.5^2 = 4.0. Proba = [0.8, 0.2]
+     * Leaf 1: err = 0.10 -> weight = 1 / 0.1^2 = 100.0. Proba = [0.1, 0.9]
+     * Class 0: 4 * 0.8 + 100 * 0.1 = 3.2 + 10 = 13.2
+     * Class 1: 4 * 0.2 + 100 * 0.9 = 0.8 + 90 = 90.8
+     * Total = 104.0
+     * Normalized: P(0) = 13.2 / 104.0 = 0.126923, P(1) = 90.8 / 104.0 = 0.873077
+     */
+    ht_float_t two_leaves_p[2 * HT_MAX_CLASSES];
+    two_leaves_p[0] = (ht_float_t)0.8; two_leaves_p[1] = (ht_float_t)0.2;
+    two_leaves_p[2] = (ht_float_t)0.0; two_leaves_p[3] = (ht_float_t)0.0;
+
+    two_leaves_p[4] = (ht_float_t)0.1; two_leaves_p[5] = (ht_float_t)0.9;
+    two_leaves_p[6] = (ht_float_t)0.0; two_leaves_p[7] = (ht_float_t)0.0;
+
+    ht_float_t errs[2] = {(ht_float_t)0.50, (ht_float_t)0.10};
+    ht_hat_combine_leaf_predictions(two_leaves_p, errs, 2U, 2U, out);
+
+    HT_ASSERT_FLOAT_NEAR(out[0], (ht_float_t)0.126923, 1e-4);
+    HT_ASSERT_FLOAT_NEAR(out[1], (ht_float_t)0.873077, 1e-4);
+
+    /* 3. Zero error floor protection */
+    errs[1] = (ht_float_t)0.0; /* 0.0 error */
+    ht_hat_combine_leaf_predictions(two_leaves_p, errs, 2U, 2U, out);
+    /* Leaf 1 with 0.0 error gets massive weight 1e12 and dominates */
+    HT_ASSERT_FLOAT_NEAR(out[0], (ht_float_t)0.1, 1e-3);
+    HT_ASSERT_FLOAT_NEAR(out[1], (ht_float_t)0.9, 1e-3);
+}
+
+/* --- Level 2: HAT Subtree Replacement and Pruning Integration Tests --- */
+
+static void test_hat_subtree_replacement_and_iterative_recycling(void) {
+    ht_adwin_pool_t ad_pool;
+    HT_ASSERT_EQ(ht_adwin_pool_init(&ad_pool), HT_OK);
+
+    ht_config_params_t params;
+    ht_default_hat_params(&params, 4, 2);
+
+    ht_tree_t tree;
+    HT_ASSERT_EQ(ht_tree_init_hat(&tree, &params, &ad_pool), HT_OK);
+
+    /* Initially 1 node (root), 1 stats, 1 adwin detector */
+    HT_ASSERT_EQ(tree.memory.nodes_allocated, 1U);
+    HT_ASSERT_EQ(tree.memory.stats_allocated, 1U);
+    HT_ASSERT_EQ(ad_pool.allocated_count, 1U);
+
+    /* Split root into left and right child */
+    uint16_t root_idx = tree.root_idx;
+    uint16_t left_idx = ht_node_alloc(&tree.memory);
+    uint16_t right_idx = ht_node_alloc(&tree.memory);
+    HT_ASSERT_NEQ(left_idx, HT_INVALID_IDX);
+    HT_ASSERT_NEQ(right_idx, HT_INVALID_IDX);
+
+    ht_node_t *r = &tree.memory.node_pool[root_idx];
+    r->flags &= ~HT_NODE_IS_LEAF;
+    r->left_child = left_idx;
+    r->right_child = right_idx;
+    if (r->stats_idx != HT_INVALID_IDX) {
+        ht_stats_free(&tree.memory, r->stats_idx);
+        r->stats_idx = HT_INVALID_IDX;
+    }
+    tree.n_decision_nodes = 1;
+    tree.n_active_leaves = 2;
+
+    /* Allocate stats for children */
+    uint16_t l_stats = ht_stats_alloc(&tree.memory);
+    uint16_t r_stats = ht_stats_alloc(&tree.memory);
+    tree.memory.node_pool[left_idx].stats_idx = l_stats;
+    tree.memory.node_pool[right_idx].stats_idx = r_stats;
+
+    /* Allocate ADWIN for children */
+    tree.node_drift[left_idx].adwin_idx = ht_adwin_pool_alloc(&ad_pool, NULL);
+    tree.node_drift[right_idx].adwin_idx = ht_adwin_pool_alloc(&ad_pool, NULL);
+
+    /* Now create an alternate subtree at root */
+    uint16_t alt_root = ht_node_alloc(&tree.memory);
+    HT_ASSERT_NEQ(alt_root, HT_INVALID_IDX);
+    uint16_t alt_stats = ht_stats_alloc(&tree.memory);
+    tree.memory.node_pool[alt_root].stats_idx = alt_stats;
+    tree.node_drift[alt_root].adwin_idx = ht_adwin_pool_alloc(&ad_pool, NULL);
+    tree.node_drift[root_idx].alt_tree_idx = alt_root;
+
+    /* Total allocated before switch: 4 nodes, 3 stats (leaves only), 4 detectors */
+    HT_ASSERT_EQ(tree.memory.nodes_allocated, 4U);
+    HT_ASSERT_EQ(tree.memory.stats_allocated, 3U);
+    HT_ASSERT_EQ(ad_pool.allocated_count, 4U);
+
+    /* Perform SWITCH: alt_root becomes new root, old root subtree (root, left, right) freed */
+    tree.root_idx = alt_root;
+    tree.node_drift[root_idx].alt_tree_idx = HT_INVALID_IDX;
+    HT_ASSERT_EQ(ht_tree_free_subtree(&tree, root_idx), HT_OK);
+
+    /* After switch: exactly 1 node (alt_root), 1 stats, 1 detector remaining! */
+    HT_ASSERT_EQ(tree.memory.nodes_allocated, 1U);
+    HT_ASSERT_EQ(tree.memory.stats_allocated, 1U);
+    HT_ASSERT_EQ(ad_pool.allocated_count, 1U);
+    HT_ASSERT_EQ(tree.root_idx, alt_root);
+
+    /* Clean up remaining tree */
+    HT_ASSERT_EQ(ht_tree_free_subtree(&tree, tree.root_idx), HT_OK);
+    HT_ASSERT_EQ(tree.memory.nodes_allocated, 0U);
+    HT_ASSERT_EQ(tree.memory.stats_allocated, 0U);
+    HT_ASSERT_EQ(ad_pool.allocated_count, 0U);
+}
+
+static void test_hat_alternate_tree_pruning_and_recycling(void) {
+    ht_adwin_pool_t ad_pool;
+    HT_ASSERT_EQ(ht_adwin_pool_init(&ad_pool), HT_OK);
+
+    ht_config_params_t params;
+    ht_default_hat_params(&params, 4, 2);
+
+    ht_tree_t tree;
+    HT_ASSERT_EQ(ht_tree_init_hat(&tree, &params, &ad_pool), HT_OK);
+
+    /* Attach alternate tree at root */
+    uint16_t alt_root = ht_node_alloc(&tree.memory);
+    uint16_t alt_stats = ht_stats_alloc(&tree.memory);
+    tree.memory.node_pool[alt_root].stats_idx = alt_stats;
+    tree.node_drift[alt_root].adwin_idx = ht_adwin_pool_alloc(&ad_pool, NULL);
+    tree.node_drift[tree.root_idx].alt_tree_idx = alt_root;
+
+    HT_ASSERT_EQ(tree.memory.nodes_allocated, 2U);
+    HT_ASSERT_EQ(tree.memory.stats_allocated, 2U);
+    HT_ASSERT_EQ(ad_pool.allocated_count, 2U);
+
+    /* Prune alternate tree */
+    HT_ASSERT_EQ(ht_tree_free_subtree(&tree, alt_root), HT_OK);
+    tree.node_drift[tree.root_idx].alt_tree_idx = HT_INVALID_IDX;
+
+    /* Memory returns strictly to baseline: 1 node, 1 stats, 1 detector */
+    HT_ASSERT_EQ(tree.memory.nodes_allocated, 1U);
+    HT_ASSERT_EQ(tree.memory.stats_allocated, 1U);
+    HT_ASSERT_EQ(ad_pool.allocated_count, 1U);
+
+    HT_ASSERT_EQ(ht_tree_free_subtree(&tree, tree.root_idx), HT_OK);
+    HT_ASSERT_EQ(tree.memory.nodes_allocated, 0U);
+    HT_ASSERT_EQ(ad_pool.allocated_count, 0U);
+}
+
 /* Master suite runner for test_drift */
 void test_drift_run(void) {
     HT_TEST_SUITE_BEGIN("Nivel 1 & 2: Detector ADWIN com Histograma Exponencial Fixo (ht_drift)");
@@ -442,6 +725,12 @@ void test_drift_run(void) {
     HT_RUN_TEST(test_adwin_cut_epsilon_analytical);
     HT_RUN_TEST(test_adwin_edge_cases_and_null);
 
+    /* Nível 1: HAT Algoritmos e Casos de Borda */
+    HT_RUN_TEST(test_hat_unilateral_error_filter);
+    HT_RUN_TEST(test_hat_switch_prune_bound_analytical);
+    HT_RUN_TEST(test_hat_evaluate_alternate_switch_and_prune);
+    HT_RUN_TEST(test_hat_weighted_voting_one_over_error_squared);
+
     /* Nível 2: Integração, Paridade River e Pool Estático */
     HT_RUN_TEST(test_adwin_drift_detection_step_change_river_parity);
     HT_RUN_TEST(test_adwin_drift_detection_multiple_shifts);
@@ -449,4 +738,8 @@ void test_drift_run(void) {
     HT_RUN_TEST(test_adwin_pool_concurrent_detectors);
     HT_RUN_TEST(test_adwin_pool_stress_50k_recycling);
     HT_RUN_TEST(test_adwin_pool_bytes_budget);
+
+    /* Nível 2: HAT Substituição e Poda de Subárvores */
+    HT_RUN_TEST(test_hat_subtree_replacement_and_iterative_recycling);
+    HT_RUN_TEST(test_hat_alternate_tree_pruning_and_recycling);
 }

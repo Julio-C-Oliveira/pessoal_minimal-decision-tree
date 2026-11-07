@@ -24,6 +24,7 @@
 #include "ht_memory.h"
 #include "ht_observer.h"
 #include "ht_criterion.h"
+#include "ht_drift.h"
 
 /**
  * @brief Supported leaf prediction strategies.
@@ -51,7 +52,22 @@ typedef struct {
     ht_float_t          max_share_to_split;             /**< Majority class share limit (default: 0.99) */
     ht_float_t          nb_threshold;                   /**< Min weight before NB is allowed (default: 0.0) */
     bool                merit_preprune;                 /**< Include null split candidate (default: true) */
+    bool                enable_hat;                     /**< Enable HAT concept drift adaptation */
+    bool                bootstrap_sampling;             /**< Enable Poisson(1) online bootstrap sampling */
+    uint16_t            drift_window_threshold;         /**< Min samples before alternate tree replacement (default: 300) */
+    ht_float_t          switch_significance;            /**< Significance for alternate tree replacement (default: 0.05) */
+    ht_float_t          adwin_delta;                    /**< Confidence parameter for ADWIN detectors (default: 0.002) */
 } ht_config_params_t;
+
+/**
+ * @brief Node concept drift monitoring and alternate subtree metadata for HAT.
+ */
+typedef struct {
+    ht_float_t mean_error;   /**< Online error rate tracked at this node */
+    uint32_t   error_count;  /**< Number of error updates observed */
+    uint16_t   adwin_idx;    /**< Index in ht_adwin_pool_t, or HT_INVALID_IDX */
+    uint16_t   alt_tree_idx; /**< Root of alternate subtree in node_pool, or HT_INVALID_IDX */
+} ht_node_drift_t;
 
 /**
  * @brief Complete Hoeffding Tree structure.
@@ -63,12 +79,19 @@ typedef struct {
     ht_memory_pool_t             memory;
     ht_config_params_t           params;
     const ht_criterion_vtable_t *criterion_vtable;
+    ht_adwin_pool_t             *adwin_pool;
+    ht_node_drift_t              node_drift[HT_MAX_NODES];
     ht_float_t                   train_weight_seen;
+    uint32_t                     rng_state;
     uint16_t                     root_idx;
     uint16_t                     n_active_leaves;
     uint16_t                     n_inactive_leaves;
     uint16_t                     n_decision_nodes;
     uint16_t                     max_depth_seen;
+    uint16_t                     n_alternate_trees;
+    uint16_t                     n_pruned_alternate_trees;
+    uint16_t                     n_switch_alternate_trees;
+    uint16_t                     pad;
 } ht_tree_t;
 
 /* Compile-time verification of strict memory budget */
@@ -261,5 +284,49 @@ ht_status_t ht_tree_save(const ht_tree_t *tree,
 ht_status_t ht_tree_load(ht_tree_t *tree,
                          const void *buffer,
                          size_t buffer_len);
+
+/* --- HAT (Hoeffding Adaptive Tree) Public API --- */
+
+/**
+ * @brief Fills configuration parameters with standard HAT defaults matching River.
+ *
+ * @param params Output parameters struct.
+ * @param n_features Number of stream features.
+ * @param n_classes Number of target classes.
+ */
+void ht_default_hat_params(ht_config_params_t *params, uint8_t n_features, uint8_t n_classes);
+
+/**
+ * @brief Initializes a Hoeffding Adaptive Tree (HAT) instance with an external ADWIN pool.
+ *
+ * @param tree Pointer to tree instance.
+ * @param params Pointer to configuration parameters.
+ * @param adwin_pool Pointer to initialized ADWIN detector pool.
+ * @return HT_OK on success, or negative error code.
+ */
+ht_status_t ht_tree_init_hat(ht_tree_t *tree,
+                             const ht_config_params_t *params,
+                             ht_adwin_pool_t *adwin_pool);
+
+/**
+ * @brief Attaches (or detaches) an ADWIN detector pool to a tree instance.
+ *
+ * @param tree Pointer to tree instance.
+ * @param adwin_pool Pointer to pool structure (or NULL to disable HAT adaptation).
+ * @return HT_OK on success, or negative error code.
+ */
+ht_status_t ht_tree_set_adwin_pool(ht_tree_t *tree, ht_adwin_pool_t *adwin_pool);
+
+/**
+ * @brief Recursively/iteratively frees an entire subtree and returns all its nodes,
+ *        leaf stats blocks, and ADWIN detectors back to their static pools.
+ *
+ * Guaranteed loop termination with zero recursion on stack.
+ *
+ * @param tree Pointer to tree instance.
+ * @param subtree_root_idx Root node index of subtree to dismantle.
+ * @return HT_OK on success, or negative error code.
+ */
+ht_status_t ht_tree_free_subtree(ht_tree_t *tree, uint16_t subtree_root_idx);
 
 #endif /* HT_TREE_H */

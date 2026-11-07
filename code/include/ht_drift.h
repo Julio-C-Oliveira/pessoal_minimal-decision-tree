@@ -255,6 +255,88 @@ void ht_adwin_pool_reset(ht_adwin_pool_t *pool);
  */
 size_t ht_adwin_pool_bytes_used(const ht_adwin_pool_t *pool);
 
+/* --- HAT (Hoeffding Adaptive Tree) Concept Drift Helpers --- */
+
+/**
+ * @brief Actions resulting from evaluating an alternate subtree in HAT.
+ */
+typedef enum {
+    HT_HAT_ACTION_NONE   = 0, /**< Keep learning in both trees */
+    HT_HAT_ACTION_SWITCH = 1, /**< Alternate tree has significantly lower error; replace main branch */
+    HT_HAT_ACTION_PRUNE  = 2  /**< Alternate tree has significantly higher error; prune alternate tree */
+} ht_hat_action_t;
+
+/**
+ * @brief Computes the statistical bound for alternate tree replacement (Switch/Prune).
+ *
+ * Evaluates: bound = sqrt(2 * e_old * (1 - e_old) * ln(2 / alpha) * (1/n_alt + 1/n_old))
+ *
+ * @param e_old Mean error rate of main branch (0.0 .. 1.0).
+ * @param n_old Number of observations accumulated in main branch.
+ * @param n_alt Number of observations accumulated in alternate tree.
+ * @param alpha Significance level (e.g. 0.05).
+ * @return Statistical bound (or HT_INFINITY on invalid arguments).
+ */
+ht_float_t ht_hat_calculate_switch_bound(ht_float_t e_old,
+                                         uint32_t n_old,
+                                         uint32_t n_alt,
+                                         ht_float_t alpha);
+
+/**
+ * @brief Evaluates whether an alternate tree should replace the main branch (Switch),
+ *        be pruned (Prune), or keep learning (None).
+ *
+ * @param e_old    Mean error of main branch.
+ * @param n_old    Observations in main branch.
+ * @param e_alt    Mean error of alternate subtree.
+ * @param n_alt    Observations in alternate subtree.
+ * @param min_obs  Minimum sample window threshold before decisions (e.g. 300).
+ * @param alpha    Significance level (e.g. 0.05).
+ * @return HT_HAT_ACTION_SWITCH, HT_HAT_ACTION_PRUNE, or HT_HAT_ACTION_NONE.
+ */
+ht_hat_action_t ht_hat_evaluate_alternate(ht_float_t e_old,
+                                          uint32_t n_old,
+                                          ht_float_t e_alt,
+                                          uint32_t n_alt,
+                                          uint32_t min_obs,
+                                          ht_float_t alpha);
+
+/**
+ * @brief Unilateral error drift detector for HAT.
+ *
+ * Updates ADWIN and online error mean with 0-1 loss (detec_in = 0 for correct, 1 for error).
+ * If ADWIN detects drift:
+ * - If new error is lower than old error: drift represents improving accuracy,
+ *   so the signal is filtered out (false alarm) and the error estimator is reset.
+ * - If new error is higher or equal: genuine drift detected, returns true.
+ *
+ * @param adwin Pointer to ADWIN detector.
+ * @param mean_error In-out pointer to current mean error.
+ * @param error_count In-out pointer to update count.
+ * @param detec_in 0 if prediction was correct, 1 if error.
+ * @return true if error significantly increased (drift requiring adaptation), false otherwise.
+ */
+bool ht_hat_check_error_drift(ht_adwin_t *adwin,
+                              ht_float_t *mean_error,
+                              uint32_t *error_count,
+                              uint8_t detec_in);
+
+/**
+ * @brief Combines predictions from multiple leaves reached across main and alternate trees,
+ *        weighting each leaf's distribution by the inverse squared error (1 / e_l^2).
+ *
+ * @param leaf_probas Flat array of leaf class distributions of size (n_leaves * HT_MAX_CLASSES).
+ * @param mean_errors Array of mean errors for each reached leaf (size n_leaves).
+ * @param n_leaves Number of leaves reached.
+ * @param n_classes Number of active classes.
+ * @param out_proba Output normalized probability array of size HT_MAX_CLASSES.
+ */
+void ht_hat_combine_leaf_predictions(const ht_float_t *leaf_probas,
+                                     const ht_float_t *mean_errors,
+                                     uint16_t n_leaves,
+                                     uint8_t n_classes,
+                                     ht_float_t out_proba[HT_MAX_CLASSES]);
+
 #ifdef __cplusplus
 }
 #endif
