@@ -23,6 +23,7 @@
 
 #define MAX_LINE_LEN 2048
 #define MAX_CHECKPOINTS 1024
+#define MAX_TEST_SAMPLES 65536
 
 typedef struct {
     uint32_t sample;
@@ -40,6 +41,10 @@ typedef struct {
 static ht_tree_t tree_instance;
 static bench_checkpoint_t checkpoints[MAX_CHECKPOINTS];
 static size_t num_checkpoints = 0;
+static uint8_t test_predictions[MAX_TEST_SAMPLES];
+static uint32_t num_test_samples = 0;
+static uint32_t num_test_correct = 0;
+static double test_elapsed_us = 0.0;
 
 static double get_time_diff_us(struct timespec start, struct timespec end) {
     double sec = (double)(end.tv_sec - start.tv_sec);
@@ -56,6 +61,7 @@ static void print_usage(const char *prog_name) {
     fprintf(stderr, "  --delta <D>                       Split confidence parameter (default: 1e-7)\n");
     fprintf(stderr, "  --tau <T>                         Tie-breaking threshold (default: 0.05)\n");
     fprintf(stderr, "  --checkpoint-interval <N>         Interval between checkpoints (default: 1000)\n");
+    fprintf(stderr, "  --test-csv <file.csv>             Optional separate holdout test CSV for inference\n");
     fprintf(stderr, "  --json <file.json>                Save JSON benchmark results\n");
 }
 
@@ -66,6 +72,7 @@ int main(int argc, char *argv[]) {
     }
 
     const char *csv_path = argv[1];
+    const char *test_csv_path = NULL;
     ht_criterion_type_t criterion = HT_CRIT_INFO_GAIN;
     ht_leaf_pred_t leaf_pred = HT_LEAF_NBA;
     uint16_t grace_period = 200;
@@ -98,6 +105,8 @@ int main(int argc, char *argv[]) {
             tau_val = atof(argv[++i]);
         } else if (strcmp(argv[i], "--checkpoint-interval") == 0 && i + 1 < argc) {
             checkpoint_interval = (uint32_t)atoi(argv[++i]);
+        } else if (strcmp(argv[i], "--test-csv") == 0 && i + 1 < argc) {
+            test_csv_path = argv[++i];
         } else if (strcmp(argv[i], "--json") == 0 && i + 1 < argc) {
             json_out_path = argv[++i];
         } else {
@@ -290,6 +299,57 @@ int main(int argc, char *argv[]) {
 
     fclose(fp);
 
+    /* Optional Holdout Test Evaluation (pure inference, no learning) */
+    if (test_csv_path) {
+        FILE *tfp = fopen(test_csv_path, "r");
+        if (!tfp) {
+            fprintf(stderr, "Error: Could not open test dataset file: %s\n", test_csv_path);
+            return 1;
+        }
+
+        while (fgets(line_buf, sizeof(line_buf), tfp)) {
+            if (line_buf[0] == '#' || line_buf[0] == '\n' || line_buf[0] == '\r') {
+                continue;
+            }
+
+            char *saveptr = NULL;
+            char *tok = strtok_r(line_buf, ",\r\n", &saveptr);
+            uint8_t f_idx = 0;
+            uint8_t y_label = 0;
+
+            while (tok && f_idx < n_features) {
+                double val = atof(tok);
+                if (feat_types[f_idx] == HT_FEAT_CATEGORICAL) {
+                    x[f_idx].cat = (int32_t)val;
+                } else {
+                    x[f_idx].num = (ht_float_t)val;
+                }
+                f_idx++;
+                tok = strtok_r(NULL, ",\r\n", &saveptr);
+            }
+
+            if (tok) {
+                y_label = (uint8_t)atoi(tok);
+            } else {
+                continue;
+            }
+
+            struct timespec t_start, t_end;
+            clock_gettime(CLOCK_MONOTONIC, &t_start);
+            uint8_t y_pred = ht_tree_predict(&tree_instance, x);
+            clock_gettime(CLOCK_MONOTONIC, &t_end);
+            test_elapsed_us += get_time_diff_us(t_start, t_end);
+
+            if (y_pred == y_label) {
+                num_test_correct++;
+            }
+            if (num_test_samples < MAX_TEST_SAMPLES) {
+                test_predictions[num_test_samples++] = y_pred;
+            }
+        }
+        fclose(tfp);
+    }
+
     /* Final statistics */
     double final_accuracy = (sample_idx > 0) ? ((double)correct_preds / (double)sample_idx) : 0.0;
     uint16_t final_nodes = tree_instance.n_active_leaves +
@@ -302,6 +362,12 @@ int main(int argc, char *argv[]) {
     printf(" Summary: Samples=%u, Accuracy=%.4f%%, Nodes=%u, ActiveLeaves=%u, RAM=%.1f KB (<=1024 KB), Avg=%.2f us/sample\n",
            sample_idx, final_accuracy * 100.0, final_nodes, tree_instance.n_active_leaves,
            (double)final_bytes / 1024.0, final_avg_us);
+    if (test_csv_path) {
+        double holdout_acc = (num_test_samples > 0) ? ((double)num_test_correct / (double)num_test_samples) : 0.0;
+        double test_avg_us = (num_test_samples > 0) ? (test_elapsed_us / (double)num_test_samples) : 0.0;
+        printf(" Holdout: Samples=%u, Accuracy=%.4f%%, Avg=%.2f us/sample\n",
+               num_test_samples, holdout_acc * 100.0, test_avg_us);
+    }
     printf("====================================================================================\n");
 
     /* Export JSON if requested */
@@ -317,6 +383,17 @@ int main(int argc, char *argv[]) {
             fprintf(jfp, "  \"n_features\": %u,\n", n_features);
             fprintf(jfp, "  \"n_classes\": %u,\n", n_classes);
             fprintf(jfp, "  \"final_accuracy\": %.6f,\n", final_accuracy);
+            if (test_csv_path) {
+                double holdout_acc = (num_test_samples > 0) ? ((double)num_test_correct / (double)num_test_samples) : 0.0;
+                fprintf(jfp, "  \"holdout_accuracy\": %.6f,\n", holdout_acc);
+                fprintf(jfp, "  \"holdout_samples\": %u,\n", num_test_samples);
+                fprintf(jfp, "  \"holdout_time_us\": %.2f,\n", test_elapsed_us);
+                fprintf(jfp, "  \"holdout_predictions\": [");
+                for (uint32_t i = 0; i < num_test_samples; ++i) {
+                    fprintf(jfp, "%s%u", (i > 0) ? "," : "", test_predictions[i]);
+                }
+                fprintf(jfp, "],\n");
+            }
             fprintf(jfp, "  \"final_nodes\": %u,\n", final_nodes);
             fprintf(jfp, "  \"final_active_leaves\": %u,\n", tree_instance.n_active_leaves);
             fprintf(jfp, "  \"final_inactive_leaves\": %u,\n", tree_instance.n_inactive_leaves);
