@@ -352,6 +352,119 @@ static void test_memory_stress_recycling_100k(void) {
     HT_ASSERT_EQ(ht_memory_bytes_used(&s_test_pool), 0);
 }
 
+static void test_memory_unified_structures_and_sizes(void) {
+#ifndef HT_USE_DOUBLE
+    HT_ASSERT_EQ(sizeof(ht_node_t), 28);
+    HT_ASSERT_EQ(sizeof(ht_var_stat_t), 12);
+    HT_ASSERT_EQ(sizeof(ht_reg_num_slot_t), 16);
+    HT_ASSERT_EQ(sizeof(ht_reg_numeric_obs_t), 80);
+    HT_ASSERT_EQ(sizeof(ht_reg_categorical_obs_t), 60);
+    HT_ASSERT_EQ(sizeof(ht_feature_obs_t), 80);
+    HT_ASSERT_EQ(sizeof(ht_leaf_stats_t), 1360);
+#else
+    HT_ASSERT_EQ(sizeof(ht_node_t), 48);
+    HT_ASSERT_EQ(sizeof(ht_var_stat_t), 24);
+    HT_ASSERT_EQ(sizeof(ht_reg_num_slot_t), 32);
+    HT_ASSERT_EQ(sizeof(ht_reg_numeric_obs_t), 160);
+    HT_ASSERT_EQ(sizeof(ht_reg_categorical_obs_t), 120);
+    HT_ASSERT_EQ(sizeof(ht_feature_obs_t), 160);
+    HT_ASSERT_EQ(sizeof(ht_leaf_stats_t), 2720);
+#endif
+
+    HT_ASSERT(sizeof(ht_memory_pool_t) <= (1024 * 1024));
+}
+
+static void test_node_unified_regression_stats(void) {
+    ht_memory_init(&s_test_pool);
+
+    uint16_t n_idx = ht_node_alloc(&s_test_pool);
+    HT_ASSERT_NEQ(n_idx, HT_INVALID_IDX);
+
+    ht_node_t *node = ht_node_get(&s_test_pool, n_idx);
+    HT_ASSERT_NOT_NULL(node);
+
+    /* reg_stats zeroed upon alloc */
+    HT_ASSERT_FLOAT_EQ(node->reg_stats.count, (ht_float_t)0.0);
+    HT_ASSERT_FLOAT_EQ(node->reg_stats.mean, (ht_float_t)0.0);
+    HT_ASSERT_FLOAT_EQ(node->reg_stats.m2, (ht_float_t)0.0);
+
+    /* Set regression target values */
+    node->reg_stats.count = (ht_float_t)150.0;
+    node->reg_stats.mean = (ht_float_t)42.5;
+    node->reg_stats.m2 = (ht_float_t)12.25;
+
+    /* Verify through regression accessor */
+    HT_ASSERT_FLOAT_EQ(node->reg_stats.count, (ht_float_t)150.0);
+    HT_ASSERT_FLOAT_EQ(node->reg_stats.mean, (ht_float_t)42.5);
+    HT_ASSERT_FLOAT_EQ(node->reg_stats.m2, (ht_float_t)12.25);
+
+    /* Verify memory recycling */
+    ht_node_free(&s_test_pool, n_idx);
+    HT_ASSERT_EQ(ht_node_count(&s_test_pool), 0);
+
+    /* Reallocate and verify freshly zeroed */
+    uint16_t realloc_idx = ht_node_alloc(&s_test_pool);
+    HT_ASSERT_EQ(realloc_idx, n_idx);
+    ht_node_t *realloc_node = ht_node_get(&s_test_pool, realloc_idx);
+    HT_ASSERT_NOT_NULL(realloc_node);
+    HT_ASSERT_FLOAT_EQ(realloc_node->reg_stats.count, (ht_float_t)0.0);
+    HT_ASSERT_FLOAT_EQ(realloc_node->reg_stats.mean, (ht_float_t)0.0);
+    HT_ASSERT_FLOAT_EQ(realloc_node->reg_stats.m2, (ht_float_t)0.0);
+
+    ht_node_free(&s_test_pool, realloc_idx);
+}
+
+static void test_leaf_stats_regression_observers_and_weights(void) {
+    ht_memory_init(&s_test_pool);
+
+    uint16_t s_idx = ht_stats_alloc(&s_test_pool);
+    HT_ASSERT_NEQ(s_idx, HT_INVALID_IDX);
+
+    ht_leaf_stats_t *stats = ht_stats_get(&s_test_pool, s_idx);
+    HT_ASSERT_NOT_NULL(stats);
+
+    /* Verify regression fields are zeroed upon alloc */
+    HT_ASSERT_FLOAT_EQ(stats->fmse_mean, (ht_float_t)0.0);
+    HT_ASSERT_FLOAT_EQ(stats->fmse_model, (ht_float_t)0.0);
+    HT_ASSERT_FLOAT_EQ(stats->reg_intercept, (ht_float_t)0.0);
+    for (uint8_t f = 0; f < HT_MAX_FEATURES; ++f) {
+        HT_ASSERT_FLOAT_EQ(stats->reg_weights[f], (ht_float_t)0.0);
+        for (uint8_t k = 0; k < HT_REG_NUM_SLOTS; ++k) {
+            HT_ASSERT_FLOAT_EQ(stats->observers[f].reg_num.slots[k].x_mean, (ht_float_t)0.0);
+            HT_ASSERT_FLOAT_EQ(stats->observers[f].reg_num.slots[k].y_stats.count, (ht_float_t)0.0);
+        }
+    }
+
+    /* Assign regression SGD weights and fMSE accumulators */
+    stats->fmse_mean = (ht_float_t)1.234;
+    stats->fmse_model = (ht_float_t)0.567;
+    stats->reg_intercept = (ht_float_t)3.14;
+    for (uint8_t f = 0; f < HT_MAX_FEATURES; ++f) {
+        stats->reg_weights[f] = (ht_float_t)(f * 0.5);
+    }
+
+    HT_ASSERT_FLOAT_NEAR(stats->fmse_mean, (ht_float_t)1.234, 1e-4);
+    HT_ASSERT_FLOAT_NEAR(stats->fmse_model, (ht_float_t)0.567, 1e-4);
+    HT_ASSERT_FLOAT_NEAR(stats->reg_intercept, (ht_float_t)3.14, 1e-4);
+
+    /* Free and reallocate to test clean recycling */
+    ht_stats_free(&s_test_pool, s_idx);
+    HT_ASSERT_EQ(ht_stats_count(&s_test_pool), 0);
+
+    uint16_t realloc_idx = ht_stats_alloc(&s_test_pool);
+    HT_ASSERT_EQ(realloc_idx, s_idx);
+    ht_leaf_stats_t *re_stats = ht_stats_get(&s_test_pool, realloc_idx);
+    HT_ASSERT_NOT_NULL(re_stats);
+    HT_ASSERT_FLOAT_EQ(re_stats->fmse_mean, (ht_float_t)0.0);
+    HT_ASSERT_FLOAT_EQ(re_stats->fmse_model, (ht_float_t)0.0);
+    HT_ASSERT_FLOAT_EQ(re_stats->reg_intercept, (ht_float_t)0.0);
+    for (uint8_t f = 0; f < HT_MAX_FEATURES; ++f) {
+        HT_ASSERT_FLOAT_EQ(re_stats->reg_weights[f], (ht_float_t)0.0);
+    }
+
+    ht_stats_free(&s_test_pool, realloc_idx);
+}
+
 void test_memory_run(void) {
     HT_TEST_SUITE_BEGIN("Nivel 1 & 2: Slab / Pool Allocator (ht_memory)");
     HT_RUN_TEST(test_memory_init_state);
@@ -363,4 +476,7 @@ void test_memory_run(void) {
     HT_RUN_TEST(test_memory_double_free_protection);
     HT_RUN_TEST(test_memory_bytes_used_calculation);
     HT_RUN_TEST(test_memory_stress_recycling_100k);
+    HT_RUN_TEST(test_memory_unified_structures_and_sizes);
+    HT_RUN_TEST(test_node_unified_regression_stats);
+    HT_RUN_TEST(test_leaf_stats_regression_observers_and_weights);
 }

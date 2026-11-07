@@ -519,6 +519,358 @@ static void test_observers_in_leaf_stats_pool(void) {
 }
 
 /* ========================================================================= */
+/* --- Level 1 & 2: Incremental Variance & Regression Observers ------------ */
+/* ========================================================================= */
+
+static void test_var_stat_init_and_welford_analytical(void) {
+    ht_var_stat_t v;
+    v.count = (ht_float_t)10.0;
+    v.mean = (ht_float_t)5.0;
+    v.m2 = (ht_float_t)2.0;
+
+    ht_var_init(&v);
+    HT_ASSERT_FLOAT_EQ(v.count, (ht_float_t)0.0);
+    HT_ASSERT_FLOAT_EQ(v.mean, (ht_float_t)0.0);
+    HT_ASSERT_FLOAT_EQ(v.m2, (ht_float_t)0.0);
+    HT_ASSERT_FLOAT_EQ(ht_var_value(&v), (ht_float_t)0.0);
+
+    /* Edge cases: NULL pointer */
+    ht_var_init(NULL);
+    ht_var_update(NULL, (ht_float_t)1.0, (ht_float_t)1.0);
+    HT_ASSERT_FLOAT_EQ(ht_var_value(NULL), (ht_float_t)0.0);
+
+    /* Edge cases: n = 1 */
+    ht_var_update(&v, (ht_float_t)42.0, (ht_float_t)1.0);
+    HT_ASSERT_FLOAT_EQ(v.count, (ht_float_t)1.0);
+    HT_ASSERT_FLOAT_EQ(v.mean, (ht_float_t)42.0);
+    HT_ASSERT_FLOAT_EQ(v.m2, (ht_float_t)0.0);
+    HT_ASSERT_FLOAT_EQ(ht_var_value(&v), (ht_float_t)0.0);
+
+    /* Edge cases: constant target (n = 3, variance = 0) */
+    ht_var_update(&v, (ht_float_t)42.0, (ht_float_t)1.0);
+    ht_var_update(&v, (ht_float_t)42.0, (ht_float_t)1.0);
+    HT_ASSERT_FLOAT_EQ(v.count, (ht_float_t)3.0);
+    HT_ASSERT_FLOAT_EQ(v.m2, (ht_float_t)0.0);
+    HT_ASSERT_FLOAT_EQ(ht_var_value(&v), (ht_float_t)0.0);
+
+    /* Edge cases: NaN, infinite, non-positive weight */
+    ht_float_t nan_val = (ht_float_t)0.0 / (ht_float_t)0.0;
+    ht_var_update(&v, nan_val, (ht_float_t)1.0);
+    ht_var_update(&v, (ht_float_t)10.0, (ht_float_t)0.0);
+    ht_var_update(&v, (ht_float_t)10.0, (ht_float_t)-1.0);
+    HT_ASSERT_FLOAT_EQ(v.count, (ht_float_t)3.0);
+
+    /* Analytical Welford on known dataset: {2, 4, 4, 4, 5, 5, 7, 9}
+     * n = 8, mean = 5.0, M2 = 32.0, s^2 = 32 / 7 = 4.57142857
+     */
+    ht_var_init(&v);
+    const ht_float_t samples[] = {
+        (ht_float_t)2.0, (ht_float_t)4.0, (ht_float_t)4.0, (ht_float_t)4.0,
+        (ht_float_t)5.0, (ht_float_t)5.0, (ht_float_t)7.0, (ht_float_t)9.0
+    };
+    for (size_t i = 0; i < sizeof(samples) / sizeof(samples[0]); ++i) {
+        ht_var_update(&v, samples[i], (ht_float_t)1.0);
+    }
+    HT_ASSERT_FLOAT_EQ(v.count, (ht_float_t)8.0);
+    HT_ASSERT_FLOAT_NEAR(v.mean, (ht_float_t)5.0, 1e-5);
+    HT_ASSERT_FLOAT_NEAR(v.m2, (ht_float_t)32.0, 1e-4);
+    HT_ASSERT_FLOAT_NEAR(ht_var_value(&v), (ht_float_t)(32.0 / 7.0), 1e-4);
+
+    /* Weighted Welford test: y1 = 10 (w=2), y2 = 20 (w=2) -> W=4, mean=15, M2=100, s^2=100/3 */
+    ht_var_stat_t wv;
+    ht_var_init(&wv);
+    ht_var_update(&wv, (ht_float_t)10.0, (ht_float_t)2.0);
+    ht_var_update(&wv, (ht_float_t)20.0, (ht_float_t)2.0);
+    HT_ASSERT_FLOAT_EQ(wv.count, (ht_float_t)4.0);
+    HT_ASSERT_FLOAT_NEAR(wv.mean, (ht_float_t)15.0, 1e-5);
+    HT_ASSERT_FLOAT_NEAR(wv.m2, (ht_float_t)100.0, 1e-4);
+    HT_ASSERT_FLOAT_NEAR(ht_var_value(&wv), (ht_float_t)(100.0 / 3.0), 1e-4);
+}
+
+static void test_var_stat_chan_combine_analytical(void) {
+    /* Set A: {10.0, 20.0} -> nA = 2, meanA = 15.0, M2_A = 50.0 */
+    ht_var_stat_t a;
+    ht_var_init(&a);
+    ht_var_update(&a, (ht_float_t)10.0, (ht_float_t)1.0);
+    ht_var_update(&a, (ht_float_t)20.0, (ht_float_t)1.0);
+    HT_ASSERT_FLOAT_EQ(a.count, (ht_float_t)2.0);
+    HT_ASSERT_FLOAT_NEAR(a.mean, (ht_float_t)15.0, 1e-5);
+    HT_ASSERT_FLOAT_NEAR(a.m2, (ht_float_t)50.0, 1e-5);
+
+    /* Set B: {30.0, 40.0} -> nB = 2, meanB = 35.0, M2_B = 50.0 */
+    ht_var_stat_t b;
+    ht_var_init(&b);
+    ht_var_update(&b, (ht_float_t)30.0, (ht_float_t)1.0);
+    ht_var_update(&b, (ht_float_t)40.0, (ht_float_t)1.0);
+    HT_ASSERT_FLOAT_EQ(b.count, (ht_float_t)2.0);
+    HT_ASSERT_FLOAT_NEAR(b.mean, (ht_float_t)35.0, 1e-5);
+    HT_ASSERT_FLOAT_NEAR(b.m2, (ht_float_t)50.0, 1e-5);
+
+    /* Combined C = A \cup B:
+     * nC = 4, meanC = (30 + 70)/4 = 25.0
+     * delta = 35 - 15 = 20
+     * M2_C = 50 + 50 + 20^2 * (2 * 2 / 4) = 100 + 400 * 1 = 500.0
+     * s^2 = 500 / 3 = 166.666667
+     */
+    ht_var_stat_t c = ht_var_combine(&a, &b);
+    HT_ASSERT_FLOAT_EQ(c.count, (ht_float_t)4.0);
+    HT_ASSERT_FLOAT_NEAR(c.mean, (ht_float_t)25.0, 1e-5);
+    HT_ASSERT_FLOAT_NEAR(c.m2, (ht_float_t)500.0, 1e-4);
+    HT_ASSERT_FLOAT_NEAR(ht_var_value(&c), (ht_float_t)(500.0 / 3.0), 1e-4);
+
+    /* Verify exact match with single sequential Welford on {10, 20, 30, 40} */
+    ht_var_stat_t seq;
+    ht_var_init(&seq);
+    ht_var_update(&seq, (ht_float_t)10.0, (ht_float_t)1.0);
+    ht_var_update(&seq, (ht_float_t)20.0, (ht_float_t)1.0);
+    ht_var_update(&seq, (ht_float_t)30.0, (ht_float_t)1.0);
+    ht_var_update(&seq, (ht_float_t)40.0, (ht_float_t)1.0);
+    HT_ASSERT_FLOAT_EQ(c.count, seq.count);
+    HT_ASSERT_FLOAT_NEAR(c.mean, seq.mean, 1e-5);
+    HT_ASSERT_FLOAT_NEAR(c.m2, seq.m2, 1e-4);
+
+    /* Edge cases: combine with empty / NULL */
+    ht_var_stat_t empty;
+    ht_var_init(&empty);
+    ht_var_stat_t c_empty_b = ht_var_combine(&a, &empty);
+    HT_ASSERT_FLOAT_EQ(c_empty_b.count, a.count);
+    HT_ASSERT_FLOAT_EQ(c_empty_b.mean, a.mean);
+    HT_ASSERT_FLOAT_EQ(c_empty_b.m2, a.m2);
+
+    ht_var_stat_t c_empty_a = ht_var_combine(&empty, &b);
+    HT_ASSERT_FLOAT_EQ(c_empty_a.count, b.count);
+    HT_ASSERT_FLOAT_EQ(c_empty_a.mean, b.mean);
+    HT_ASSERT_FLOAT_EQ(c_empty_a.m2, b.m2);
+
+    ht_var_stat_t c_null = ht_var_combine(NULL, NULL);
+    HT_ASSERT_FLOAT_EQ(c_null.count, (ht_float_t)0.0);
+}
+
+static void test_var_stat_chan_subtract_analytical(void) {
+    /* Construct total set C = {10, 20, 30, 40} */
+    ht_var_stat_t a, b;
+    ht_var_init(&a);
+    ht_var_init(&b);
+    ht_var_update(&a, (ht_float_t)10.0, (ht_float_t)1.0);
+    ht_var_update(&a, (ht_float_t)20.0, (ht_float_t)1.0);
+    ht_var_update(&b, (ht_float_t)30.0, (ht_float_t)1.0);
+    ht_var_update(&b, (ht_float_t)40.0, (ht_float_t)1.0);
+
+    ht_var_stat_t c = ht_var_combine(&a, &b);
+
+    /* Subtract A from C: R = C \setminus A -> must exactly match B */
+    ht_var_stat_t r = ht_var_subtract(&c, &a);
+    HT_ASSERT_FLOAT_EQ(r.count, b.count);
+    HT_ASSERT_FLOAT_NEAR(r.mean, b.mean, 1e-5);
+    HT_ASSERT_FLOAT_NEAR(r.m2, b.m2, 1e-4);
+    HT_ASSERT_FLOAT_NEAR(ht_var_value(&r), ht_var_value(&b), 1e-4);
+
+    /* Subtract B from C: R = C \setminus B -> must exactly match A */
+    ht_var_stat_t r2 = ht_var_subtract(&c, &b);
+    HT_ASSERT_FLOAT_EQ(r2.count, a.count);
+    HT_ASSERT_FLOAT_NEAR(r2.mean, a.mean, 1e-5);
+    HT_ASSERT_FLOAT_NEAR(r2.m2, a.m2, 1e-4);
+
+    /* Edge cases: subtract empty part -> returns total */
+    ht_var_stat_t empty;
+    ht_var_init(&empty);
+    ht_var_stat_t r_empty = ht_var_subtract(&c, &empty);
+    HT_ASSERT_FLOAT_EQ(r_empty.count, c.count);
+    HT_ASSERT_FLOAT_NEAR(r_empty.mean, c.mean, 1e-5);
+    HT_ASSERT_FLOAT_NEAR(r_empty.m2, c.m2, 1e-4);
+
+    /* Edge cases: subtract total from total -> returns zeroed */
+    ht_var_stat_t r_all = ht_var_subtract(&c, &c);
+    HT_ASSERT_FLOAT_EQ(r_all.count, (ht_float_t)0.0);
+    HT_ASSERT_FLOAT_EQ(r_all.mean, (ht_float_t)0.0);
+    HT_ASSERT_FLOAT_EQ(r_all.m2, (ht_float_t)0.0);
+
+    /* Edge cases: NULL total */
+    ht_var_stat_t r_null = ht_var_subtract(NULL, &a);
+    HT_ASSERT_FLOAT_EQ(r_null.count, (ht_float_t)0.0);
+}
+
+static void test_reg_numeric_obs_ordered_slots_and_merging(void) {
+    ht_reg_numeric_obs_t obs;
+    ht_reg_numeric_init(&obs);
+
+    /* Verify all slots zeroed */
+    for (uint8_t k = 0; k < HT_REG_NUM_SLOTS; ++k) {
+        HT_ASSERT_FLOAT_EQ(obs.slots[k].x_mean, (ht_float_t)0.0);
+        HT_ASSERT_FLOAT_EQ(obs.slots[k].y_stats.count, (ht_float_t)0.0);
+    }
+
+    /* Insert 5 samples: x = 10, 30, 20, 50, 40 (unordered) */
+    ht_reg_numeric_update(&obs, (ht_float_t)10.0, (ht_float_t)1.0, (ht_float_t)1.0);
+    ht_reg_numeric_update(&obs, (ht_float_t)30.0, (ht_float_t)3.0, (ht_float_t)1.0);
+    ht_reg_numeric_update(&obs, (ht_float_t)20.0, (ht_float_t)2.0, (ht_float_t)1.0);
+    ht_reg_numeric_update(&obs, (ht_float_t)50.0, (ht_float_t)5.0, (ht_float_t)1.0);
+    ht_reg_numeric_update(&obs, (ht_float_t)40.0, (ht_float_t)4.0, (ht_float_t)1.0);
+
+    /* Verify slots are strictly sorted by x_mean: 10, 20, 30, 40, 50 */
+    HT_ASSERT_FLOAT_NEAR(obs.slots[0].x_mean, (ht_float_t)10.0, 1e-5);
+    HT_ASSERT_FLOAT_NEAR(obs.slots[1].x_mean, (ht_float_t)20.0, 1e-5);
+    HT_ASSERT_FLOAT_NEAR(obs.slots[2].x_mean, (ht_float_t)30.0, 1e-5);
+    HT_ASSERT_FLOAT_NEAR(obs.slots[3].x_mean, (ht_float_t)40.0, 1e-5);
+    HT_ASSERT_FLOAT_NEAR(obs.slots[4].x_mean, (ht_float_t)50.0, 1e-5);
+    for (uint8_t k = 0; k < HT_REG_NUM_SLOTS; ++k) {
+        HT_ASSERT_FLOAT_EQ(obs.slots[k].y_stats.count, (ht_float_t)1.0);
+    }
+
+    /* Insert 6th sample: x = 21.0. All 5 slots full.
+     * Adjacent distances:
+     * (10, 20) = 10
+     * (20, 30) = 10
+     * (30, 40) = 10
+     * (40, 50) = 10
+     * First pair with min_dist (10) is index 0: slots (10, 20) are fused into x_mean = 15.0, count = 2.
+     * Then 21.0 is inserted in sorted order!
+     */
+    ht_reg_numeric_update(&obs, (ht_float_t)21.0, (ht_float_t)2.1, (ht_float_t)1.0);
+
+    /* Verify slots remain strictly sorted */
+    for (uint8_t k = 0; k < HT_REG_NUM_SLOTS - 1; ++k) {
+        HT_ASSERT(obs.slots[k].x_mean <= obs.slots[k + 1].x_mean);
+    }
+
+    /* Stream 100 pseudo-random continuous samples */
+    uint32_t lcg = 12345;
+    ht_float_t sum_w = (ht_float_t)0.0;
+    ht_float_t sum_xw = (ht_float_t)0.0;
+
+    for (uint8_t k = 0; k < HT_REG_NUM_SLOTS; ++k) {
+        sum_w += obs.slots[k].y_stats.count;
+        sum_xw += obs.slots[k].y_stats.count * obs.slots[k].x_mean;
+    }
+
+    for (int i = 0; i < 100; ++i) {
+        lcg = lcg * 1664525U + 1013904223U;
+        ht_float_t x_in = (ht_float_t)(lcg % 1000) * (ht_float_t)0.1; /* [0.0 .. 99.9] */
+        ht_float_t y_in = (ht_float_t)(x_in * 2.5 - 10.0);
+        ht_float_t w_in = (ht_float_t)1.0;
+
+        sum_w += w_in;
+        sum_xw += x_in * w_in;
+
+        ht_reg_numeric_update(&obs, x_in, y_in, w_in);
+
+        /* Invariant: slots MUST remain strictly ordered by x_mean after every insertion */
+        for (uint8_t k = 0; k < HT_REG_NUM_SLOTS - 1; ++k) {
+            HT_ASSERT(obs.slots[k].x_mean <= obs.slots[k + 1].x_mean);
+            HT_ASSERT(obs.slots[k].y_stats.count > (ht_float_t)0.0);
+        }
+    }
+
+    /* Conservation of total weight across all slots */
+    ht_float_t total_slot_w = (ht_float_t)0.0;
+    ht_float_t total_slot_xw = (ht_float_t)0.0;
+    for (uint8_t k = 0; k < HT_REG_NUM_SLOTS; ++k) {
+        total_slot_w += obs.slots[k].y_stats.count;
+        total_slot_xw += obs.slots[k].y_stats.count * obs.slots[k].x_mean;
+    }
+    HT_ASSERT_FLOAT_NEAR(total_slot_w, sum_w, 1e-4);
+    HT_ASSERT_FLOAT_NEAR(total_slot_xw, sum_xw, 1e-2);
+
+    /* Edge cases: NaN, infinite, weight <= 0 must be ignored */
+    ht_float_t nan_val = (ht_float_t)0.0 / (ht_float_t)0.0;
+    ht_reg_numeric_update(&obs, nan_val, (ht_float_t)1.0, (ht_float_t)1.0);
+    ht_reg_numeric_update(&obs, (ht_float_t)1.0, nan_val, (ht_float_t)1.0);
+    ht_reg_numeric_update(&obs, (ht_float_t)1.0, (ht_float_t)1.0, (ht_float_t)0.0);
+    ht_reg_numeric_update(&obs, (ht_float_t)1.0, (ht_float_t)1.0, (ht_float_t)-5.0);
+    ht_reg_numeric_update(NULL, (ht_float_t)1.0, (ht_float_t)1.0, (ht_float_t)1.0);
+
+    /* Weight unchanged */
+    ht_float_t after_edge_w = (ht_float_t)0.0;
+    for (uint8_t k = 0; k < HT_REG_NUM_SLOTS; ++k) {
+        after_edge_w += obs.slots[k].y_stats.count;
+    }
+    HT_ASSERT_FLOAT_NEAR(after_edge_w, sum_w, 1e-4);
+}
+
+static void test_reg_categorical_obs_basic_and_edge_cases(void) {
+    ht_reg_categorical_obs_t cat;
+    ht_reg_categorical_init(&cat);
+
+    for (uint8_t v = 0; v < HT_MAX_CATEGORIES; ++v) {
+        HT_ASSERT_FLOAT_EQ(cat.cat_stats[v].count, (ht_float_t)0.0);
+        HT_ASSERT_FLOAT_EQ(cat.cat_stats[v].mean, (ht_float_t)0.0);
+        HT_ASSERT_FLOAT_EQ(cat.cat_stats[v].m2, (ht_float_t)0.0);
+    }
+
+    /* Category 0: targets {10, 20} -> n = 2, mean = 15, M2 = 50 */
+    ht_reg_categorical_update(&cat, 0, (ht_float_t)10.0, (ht_float_t)1.0);
+    ht_reg_categorical_update(&cat, 0, (ht_float_t)20.0, (ht_float_t)1.0);
+
+    /* Category 2: targets {5, 5, 5} -> n = 3, mean = 5, M2 = 0 */
+    ht_reg_categorical_update(&cat, 2, (ht_float_t)5.0, (ht_float_t)1.0);
+    ht_reg_categorical_update(&cat, 2, (ht_float_t)5.0, (ht_float_t)1.0);
+    ht_reg_categorical_update(&cat, 2, (ht_float_t)5.0, (ht_float_t)1.0);
+
+    HT_ASSERT_FLOAT_EQ(cat.cat_stats[0].count, (ht_float_t)2.0);
+    HT_ASSERT_FLOAT_NEAR(cat.cat_stats[0].mean, (ht_float_t)15.0, 1e-5);
+    HT_ASSERT_FLOAT_NEAR(cat.cat_stats[0].m2, (ht_float_t)50.0, 1e-4);
+    HT_ASSERT_FLOAT_NEAR(ht_var_value(&cat.cat_stats[0]), (ht_float_t)50.0, 1e-4);
+
+    HT_ASSERT_FLOAT_EQ(cat.cat_stats[2].count, (ht_float_t)3.0);
+    HT_ASSERT_FLOAT_NEAR(cat.cat_stats[2].mean, (ht_float_t)5.0, 1e-5);
+    HT_ASSERT_FLOAT_NEAR(cat.cat_stats[2].m2, (ht_float_t)0.0, 1e-5);
+    HT_ASSERT_FLOAT_EQ(ht_var_value(&cat.cat_stats[2]), (ht_float_t)0.0);
+
+    /* Category 1, 3, 4 unobserved */
+    HT_ASSERT_FLOAT_EQ(cat.cat_stats[1].count, (ht_float_t)0.0);
+    HT_ASSERT_FLOAT_EQ(cat.cat_stats[3].count, (ht_float_t)0.0);
+    HT_ASSERT_FLOAT_EQ(cat.cat_stats[4].count, (ht_float_t)0.0);
+
+    /* Edge cases: negative category, >= HT_MAX_CATEGORIES, NaN target, non-positive weight, NULL */
+    ht_reg_categorical_update(&cat, -1, (ht_float_t)10.0, (ht_float_t)1.0);
+    ht_reg_categorical_update(&cat, HT_MAX_CATEGORIES, (ht_float_t)10.0, (ht_float_t)1.0);
+    ht_float_t nan_val = (ht_float_t)0.0 / (ht_float_t)0.0;
+    ht_reg_categorical_update(&cat, 0, nan_val, (ht_float_t)1.0);
+    ht_reg_categorical_update(&cat, 0, (ht_float_t)10.0, (ht_float_t)0.0);
+    ht_reg_categorical_update(&cat, 0, (ht_float_t)10.0, (ht_float_t)-2.0);
+    ht_reg_categorical_update(NULL, 0, (ht_float_t)10.0, (ht_float_t)1.0);
+    ht_reg_categorical_init(NULL);
+
+    HT_ASSERT_FLOAT_EQ(cat.cat_stats[0].count, (ht_float_t)2.0);
+}
+
+static void test_reg_observers_in_leaf_stats_pool(void) {
+    ht_memory_init(&s_observer_test_pool);
+
+    uint16_t stats_idx = ht_stats_alloc(&s_observer_test_pool);
+    HT_ASSERT_NEQ(stats_idx, HT_INVALID_IDX);
+
+    ht_leaf_stats_t *stats = ht_stats_get(&s_observer_test_pool, stats_idx);
+    HT_ASSERT_NOT_NULL(stats);
+
+    /* Update numeric regression observer at feature 0 */
+    ht_reg_numeric_update(&stats->observers[0].reg_num, (ht_float_t)5.0, (ht_float_t)12.0, (ht_float_t)1.0);
+    ht_reg_numeric_update(&stats->observers[0].reg_num, (ht_float_t)15.0, (ht_float_t)24.0, (ht_float_t)1.0);
+
+    HT_ASSERT_FLOAT_NEAR(stats->observers[0].reg_num.slots[0].x_mean, (ht_float_t)5.0, 1e-5);
+    HT_ASSERT_FLOAT_NEAR(stats->observers[0].reg_num.slots[1].x_mean, (ht_float_t)15.0, 1e-5);
+
+    /* Update categorical regression observer at feature 1 */
+    ht_reg_categorical_update(&stats->observers[1].reg_cat, 3, (ht_float_t)42.0, (ht_float_t)2.0);
+    HT_ASSERT_FLOAT_EQ(stats->observers[1].reg_cat.cat_stats[3].count, (ht_float_t)2.0);
+    HT_ASSERT_FLOAT_NEAR(stats->observers[1].reg_cat.cat_stats[3].mean, (ht_float_t)42.0, 1e-5);
+
+    /* Free and reallocate: must return zeroed */
+    ht_stats_free(&s_observer_test_pool, stats_idx);
+    HT_ASSERT_EQ(ht_stats_count(&s_observer_test_pool), 0);
+
+    uint16_t realloc_idx = ht_stats_alloc(&s_observer_test_pool);
+    HT_ASSERT_EQ(realloc_idx, stats_idx);
+
+    ht_leaf_stats_t *re_stats = ht_stats_get(&s_observer_test_pool, realloc_idx);
+    HT_ASSERT_NOT_NULL(re_stats);
+    HT_ASSERT_FLOAT_EQ(re_stats->observers[0].reg_num.slots[0].y_stats.count, (ht_float_t)0.0);
+    HT_ASSERT_FLOAT_EQ(re_stats->observers[1].reg_cat.cat_stats[3].count, (ht_float_t)0.0);
+
+    ht_stats_free(&s_observer_test_pool, realloc_idx);
+}
+
+/* ========================================================================= */
 /* --- Test Suite Runner --------------------------------------------------- */
 /* ========================================================================= */
 
@@ -541,6 +893,14 @@ void test_observer_run(void) {
     HT_RUN_TEST(test_categorical_binary_split_dists);
     HT_RUN_TEST(test_split_candidate_struct);
 
+    /* Nível 1: Variância Incremental & Observadores de Regressão */
+    HT_RUN_TEST(test_var_stat_init_and_welford_analytical);
+    HT_RUN_TEST(test_var_stat_chan_combine_analytical);
+    HT_RUN_TEST(test_var_stat_chan_subtract_analytical);
+    HT_RUN_TEST(test_reg_numeric_obs_ordered_slots_and_merging);
+    HT_RUN_TEST(test_reg_categorical_obs_basic_and_edge_cases);
+
     /* Nível 2: Integração com ht_memory slab pool */
     HT_RUN_TEST(test_observers_in_leaf_stats_pool);
+    HT_RUN_TEST(test_reg_observers_in_leaf_stats_pool);
 }

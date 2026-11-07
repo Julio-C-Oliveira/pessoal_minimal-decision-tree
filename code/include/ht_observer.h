@@ -22,17 +22,25 @@
 /**
  * @brief Stack-allocated candidate split descriptor (replaces River's heap-allocated BranchFactory).
  *
- * Stores evaluated impurity merit and estimated post-split child class distributions.
+ * Stores evaluated impurity merit and estimated post-split child distributions:
+ * - Classification: lhs_dist[HT_MAX_CLASSES] and rhs_dist[HT_MAX_CLASSES]
+ * - Continuous Regression: lhs_var and rhs_var (ht_var_stat_t)
  * Layout ordered by decreasing field alignment to eliminate wasteful internal padding:
- * - 4 or 8 bytes: merit, lhs_dist, rhs_dist, split_val
+ * - 4 or 8 bytes: merit, lhs_dist/lhs_var, rhs_dist/rhs_var, split_val
  * - 1 byte: feature_idx, is_categorical
  *
  * Exactly 44 bytes in float32 and 88 bytes in float64.
  */
 typedef struct {
     ht_float_t merit;                            /* Impurity merit (-HT_INFINITY if invalid) */
-    ht_float_t lhs_dist[HT_MAX_CLASSES];         /* Estimated distribution for left branch */
-    ht_float_t rhs_dist[HT_MAX_CLASSES];         /* Estimated distribution for right branch */
+    union {
+        ht_float_t    lhs_dist[HT_MAX_CLASSES];  /* Estimated distribution for left branch */
+        ht_var_stat_t lhs_var;                   /* Target variance stats for left branch (regression) */
+    };
+    union {
+        ht_float_t    rhs_dist[HT_MAX_CLASSES];  /* Estimated distribution for right branch */
+        ht_var_stat_t rhs_var;                   /* Target variance stats for right branch (regression) */
+    };
     union {
         ht_float_t threshold;                    /* Numeric split threshold */
         int32_t    cat_val;                      /* Categorical equality value */
@@ -255,5 +263,115 @@ void ht_categorical_binary_split_dists(const ht_categorical_obs_t *obs,
  * @param cand Pointer to candidate descriptor.
  */
 void ht_split_candidate_init(ht_split_candidate_t *cand);
+
+/* ========================================================================= */
+/* --- Incremental Variance and Regression Observer API -------------------- */
+/* ========================================================================= */
+
+/**
+ * @brief Initializes a sufficient variance statistics tracker to zero state.
+ *
+ * @param var Pointer to variance statistics struct.
+ */
+void ht_var_init(ht_var_stat_t *var);
+
+/**
+ * @brief Online incremental update of variance statistics with sample (y, weight).
+ *
+ * Uses Welford/West algorithm to prevent catastrophic cancellation.
+ * Safely ignores NaN, infinite values, or weights <= 0.
+ *
+ * @param var Pointer to variance statistics struct.
+ * @param y Observed continuous target value.
+ * @param weight Sample weight.
+ */
+void ht_var_update(ht_var_stat_t *var, ht_float_t y, ht_float_t weight);
+
+/**
+ * @brief Returns unbiased sample variance S_y / (n - 1) for n > 1.0 (ddof = 1).
+ *
+ * Returns 0.0 if n <= 1.0 or M2 <= 0.
+ *
+ * @param var Pointer to variance statistics struct.
+ * @return Sample variance s^2.
+ */
+ht_float_t ht_var_value(const ht_var_stat_t *var);
+
+/**
+ * @brief Exact parallel addition/combination of two variance statistics (Chan et al., 1983).
+ *
+ * Computes exact combined statistics for C = A \cup B in O(1):
+ * n_C = n_A + n_B
+ * \mu_C = \mu_A + (n_B / n_C) * (\mu_B - \mu_A)
+ * S_C = S_A + S_B + (\mu_B - \mu_A)^2 * (n_A * n_B / n_C)
+ *
+ * @param a First variance statistics.
+ * @param b Second variance statistics.
+ * @return Combined variance statistics.
+ */
+ht_var_stat_t ht_var_combine(const ht_var_stat_t *a, const ht_var_stat_t *b);
+
+/**
+ * @brief Exact parallel subtraction/removal of variance statistics (Chan et al., 1983).
+ *
+ * Computes exact remaining statistics for R = total \setminus part in O(1):
+ * n_R = n_total - n_part
+ * \mu_R = (n_total * \mu_total - n_part * \mu_part) / n_R
+ * S_R = \max(0.0, S_total - S_part - (\mu_R - \mu_part)^2 * (n_R * n_part / n_total))
+ *
+ * @param total Total variance statistics.
+ * @param part Subset variance statistics to remove.
+ * @return Remaining variance statistics.
+ */
+ht_var_stat_t ht_var_subtract(const ht_var_stat_t *total, const ht_var_stat_t *part);
+
+/**
+ * @brief Initializes a numeric regression observer (5 quantization slots) to zero state.
+ *
+ * @param obs Pointer to regression numeric observer.
+ */
+void ht_reg_numeric_init(ht_reg_numeric_obs_t *obs);
+
+/**
+ * @brief Incremental update of numeric regression observer with ordered slot fusion in O(1).
+ *
+ * Maintains up to HT_REG_NUM_SLOTS ordered slots sorted by x_mean:
+ * - If slots are available, inserts the new slot keeping sorted order.
+ * - If all slots are occupied, fuses the two adjacent slots with minimum distance
+ *   via Chan's combine formula, shifts remaining slots, and inserts the new sample.
+ * Safely ignores NaN, infinite values, or weights <= 0.
+ *
+ * @param obs Pointer to regression numeric observer.
+ * @param x_val Observed continuous feature value.
+ * @param y_val Observed continuous target value.
+ * @param weight Sample weight.
+ */
+void ht_reg_numeric_update(ht_reg_numeric_obs_t *obs,
+                           ht_float_t x_val,
+                           ht_float_t y_val,
+                           ht_float_t weight);
+
+/**
+ * @brief Initializes a categorical nominal regression observer to zero state.
+ *
+ * @param obs Pointer to regression categorical observer.
+ */
+void ht_reg_categorical_init(ht_reg_categorical_obs_t *obs);
+
+/**
+ * @brief Incremental update of categorical regression observer for nominal attribute.
+ *
+ * Updates target variance statistics for category cat_val.
+ * Safely ignores invalid category (< 0 or >= HT_MAX_CATEGORIES), NaN target, or weights <= 0.
+ *
+ * @param obs Pointer to regression categorical observer.
+ * @param cat_val Discrete category index (0 .. HT_MAX_CATEGORIES - 1).
+ * @param y_val Observed continuous target value.
+ * @param weight Sample weight.
+ */
+void ht_reg_categorical_update(ht_reg_categorical_obs_t *obs,
+                               int32_t cat_val,
+                               ht_float_t y_val,
+                               ht_float_t weight);
 
 #endif /* HT_OBSERVER_H */

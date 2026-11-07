@@ -20,17 +20,63 @@
 #define HT_NODE_IN_USE       (1U << 7)
 
 /**
- * @brief Permanent structural node in the decision tree.
+ * @brief Sufficient variance statistics for continuous regression target y.
+ *
+ * Implements West/Welford incremental variance and Chan's parallel formulas.
+ * Exact size: 3 floats (12 bytes in float32 / 24 bytes in float64).
+ */
+typedef struct {
+    ht_float_t count;      /**< Total accumulated weight n */
+    ht_float_t mean;       /**< Incremental mean \mu_y */
+    ht_float_t m2;         /**< Sum of squared differences from mean S_y (M2) */
+} ht_var_stat_t;
+
+/**
+ * @brief Quantization slot for continuous numeric feature in regression.
+ *
+ * Tracks the incremental mean of attribute x and variance statistics of target y.
+ * Exact size: 4 floats (16 bytes in float32 / 32 bytes in float64).
+ */
+typedef struct {
+    ht_float_t    x_mean;  /**< Incremental mean of feature x in this slot */
+    ht_var_stat_t y_stats; /**< Sufficient variance statistics (n, \mu_y, S_y) of target y */
+} ht_reg_num_slot_t;
+
+/**
+ * @brief Numeric feature observer for regression using HT_REG_NUM_SLOTS ordered slots.
+ *
+ * Exact size: 5 * 16 = 80 bytes in float32 / 5 * 32 = 160 bytes in float64.
+ */
+typedef struct {
+    ht_reg_num_slot_t slots[HT_REG_NUM_SLOTS];
+} ht_reg_numeric_obs_t;
+
+/**
+ * @brief Categorical nominal observer for regression.
+ *
+ * Maintains target variance statistics for up to HT_MAX_CATEGORIES.
+ * Exact size: 5 * 12 = 60 bytes in float32 / 5 * 24 = 120 bytes in float64.
+ */
+typedef struct {
+    ht_var_stat_t cat_stats[HT_MAX_CATEGORIES];
+} ht_reg_categorical_obs_t;
+
+/**
+ * @brief Permanent structural node in the decision tree (unified classification + regression).
  *
  * Designed for binary relocatability and memory efficiency:
- * - 4 or 8 bytes: class_counts, split_val union
+ * - 16 or 32 bytes: anonymous union between class_counts and reg_stats
+ * - 4 or 8 bytes: split_val union
  * - 2 bytes: left_child, right_child, stats_idx
  * - 1 byte: feature_idx, flags
  *
- * Sized at exactly 28 bytes in float32 and 48 bytes in float64.
+ * Sized at exactly 28 bytes in float32 and 48 bytes in float64 (zero bytes overhead).
  */
 typedef struct {
-    ht_float_t class_counts[HT_MAX_CLASSES];
+    union {
+        ht_float_t    class_counts[HT_MAX_CLASSES];
+        ht_var_stat_t reg_stats;
+    };
     union {
         ht_float_t threshold;
         int32_t    cat_val;
@@ -67,22 +113,36 @@ typedef struct {
 
 /**
  * @brief Unified feature observer representation (no vtable).
+ *
+ * Exactly 80 bytes in float32 and 160 bytes in float64 across all 4 modes.
  */
 typedef union {
-    ht_gaussian_obs_t    num[HT_MAX_CLASSES];
-    ht_categorical_obs_t cat;
+    ht_gaussian_obs_t        num[HT_MAX_CLASSES];
+    ht_categorical_obs_t     cat;
+    ht_reg_numeric_obs_t     reg_num;
+    ht_reg_categorical_obs_t reg_cat;
 } ht_feature_obs_t;
 
 /**
  * @brief Heavy learning statistics allocated only for ACTIVE leaves.
  *
- * Holds split attempt timestamp, NBA prequential accuracy tracking weights,
- * and observers for all features. Recycled immediately on node split.
+ * Holds split attempt timestamp, NBA accuracy weights / regression fMSE accumulators,
+ * SGD linear model weights/intercept, and observers for all features.
+ * Recycled immediately on node split.
+ * Sized at exactly 1360 bytes in float32 and 2720 bytes in float64.
  */
 typedef struct {
-    ht_float_t       last_split_attempt_at;
-    ht_float_t       mc_correct_weight;
-    ht_float_t       nb_correct_weight;
+    ht_float_t last_split_attempt_at;
+    union {
+        ht_float_t mc_correct_weight;
+        ht_float_t fmse_mean;
+    };
+    union {
+        ht_float_t nb_correct_weight;
+        ht_float_t fmse_model;
+    };
+    ht_float_t       reg_weights[HT_MAX_FEATURES];
+    ht_float_t       reg_intercept;
     ht_feature_obs_t observers[HT_MAX_FEATURES];
 } ht_leaf_stats_t;
 
@@ -106,14 +166,22 @@ typedef struct {
 _Static_assert(sizeof(ht_node_t) == 28, "ht_node_t must be exactly 28 bytes in float32 mode");
 _Static_assert(sizeof(ht_gaussian_obs_t) == 20, "ht_gaussian_obs_t must be 20 bytes in float32 mode");
 _Static_assert(sizeof(ht_categorical_obs_t) == 80, "ht_categorical_obs_t must be 80 bytes in float32 mode");
+_Static_assert(sizeof(ht_var_stat_t) == 12, "ht_var_stat_t must be exactly 12 bytes in float32 mode");
+_Static_assert(sizeof(ht_reg_num_slot_t) == 16, "ht_reg_num_slot_t must be exactly 16 bytes in float32 mode");
+_Static_assert(sizeof(ht_reg_numeric_obs_t) == 80, "ht_reg_numeric_obs_t must be exactly 80 bytes in float32 mode");
+_Static_assert(sizeof(ht_reg_categorical_obs_t) == 60, "ht_reg_categorical_obs_t must be exactly 60 bytes in float32 mode");
 _Static_assert(sizeof(ht_feature_obs_t) == 80, "ht_feature_obs_t must be 80 bytes in float32 mode");
-_Static_assert(sizeof(ht_leaf_stats_t) == 1292, "ht_leaf_stats_t must be exactly 1292 bytes in float32 mode");
+_Static_assert(sizeof(ht_leaf_stats_t) == 1360, "ht_leaf_stats_t must be exactly 1360 bytes in float32 mode");
 #else
 _Static_assert(sizeof(ht_node_t) == 48, "ht_node_t must be exactly 48 bytes in float64 mode");
 _Static_assert(sizeof(ht_gaussian_obs_t) == 40, "ht_gaussian_obs_t must be 40 bytes in float64 mode");
 _Static_assert(sizeof(ht_categorical_obs_t) == 160, "ht_categorical_obs_t must be 160 bytes in float64 mode");
+_Static_assert(sizeof(ht_var_stat_t) == 24, "ht_var_stat_t must be exactly 24 bytes in float64 mode");
+_Static_assert(sizeof(ht_reg_num_slot_t) == 32, "ht_reg_num_slot_t must be exactly 32 bytes in float64 mode");
+_Static_assert(sizeof(ht_reg_numeric_obs_t) == 160, "ht_reg_numeric_obs_t must be exactly 160 bytes in float64 mode");
+_Static_assert(sizeof(ht_reg_categorical_obs_t) == 120, "ht_reg_categorical_obs_t must be exactly 120 bytes in float64 mode");
 _Static_assert(sizeof(ht_feature_obs_t) == 160, "ht_feature_obs_t must be 160 bytes in float64 mode");
-_Static_assert(sizeof(ht_leaf_stats_t) == 2584, "ht_leaf_stats_t must be exactly 2584 bytes in float64 mode");
+_Static_assert(sizeof(ht_leaf_stats_t) == 2720, "ht_leaf_stats_t must be exactly 2720 bytes in float64 mode");
 #endif
 #endif
 _Static_assert(sizeof(ht_memory_pool_t) <= (1024 * 1024), "ht_memory_pool_t exceeds 1 MB RAM budget!");

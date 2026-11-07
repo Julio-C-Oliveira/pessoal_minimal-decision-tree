@@ -333,3 +333,213 @@ void ht_split_candidate_init(ht_split_candidate_t *cand) {
     cand->feature_idx = HT_NO_FEATURE;
     cand->is_categorical = 0;
 }
+
+/* ========================================================================= */
+/* --- Incremental Variance and Regression Observer Implementation --------- */
+/* ========================================================================= */
+
+void ht_var_init(ht_var_stat_t *var) {
+    if (var) {
+        var->count = (ht_float_t)0.0;
+        var->mean = (ht_float_t)0.0;
+        var->m2 = (ht_float_t)0.0;
+    }
+}
+
+void ht_var_update(ht_var_stat_t *var, ht_float_t y, ht_float_t weight) {
+    if (!var || weight <= (ht_float_t)0.0 || HT_ISNAN(y) || !HT_ISFINITE(y)) {
+        return;
+    }
+
+    if (var->count <= (ht_float_t)0.0) {
+        var->count = weight;
+        var->mean = y;
+        var->m2 = (ht_float_t)0.0;
+    } else {
+        ht_float_t old_count = var->count;
+        ht_float_t new_count = old_count + weight;
+        ht_float_t delta = y - var->mean;
+
+        var->mean += (weight / new_count) * delta;
+        ht_float_t delta2 = y - var->mean;
+        var->m2 += weight * delta * delta2;
+        var->count = new_count;
+
+        if (var->m2 < (ht_float_t)0.0) {
+            var->m2 = (ht_float_t)0.0;
+        }
+    }
+}
+
+ht_float_t ht_var_value(const ht_var_stat_t *var) {
+    if (!var || var->count <= (ht_float_t)1.0 || var->m2 <= (ht_float_t)0.0) {
+        return (ht_float_t)0.0;
+    }
+    ht_float_t v = var->m2 / (var->count - (ht_float_t)1.0);
+    return (v > (ht_float_t)0.0) ? v : (ht_float_t)0.0;
+}
+
+ht_var_stat_t ht_var_combine(const ht_var_stat_t *a, const ht_var_stat_t *b) {
+    ht_var_stat_t res;
+    res.count = (ht_float_t)0.0;
+    res.mean = (ht_float_t)0.0;
+    res.m2 = (ht_float_t)0.0;
+
+    bool a_valid = (a && a->count > (ht_float_t)0.0);
+    bool b_valid = (b && b->count > (ht_float_t)0.0);
+
+    if (!a_valid && !b_valid) {
+        return res;
+    }
+    if (!a_valid) {
+        return *b;
+    }
+    if (!b_valid) {
+        return *a;
+    }
+
+    res.count = a->count + b->count;
+    ht_float_t delta = b->mean - a->mean;
+    res.mean = a->mean + (b->count / res.count) * delta;
+    res.m2 = a->m2 + b->m2 + (delta * delta) * ((a->count * b->count) / res.count);
+
+    if (res.m2 < (ht_float_t)0.0) {
+        res.m2 = (ht_float_t)0.0;
+    }
+
+    return res;
+}
+
+ht_var_stat_t ht_var_subtract(const ht_var_stat_t *total, const ht_var_stat_t *part) {
+    ht_var_stat_t res;
+    res.count = (ht_float_t)0.0;
+    res.mean = (ht_float_t)0.0;
+    res.m2 = (ht_float_t)0.0;
+
+    if (!total || total->count <= (ht_float_t)0.0) {
+        return res;
+    }
+    if (!part || part->count <= (ht_float_t)0.0) {
+        return *total;
+    }
+
+    if (part->count >= total->count) {
+        return res;
+    }
+
+    res.count = total->count - part->count;
+    if (res.count <= (ht_float_t)0.0) {
+        return res;
+    }
+
+    res.mean = (total->count * total->mean - part->count * part->mean) / res.count;
+    ht_float_t delta = res.mean - part->mean;
+    ht_float_t diff_m2 = total->m2 - part->m2 - (delta * delta) * ((res.count * part->count) / total->count);
+
+    res.m2 = (diff_m2 > (ht_float_t)0.0) ? diff_m2 : (ht_float_t)0.0;
+
+    return res;
+}
+
+void ht_reg_numeric_init(ht_reg_numeric_obs_t *obs) {
+    if (obs) {
+        memset(obs, 0, sizeof(*obs));
+    }
+}
+
+void ht_reg_numeric_update(ht_reg_numeric_obs_t *obs,
+                           ht_float_t x_val,
+                           ht_float_t y_val,
+                           ht_float_t weight)
+{
+    if (!obs || weight <= (ht_float_t)0.0 ||
+        HT_ISNAN(x_val) || !HT_ISFINITE(x_val) ||
+        HT_ISNAN(y_val) || !HT_ISFINITE(y_val)) {
+        return;
+    }
+
+    /* Count active slots in obs->slots (slots are strictly packed 0..m-1) */
+    uint8_t m = 0;
+    while (m < HT_REG_NUM_SLOTS && obs->slots[m].y_stats.count > (ht_float_t)0.0) {
+        m++;
+    }
+
+    if (m < HT_REG_NUM_SLOTS) {
+        /* Room available: insert new slot in ascending order of x_mean */
+        uint8_t pos = 0;
+        while (pos < m && obs->slots[pos].x_mean <= x_val) {
+            pos++;
+        }
+        for (uint8_t i = m; i > pos; --i) {
+            obs->slots[i] = obs->slots[i - 1];
+        }
+        obs->slots[pos].x_mean = x_val;
+        obs->slots[pos].y_stats.count = weight;
+        obs->slots[pos].y_stats.mean = y_val;
+        obs->slots[pos].y_stats.m2 = (ht_float_t)0.0;
+        return;
+    }
+
+    /* All HT_REG_NUM_SLOTS slots are occupied.
+     * Find adjacent pair with minimum distance between their x_means. */
+    uint8_t min_idx = 0;
+    ht_float_t min_dist = obs->slots[1].x_mean - obs->slots[0].x_mean;
+    for (uint8_t i = 1; i < HT_REG_NUM_SLOTS - 1; ++i) {
+        ht_float_t dist = obs->slots[i + 1].x_mean - obs->slots[i].x_mean;
+        if (dist < min_dist) {
+            min_dist = dist;
+            min_idx = i;
+        }
+    }
+
+    /* Fuse slots min_idx and min_idx + 1 using Chan's parallel formulas */
+    ht_reg_num_slot_t *s0 = &obs->slots[min_idx];
+    ht_reg_num_slot_t *s1 = &obs->slots[min_idx + 1];
+
+    ht_float_t fused_count = s0->y_stats.count + s1->y_stats.count;
+    ht_float_t fused_x = (s0->y_stats.count * s0->x_mean + s1->y_stats.count * s1->x_mean) / fused_count;
+    ht_var_stat_t fused_y = ht_var_combine(&s0->y_stats, &s1->y_stats);
+
+    s0->x_mean = fused_x;
+    s0->y_stats = fused_y;
+
+    /* Shift remaining slots left by 1 position */
+    for (uint8_t i = min_idx + 1; i < HT_REG_NUM_SLOTS - 1; ++i) {
+        obs->slots[i] = obs->slots[i + 1];
+    }
+    uint8_t active_count = (uint8_t)(HT_REG_NUM_SLOTS - 1U);
+
+    /* Insert new sample (x_val, y_val, weight) in sorted order */
+    uint8_t pos = 0;
+    while (pos < active_count && obs->slots[pos].x_mean <= x_val) {
+        pos++;
+    }
+    for (uint8_t i = active_count; i > pos; --i) {
+        obs->slots[i] = obs->slots[i - 1];
+    }
+    obs->slots[pos].x_mean = x_val;
+    obs->slots[pos].y_stats.count = weight;
+    obs->slots[pos].y_stats.mean = y_val;
+    obs->slots[pos].y_stats.m2 = (ht_float_t)0.0;
+}
+
+void ht_reg_categorical_init(ht_reg_categorical_obs_t *obs) {
+    if (obs) {
+        for (uint8_t v = 0; v < HT_MAX_CATEGORIES; ++v) {
+            ht_var_init(&obs->cat_stats[v]);
+        }
+    }
+}
+
+void ht_reg_categorical_update(ht_reg_categorical_obs_t *obs,
+                               int32_t cat_val,
+                               ht_float_t y_val,
+                               ht_float_t weight)
+{
+    if (!obs || cat_val < 0 || cat_val >= (int32_t)HT_MAX_CATEGORIES ||
+        weight <= (ht_float_t)0.0 || HT_ISNAN(y_val) || !HT_ISFINITE(y_val)) {
+        return;
+    }
+
+    ht_var_update(&obs->cat_stats[cat_val], y_val, weight);
+}

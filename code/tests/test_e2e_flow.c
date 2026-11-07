@@ -808,6 +808,155 @@ static void test_e2e_hat_abrupt_drift_recovery(void) {
     HT_ASSERT_EQ(adwin_pool.allocated_count, 0U);
 }
 
+static void test_e2e_continuous_regression_stream_pipeline(void) {
+    ht_memory_init(&s_e2e_pool);
+
+    /* Allocate regression leaf node (node 0) and leaf stats block (stats 0) */
+    uint16_t root_node_idx = ht_node_alloc(&s_e2e_pool);
+    HT_ASSERT_EQ(root_node_idx, 0);
+
+    uint16_t root_stats_idx = ht_stats_alloc(&s_e2e_pool);
+    HT_ASSERT_EQ(root_stats_idx, 0);
+
+    ht_node_t *root = ht_node_get(&s_e2e_pool, root_node_idx);
+    HT_ASSERT_NOT_NULL(root);
+    root->stats_idx = root_stats_idx;
+
+    ht_leaf_stats_t *stats = ht_stats_get(&s_e2e_pool, root_stats_idx);
+    HT_ASSERT_NOT_NULL(stats);
+
+    /* Initialize observers */
+    for (uint8_t f = 0; f < 8; ++f) {
+        ht_reg_numeric_init(&stats->observers[f].reg_num);
+    }
+    for (uint8_t f = 8; f < 12; ++f) {
+        ht_reg_categorical_init(&stats->observers[f].reg_cat);
+    }
+
+    const uint32_t N_SAMPLES = 500U;
+    uint32_t lcg = 777U;
+
+    /* Continuous stream ingestion */
+    for (uint32_t i = 0; i < N_SAMPLES; ++i) {
+        ht_value_t x[HT_MAX_FEATURES];
+
+        /* Features 0..7: Continuous numeric */
+        for (uint8_t f = 0; f < 8; ++f) {
+            lcg = lcg * 1664525U + 1013904223U;
+            ht_float_t raw = (ht_float_t)(lcg & 0xFFFFU) / (ht_float_t)65536.0; /* [0.0 .. 1.0) */
+            /* Feature 7 has occasional missing values (NaN) */
+            if (f == 7 && (i % 25 == 0)) {
+                x[f].num = (ht_float_t)(0.0 / 0.0);
+            } else {
+                x[f].num = (ht_float_t)(f * 5.0) + raw * (ht_float_t)10.0;
+            }
+        }
+
+        /* Features 8..11: Nominal categorical */
+        for (uint8_t f = 8; f < 12; ++f) {
+            /* Feature 11 has occasional missing categories (-1) */
+            if (f == 11 && (i % 31 == 0)) {
+                x[f].cat = -1;
+            } else {
+                x[f].cat = (int32_t)((i + f) % HT_MAX_CATEGORIES);
+            }
+        }
+
+        /* Features 12..15: Additional numeric features */
+        for (uint8_t f = 12; f < HT_MAX_FEATURES; ++f) {
+            lcg = lcg * 1664525U + 1013904223U;
+            x[f].num = (ht_float_t)((lcg & 0xFFU) - 128);
+        }
+
+        /* Continuous regression target function:
+         * y = 2.0 * x[0] - 1.5 * x[1] + 3.0 * (float)x[8] + noise
+         */
+        lcg = lcg * 1664525U + 1013904223U;
+        ht_float_t noise = ((ht_float_t)(lcg & 0xFFU) / (ht_float_t)256.0 - (ht_float_t)0.5) * (ht_float_t)2.0;
+        ht_float_t y = (ht_float_t)2.0 * x[0].num - (ht_float_t)1.5 * x[1].num +
+                       (ht_float_t)3.0 * (ht_float_t)x[8].cat + noise;
+        ht_float_t weight = (ht_float_t)1.0;
+
+        /* Update leaf target variance statistics */
+        ht_var_update(&root->reg_stats, y, weight);
+
+        /* Update numeric regression observers */
+        for (uint8_t f = 0; f < 8; ++f) {
+            ht_reg_numeric_update(&stats->observers[f].reg_num, x[f].num, y, weight);
+        }
+
+        /* Update categorical regression observers */
+        for (uint8_t f = 8; f < 12; ++f) {
+            ht_reg_categorical_update(&stats->observers[f].reg_cat, x[f].cat, y, weight);
+        }
+    }
+
+    /* 1. Verify target statistics in leaf */
+    HT_ASSERT_FLOAT_EQ(root->reg_stats.count, (ht_float_t)N_SAMPLES);
+    HT_ASSERT(HT_ISFINITE(root->reg_stats.mean));
+    HT_ASSERT(root->reg_stats.m2 > (ht_float_t)0.0);
+    ht_float_t target_var = ht_var_value(&root->reg_stats);
+    HT_ASSERT(target_var > (ht_float_t)0.0);
+
+    /* 2. Verify all numeric regression observers */
+    for (uint8_t f = 0; f < 8; ++f) {
+        ht_reg_numeric_obs_t *num_obs = &stats->observers[f].reg_num;
+
+        /* All 5 slots must be populated and sorted by x_mean */
+        for (uint8_t k = 0; k < HT_REG_NUM_SLOTS; ++k) {
+            HT_ASSERT(num_obs->slots[k].y_stats.count > (ht_float_t)0.0);
+            HT_ASSERT(HT_ISFINITE(num_obs->slots[k].x_mean));
+            HT_ASSERT(HT_ISFINITE(num_obs->slots[k].y_stats.mean));
+            HT_ASSERT(num_obs->slots[k].y_stats.m2 >= (ht_float_t)0.0);
+        }
+        for (uint8_t k = 0; k < HT_REG_NUM_SLOTS - 1; ++k) {
+            HT_ASSERT(num_obs->slots[k].x_mean <= num_obs->slots[k + 1].x_mean);
+        }
+
+        /* Check total weight conservation */
+        ht_float_t slot_w = (ht_float_t)0.0;
+        for (uint8_t k = 0; k < HT_REG_NUM_SLOTS; ++k) {
+            slot_w += num_obs->slots[k].y_stats.count;
+        }
+        if (f == 7) {
+            /* NaN samples skipped */
+            HT_ASSERT(slot_w < (ht_float_t)N_SAMPLES && slot_w >= (ht_float_t)(N_SAMPLES - 30));
+        } else {
+            HT_ASSERT_FLOAT_EQ(slot_w, (ht_float_t)N_SAMPLES);
+        }
+    }
+
+    /* 3. Verify categorical regression observers */
+    for (uint8_t f = 8; f < 12; ++f) {
+        ht_reg_categorical_obs_t *cat_obs = &stats->observers[f].reg_cat;
+        ht_float_t cat_w = (ht_float_t)0.0;
+        for (uint8_t v = 0; v < HT_MAX_CATEGORIES; ++v) {
+            cat_w += cat_obs->cat_stats[v].count;
+            if (cat_obs->cat_stats[v].count > (ht_float_t)0.0) {
+                HT_ASSERT(HT_ISFINITE(cat_obs->cat_stats[v].mean));
+                HT_ASSERT(cat_obs->cat_stats[v].m2 >= (ht_float_t)0.0);
+            }
+        }
+        if (f == 11) {
+            HT_ASSERT(cat_w < (ht_float_t)N_SAMPLES && cat_w >= (ht_float_t)(N_SAMPLES - 30));
+        } else {
+            HT_ASSERT_FLOAT_EQ(cat_w, (ht_float_t)N_SAMPLES);
+        }
+    }
+
+    /* 4. Memory budget verification */
+    HT_ASSERT(ht_memory_bytes_used(&s_e2e_pool) <= (1024 * 1024));
+
+    /* 5. Clean up: recycle leaf stats and node */
+    ht_stats_free(&s_e2e_pool, root_stats_idx);
+    root->stats_idx = HT_INVALID_IDX;
+    ht_node_free(&s_e2e_pool, root_node_idx);
+
+    HT_ASSERT_EQ(ht_node_count(&s_e2e_pool), 0);
+    HT_ASSERT_EQ(ht_stats_count(&s_e2e_pool), 0);
+    HT_ASSERT_EQ(ht_memory_bytes_used(&s_e2e_pool), 0);
+}
+
 void test_e2e_flow_run(void) {
     HT_TEST_SUITE_BEGIN("Nivel 3: Fluxo Ponta a Ponta Acumulado (E2E)");
     HT_RUN_TEST(test_e2e_sample_vector_ingestion);
@@ -818,4 +967,5 @@ void test_e2e_flow_run(void) {
     HT_RUN_TEST(test_e2e_full_tree_prequential_and_serialization);
     HT_RUN_TEST(test_e2e_drift_stream_pipeline);
     HT_RUN_TEST(test_e2e_hat_abrupt_drift_recovery);
+    HT_RUN_TEST(test_e2e_continuous_regression_stream_pipeline);
 }

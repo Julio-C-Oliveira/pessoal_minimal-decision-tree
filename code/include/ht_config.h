@@ -68,6 +68,10 @@ typedef float ht_float_t;
 #define HT_GAUSSIAN_SPLITS   10U
 #endif
 
+#ifndef HT_REG_NUM_SLOTS
+#define HT_REG_NUM_SLOTS     5U
+#endif
+
 #ifndef HT_ADWIN_MAX_BUCKETS
 #define HT_ADWIN_MAX_BUCKETS 5U
 #endif
@@ -82,6 +86,14 @@ typedef float ht_float_t;
 
 #define HT_INVALID_IDX       ((uint16_t)0xFFFFU)
 #define HT_NO_FEATURE        ((uint8_t)0xFFU)
+
+/**
+ * @brief Machine learning task type: Classification or Continuous Regression.
+ */
+typedef enum {
+    HT_TASK_CLASSIFICATION = 0,
+    HT_TASK_REGRESSION     = 1
+} ht_task_type_t;
 
 /**
  * @brief Feature type indicator: numeric (continuous) or categorical (nominal).
