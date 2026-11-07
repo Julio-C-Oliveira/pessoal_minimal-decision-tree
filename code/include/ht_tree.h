@@ -50,6 +50,8 @@ typedef struct {
     ht_leaf_pred_t      leaf_prediction;                /**< MC/MEAN, NB/MODEL, or NBA/ADAPTIVE */
     uint16_t            grace_period;                   /**< Samples between split attempts (default: 200) */
     uint16_t            max_depth;                      /**< Maximum tree depth allowed (default: 64) */
+    uint16_t            max_nodes;                      /**< Maximum tree nodes allowed (0 = HT_MAX_NODES) */
+    uint16_t            max_active_leaves;              /**< Maximum active learning leaves allowed (0 = HT_MAX_ACTIVE_LEAVES) */
     ht_float_t          delta;                          /**< Split confidence parameter (default: 1e-7) */
     ht_float_t          tau;                            /**< Tie-breaking threshold (default: 0.05) */
     ht_float_t          min_branch_fraction;            /**< Min sample fraction per branch (default: 0.01) */
