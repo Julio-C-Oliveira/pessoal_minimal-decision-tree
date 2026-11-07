@@ -100,7 +100,8 @@ pessoal_minimal-decision-tree/
 │   ├── 02_attribute_observers.md
 │   ├── 03_concept_drift_hat.md
 │   ├── 04_river_mapping.md
-│   └── 05_sklearn_architecture.md
+│   ├── 05_sklearn_architecture.md
+│   └── 06_implementation_plan.md # Plano de implementação persistente multi-chat/agente
 ├── include/                     # Headers públicos e internos (C11)
 │   ├── ht_config.h              # Tipos (ht_float_t, ht_value_t), limites e constantes
 │   ├── ht_memory.h              # Slab/Pool allocator determinístico baseado em índices uint16_t

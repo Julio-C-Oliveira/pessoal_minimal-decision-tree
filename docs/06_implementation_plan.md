@@ -1,0 +1,318 @@
+# 06 — Plano de Implementação Persistente (C11 VFDT & HAT $\le 1\text{ MB}$)
+
+> [!IMPORTANT]
+> **Fonte Única de Verdade Multi-Chat (`implementation-plan` skill):**
+> Este documento é o plano mestre compartilhado entre diferentes sessões de chat e agentes. Antes de iniciar qualquer implementação em `include/`, `src/`, `tests/` ou `benchmarks/`, verifique o **Quadro de Status das Entregas** abaixo, siga rigorosamente os contratos de structs/APIs e atualize o status (`[x]`) ao concluir cada entrega.
+
+---
+
+## 1. Quadro de Status das Entregas (Checklist Executável)
+
+| ID | Fase / Entrega | Arquivos Alvo | Testes Exigidos (Níveis 1, 2 e 3) | Status | Commit |
+| :---: | :--- | :--- | :--- | :---: | :---: |
+| **0.1** | Estudo Teórico: Hoeffding Tree & VFDT | [`docs/01_hoeffding_tree_vfdt.md`](file:///home/julio/Documentos/pessoal_minimal-decision-tree/docs/01_hoeffding_tree_vfdt.md) | Revisão de equações e layout `ht_node_t` | `[x]` | `8dfdb80` |
+| **0.2** | Estudo Teórico: Observadores, Critérios e NBA | [`docs/02_attribute_observers.md`](file:///home/julio/Documentos/pessoal_minimal-decision-tree/docs/02_attribute_observers.md) | Revisão de Welford, CDF, LSE e `ht_leaf_stats_t` | `[x]` | `a064ef1` |
+| **0.3** | Estudo Teórico: Concept Drift, ADWIN e HAT | [`docs/03_concept_drift_hat.md`](file:///home/julio/Documentos/pessoal_minimal-decision-tree/docs/03_concept_drift_hat.md) | Revisão de ADWIN2, subárvore alternativa e `ht_adwin_state_t` | `[x]` | `5b88328` |
+| **0.4** | Mapeamento Arquitetural do River | [`docs/04_river_mapping.md`](file:///home/julio/Documentos/pessoal_minimal-decision-tree/docs/04_river_mapping.md) | Mapeamento de paridade e desempates `BranchFactory` | `[x]` | `e6e05d7` |
+| **0.5** | Mapeamento Arquitetural do Scikit-Learn | [`docs/05_sklearn_architecture.md`](file:///home/julio/Documentos/pessoal_minimal-decision-tree/docs/05_sklearn_architecture.md) | Mapeamento de array plano, Gini 1-divisão e `SplitRecord` | `[x]` | `ef71e9f` |
+| **1.1** | **Fase 1:** Build System, Config & Test Harness | `Makefile`, `include/ht_config.h`, `tests/test_harness.h`, `tests/test_e2e_flow.c`, `tests/test_main.c` | Compilação limpa `-std=c11 -Wall -Wextra -Werror -pedantic` em `float` e `double` + `_Static_assert` de tipos básicos | `[ ]` | — |
+| **1.2** | **Fase 1:** Slab/Pool Allocator Determinístico | `include/ht_memory.h`, `src/ht_memory.c`, `tests/test_memory.c`, `tests/test_e2e_flow.c` | **N1:** alloc/free/reset, `HT_INVALID_IDX`<br/>**N2:** stress test de reciclagem $O(1)$ sem fragmentação<br/>**N3:** orçamento $\le 1\text{ MB}$ validado no fluxo E2E | `[ ]` | — |
+| **1.3** | **Fase 1:** Observadores de Atributos (Welford + Nominal) | `include/ht_observer.h`, `src/ht_observer.c`, `tests/test_observer.c`, `tests/test_e2e_flow.c` | **N1:** Welford ($n=0,1,2$, $s^2=0$, `NaN`), PDF/CDF normal, tabela categórica<br/>**N2:** observadores dentro de `ht_leaf_stats_t` do pool<br/>**N3:** ingestão de stream sintético `ht_value_t[]` no E2E | `[ ]` | — |
+| **1.4** | **Fase 1:** Critérios de Impureza & Hoeffding Bound | `include/ht_criterion.h`, `src/ht_criterion.c`, `tests/test_criterion.c`, `tests/test_e2e_flow.c` | **N1:** Gini (1 divisão), InfoGain (base 2), `min_branch_fraction`, $\epsilon(R, \delta, n)$<br/>**N2:** busca do melhor `ht_split_candidate_t` entre observadores + desempate $\tau$<br/>**N3:** decisão completa de split sobre dados sintéticos no E2E | `[ ]` | — |
+| **1.5** | **Fase 1:** Árvore VFDT Completa (MC/NB/NBA, Memória, Save/Load) | `include/ht_tree.h`, `src/ht_tree.c`, `tests/test_tree.c`, `tests/test_e2e_flow.c` | **N1:** roteamento iterativo (`NaN` $\to$ filho mais populoso), predição MC/NB/NBA, `Promise(l)`<br/>**N2:** split com reciclagem de `stats_idx` + desativação de folhas quando pool enche<br/>**N3:** treino *prequential* completo + `ht_save`/`ht_load` bit-a-bit | `[ ]` | — |
+| **2.1** | **Fase 2:** Paridade Prequential e Benchmark vs River | `benchmarks/generate_streams.py`, `benchmarks/bench_c_runner.c`, `benchmarks/compare_river.py` | Comparação *Apples-to-Apples* (SEA, Agrawal, Hyperplane, LED) em `double` e `float`: Acurácia, Splits, Nós, RAM ($\le 1\text{ MB}$) e Tempo ($\mu\text{s}$/amostra) | `[ ]` | — |
+| **3.1** | **Fase 3:** Detector ADWIN com Histograma Exponencial Fixo | `include/ht_drift.h`, `src/ht_drift.c`, `tests/test_drift.c` | **N1:** inserção, compressão de buckets $2^k$ ($M=5$), corte $\epsilon_{\text{cut}}$<br/>**N2:** pool estático de detectores ADWIN + detecção de salto de média | `[ ]` | — |
+| **3.2** | **Fase 3:** Hoeffding Adaptive Tree (HAT) | `include/ht_tree.h`, `src/ht_tree.c`, `src/ht_drift.c`, `tests/test_drift.c`, `tests/test_e2e_flow.c` | **N1:** filtro unilateral de erro, `bound` de troca/poda, votação $1/\hat{e}^2$<br/>**N2:** substituição de subárvore com reciclagem iterativa de nós antigos<br/>**N3:** stream E2E com drift abrupto recuperando acurácia | `[ ]` | — |
+| **3.3** | **Fase 3:** Benchmark de Concept Drift vs River HAT | `benchmarks/compare_river.py`, `benchmarks/bench_c_runner.c` | Paridade contra `HoeffdingAdaptiveTreeClassifier` em streams com drift abrupto e gradual | `[ ]` | — |
+
+---
+
+## 2. Orçamento Consolidado de Memória ($\le 1\text{ MB}$) e `_Static_assert`
+
+Toda a memória da árvore reside em estruturas estáticas pré-alocadas (zero chamadas a `malloc`/`calloc`/`realloc`/`free` em `ht_learn_one` e `ht_predict`).
+
+### 2.1 Limites de Compilação Padrão (`include/ht_config.h`)
+
+| Macro de Configuração | Valor Padrão | Significado |
+| :--- | :---: | :--- |
+| `HT_MAX_FEATURES` | `16` | Número máximo de atributos por amostra ($F$) |
+| `HT_MAX_CLASSES` | `4` | Número máximo de classes alvo ($C$) |
+| `HT_MAX_CATEGORIES` | `5` | Cardinalidade máxima de um atributo categórico nominal ($V$) |
+| `HT_MAX_NODES` | `4096` | Capacidade do `node_pool` (nós internos + folhas ativas/inativas) |
+| `HT_MAX_ACTIVE_LEAVES` | `256` | Capacidade do `stats_pool` (folhas aprendendo simultaneamente) |
+| `HT_Gaussian_SPLITS` | `10` | Número de pontos de corte candidatos avaliados na Gaussiana ($k$) |
+| `HT_INVALID_IDX` | `0xFFFFU` | Sentinela `uint16_t` para filho ou `stats_idx` inexistente |
+
+### 2.2 Tabela de Tamanhos Exatos (`sizeof`) e Verificação em Tempo de Compilação
+
+| Struct C11 | Tamanho Unitário em `float` (32-bit) | Tamanho Unitário em `double` (`-DHT_USE_DOUBLE`) | Quantidade no Pool | Total em `float` (32-bit) | Total em `double` (64-bit) |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| `ht_node_t` | **$28\text{ B}$** | **$48\text{ B}$** | `4096` (`node_pool`) | $114.688\text{ B}$ ($112.0\text{ KB}$) | $196.608\text{ B}$ ($192.0\text{ KB}$) |
+| `ht_gaussian_obs_t` | **$20\text{ B}$** | **$40\text{ B}$** | $16 \times 4$ por folha | — | — |
+| `ht_feature_obs_t` | **$80\text{ B}$** | **$160\text{ B}$** | $16$ por folha | — | — |
+| `ht_leaf_stats_t` | **$1.292\text{ B}$** | **$2.584\text{ B}$** | `256` (`stats_pool`) | $330.752\text{ B}$ ($323.0\text{ KB}$) | $661.504\text{ B}$ ($646.0\text{ KB}$) |
+| Free-lists + Header `ht_tree_t` | $\approx 8.8\text{ KB}$ | $\approx 8.8\text{ KB}$ | `1` instância | $8.832\text{ B}$ ($8.6\text{ KB}$) | $8.864\text{ B}$ ($8.7\text{ KB}$) |
+| **Total `sizeof(ht_tree_t)` (VFDT)** | — | — | **1 Árvore Completa** | **$454.272\text{ B}$ ($\approx 443.6\text{ KB}$)** | **$866.976\text{ B}$ ($\approx 846.7\text{ KB}$)** |
+
+```c
+/* Verificações obrigatórias em tempo de compilação: */
+#ifndef HT_USE_DOUBLE
+_Static_assert(sizeof(ht_node_t) == 28, "ht_node_t deve ter exatamente 28 bytes em float32");
+_Static_assert(sizeof(ht_leaf_stats_t) == 1292, "ht_leaf_stats_t deve ter exatamente 1292 bytes em float32");
+#else
+_Static_assert(sizeof(ht_node_t) == 48, "ht_node_t deve ter exatamente 48 bytes em float64");
+_Static_assert(sizeof(ht_leaf_stats_t) == 2584, "ht_leaf_stats_t deve ter exatamente 2584 bytes em float64");
+#endif
+_Static_assert(sizeof(ht_tree_t) <= (1024 * 1024), "ht_tree_t excedeu o orcamento de 1 MB de RAM!");
+```
+
+---
+
+## 3. Especificação Técnica Detalhada por Módulo (`include/` e `src/`)
+
+### Entrega 1.1: Build System (`Makefile`), Configuração (`include/ht_config.h`) e Harness (`tests/test_harness.h`)
+
+#### [NEW] `include/ht_config.h`
+Define os tipos numéricos abstratos, macros matemáticas compatíveis com `float`/`double`, tipos de entrada e códigos de retorno:
+
+```c
+#ifndef HT_CONFIG_H
+#define HT_CONFIG_H
+
+#include <stdint.h>
+#include <stddef.h>
+#include <stdbool.h>
+#include <math.h>
+#include <float.h>
+
+#ifdef HT_USE_DOUBLE
+typedef double ht_float_t;
+#define HT_SQRT(x)    sqrt(x)
+#define HT_LOG(x)     log(x)
+#define HT_LOG2(x)    log2(x)
+#define HT_EXP(x)     exp(x)
+#define HT_ERF(x)     erf(x)
+#define HT_FABS(x)    fabs(x)
+#define HT_ISNAN(x)   isnan(x)
+#define HT_ISFINITE(x) isfinite(x)
+#define HT_INFINITY   ((ht_float_t)INFINITY)
+#define HT_EPSILON    ((ht_float_t)1e-12)
+#else
+typedef float ht_float_t;
+#define HT_SQRT(x)    sqrtf(x)
+#define HT_LOG(x)     logf(x)
+#define HT_LOG2(x)    log2f(x)
+#define HT_EXP(x)     expf(x)
+#define HT_ERF(x)     erff(x)
+#define HT_FABS(x)    fabsf(x)
+#define HT_ISNAN(x)   isnan(x)
+#define HT_ISFINITE(x) isfinite(x)
+#define HT_INFINITY   ((ht_float_t)INFINITY)
+#define HT_EPSILON    ((ht_float_t)1e-7f)
+#endif
+
+#define HT_PI         ((ht_float_t)3.14159265358979323846)
+#define HT_SQRT2      ((ht_float_t)1.41421356237309504880)
+
+#ifndef HT_MAX_FEATURES
+#define HT_MAX_FEATURES      16U
+#endif
+#ifndef HT_MAX_CLASSES
+#define HT_MAX_CLASSES       4U
+#endif
+#ifndef HT_MAX_CATEGORIES
+#define HT_MAX_CATEGORIES    5U
+#endif
+#ifndef HT_MAX_NODES
+#define HT_MAX_NODES         4096U
+#endif
+#ifndef HT_MAX_ACTIVE_LEAVES
+#define HT_MAX_ACTIVE_LEAVES 256U
+#endif
+#ifndef HT_GAUSSIAN_SPLITS
+#define HT_GAUSSIAN_SPLITS   10U
+#endif
+
+#define HT_INVALID_IDX       ((uint16_t)0xFFFFU)
+#define HT_NO_FEATURE        ((uint8_t)0xFFU)
+
+typedef enum {
+    HT_FEAT_NUMERIC     = 0,
+    HT_FEAT_CATEGORICAL = 1
+} ht_feature_type_t;
+
+typedef union {
+    ht_float_t num;
+    int32_t    cat;
+} ht_value_t;
+
+typedef enum {
+    HT_OK                = 0,
+    HT_ERR_INVALID_ARG   = -1,
+    HT_ERR_OUT_OF_NODES  = -2,
+    HT_ERR_OUT_OF_STATS  = -3,
+    HT_ERR_IO            = -4,
+    HT_ERR_CORRUPT_IMAGE = -5
+} ht_status_t;
+
+#endif /* HT_CONFIG_H */
+```
+
+#### [NEW] `Makefile`
+- Flags estritas: `CFLAGS = -std=c11 -O2 -Wall -Wextra -Werror -pedantic -Iinclude $(CFLAGS_EXTRA)` e `LDFLAGS = -lm`.
+- Targets principais: `all`, `lib`, `test` (compila e roda `./build/test_runner`), `bench` e `clean`.
+
+---
+
+### Entrega 1.2: Slab / Pool Allocator Determinístico (`include/ht_memory.h`, `src/ht_memory.c`)
+
+Gerencia dois pools estáticos independentes (`node_pool` e `stats_pool`) com pilhas de índices livres (`free_nodes[]` e `free_stats[]`) operando em **$O(1)$ estrito**:
+
+```c
+/* Nó estrutural permanente (28 B em float / 48 B em double) */
+#define HT_NODE_IS_LEAF   (1U << 0)
+#define HT_NODE_SPLIT_CAT (1U << 1)
+
+typedef struct {
+    ht_float_t class_counts[HT_MAX_CLASSES];
+    union {
+        ht_float_t threshold;
+        int32_t    cat_val;
+    } split_val;
+    uint16_t left_child;
+    uint16_t right_child;
+    uint16_t stats_idx;
+    uint8_t  feature_idx;
+    uint8_t  flags;
+} ht_node_t;
+```
+
+#### API Pública de `ht_memory.h`:
+- `void ht_memory_init(ht_memory_pool_t *pool)`: Inicializa as *free-lists* (`0 .. MAX-1`) e contadores de uso.
+- `uint16_t ht_node_alloc(ht_memory_pool_t *pool)`: Retira um índice da `node_free_list`, zera o `ht_node_t` via `memset` e inicializa `left_child = right_child = stats_idx = HT_INVALID_IDX` e `flags = HT_NODE_IS_LEAF`. Retorna `HT_INVALID_IDX` se cheio.
+- `void ht_node_free(ht_memory_pool_t *pool, uint16_t node_idx)`: Devolve `node_idx` à `node_free_list`.
+- `uint16_t ht_stats_alloc(ht_memory_pool_t *pool)`: Retira um índice da `stats_free_list`, zera o `ht_leaf_stats_t` via `memset`. Retorna `HT_INVALID_IDX` se cheio.
+- `void ht_stats_free(ht_memory_pool_t *pool, uint16_t stats_idx)`: Devolve `stats_idx` à `stats_free_list`.
+- `size_t ht_memory_bytes_used(const ht_memory_pool_t *pool)`: Retorna `nodes_used * sizeof(ht_node_t) + stats_used * sizeof(ht_leaf_stats_t)`.
+
+---
+
+### Entrega 1.3: Observadores de Atributos (`include/ht_observer.h`, `src/ht_observer.c`)
+
+Implementa as estruturas `ht_gaussian_obs_t`, `ht_categorical_obs_t`, `ht_feature_obs_t` e `ht_split_candidate_t` (definidas em [`docs/02_attribute_observers.md`](file:///home/julio/Documentos/pessoal_minimal-decision-tree/docs/02_attribute_observers.md) e [`docs/04_river_mapping.md`](file:///home/julio/Documentos/pessoal_minimal-decision-tree/docs/04_river_mapping.md)).
+
+#### API Pública de `ht_observer.h`:
+- `void ht_gaussian_update(ht_gaussian_obs_t obs[HT_MAX_CLASSES], uint8_t class_idx, ht_float_t val, ht_float_t weight)`:
+  - Ignora se `HT_ISNAN(val)` ou `weight <= 0`. Atualiza Welford (`count`, `mean`, `m2`, `min_val`, `max_val`).
+- `ht_float_t ht_gaussian_cond_log_proba(const ht_gaussian_obs_t *obs, ht_float_t val)`:
+  - Retorna `-HT_INFINITY` se `obs->count < 2.0` ou variância $s^2 = \frac{M_2}{n - 1} \le 0.0$. Caso contrário, retorna $-\frac{1}{2}\ln(2\pi s^2) - \frac{(val - \mu)^2}{2s^2}$.
+- `ht_float_t ht_normal_cdf(ht_float_t x, ht_float_t mean, ht_float_t stddev)`:
+  - Calcula $\Phi\left(\frac{x - \mu}{\sigma}\right) = 0.5 \cdot \left(1 + \operatorname{erf}\left(\frac{x - \mu}{\sigma \sqrt{2}}\right)\right)$.
+- `void ht_categorical_update(ht_categorical_obs_t *obs, uint8_t class_idx, int32_t cat_val, ht_float_t weight)`:
+  - Ignora se `cat_val < 0 || cat_val >= HT_MAX_CATEGORIES`. Incrementa `obs->counts[class_idx][cat_val] += weight`.
+- `ht_float_t ht_categorical_cond_proba(const ht_categorical_obs_t *obs, uint8_t class_idx, int32_t cat_val)`:
+  - Retorna $N_{v, c} / \sum_u N_{u, c}$ (ou `0.0` se total da classe for zero ou categoria inválida).
+
+---
+
+### Entrega 1.4: Critérios de Impureza e Hoeffding Bound (`include/ht_criterion.h`, `src/ht_criterion.c`)
+
+Implementa o polimorfismo por árvore via `ht_criterion_vtable_t`:
+
+```c
+typedef enum {
+    HT_CRIT_INFO_GAIN = 0,
+    HT_CRIT_GINI      = 1
+} ht_criterion_type_t;
+
+typedef struct {
+    ht_float_t (*range_of_merit)(const ht_float_t pre_dist[HT_MAX_CLASSES], uint8_t n_classes);
+    ht_float_t (*merit_of_split)(const ht_float_t pre_dist[HT_MAX_CLASSES],
+                                 const ht_float_t lhs_dist[HT_MAX_CLASSES],
+                                 const ht_float_t rhs_dist[HT_MAX_CLASSES],
+                                 uint8_t n_classes,
+                                 ht_float_t min_branch_fraction);
+} ht_criterion_vtable_t;
+```
+
+#### API Pública de `ht_criterion.h`:
+- `const ht_criterion_vtable_t *ht_criterion_get_vtable(ht_criterion_type_t type)`
+- `ht_float_t ht_hoeffding_bound(ht_float_t range_val, ht_float_t delta, ht_float_t total_weight)`
+- `void ht_evaluate_numeric_observer(const ht_gaussian_obs_t obs[HT_MAX_CLASSES], const ht_float_t pre_dist[HT_MAX_CLASSES], uint8_t n_classes, uint8_t feature_idx, const ht_criterion_vtable_t *crit, ht_float_t min_branch_frac, ht_split_candidate_t *out_best)`
+- `void ht_evaluate_categorical_observer(const ht_categorical_obs_t *obs, const ht_float_t pre_dist[HT_MAX_CLASSES], uint8_t n_classes, uint8_t feature_idx, const ht_criterion_vtable_t *crit, ht_float_t min_branch_frac, ht_split_candidate_t *out_best)`
+
+---
+
+### Entrega 1.5: Núcleo da Árvore VFDT (`include/ht_tree.h`, `src/ht_tree.c`)
+
+Integra topologia, roteamento iterativo, predição nas folhas (`HT_LEAF_MC`, `HT_LEAF_NB`, `HT_LEAF_NBA`), tentativa de split, gerenciamento de memória VFDT (`Promise(l)`) e persistência binária (`ht_save` / `ht_load`).
+
+```c
+typedef enum {
+    HT_LEAF_MC  = 0,
+    HT_LEAF_NB  = 1,
+    HT_LEAF_NBA = 2
+} ht_leaf_pred_t;
+
+typedef struct {
+    uint8_t             n_features;
+    uint8_t             n_classes;
+    ht_feature_type_t   feature_types[HT_MAX_FEATURES];
+    ht_criterion_type_t criterion;
+    ht_leaf_pred_t      leaf_prediction;
+    uint16_t            grace_period;        /* Padrão: 200 */
+    uint16_t            max_depth;           /* Padrão: 64 */
+    ht_float_t          delta;               /* Padrão: 1e-7 */
+    ht_float_t          tau;                 /* Padrão: 0.05 */
+    ht_float_t          min_branch_fraction; /* Padrão: 0.01 */
+    ht_float_t          max_share_to_split;  /* Padrão: 0.99 */
+    ht_float_t          nb_threshold;        /* Padrão: 0.0 */
+    bool                merit_preprune;      /* Padrão: true */
+} ht_config_params_t;
+```
+
+#### API Pública de `ht_tree.h`:
+- `void ht_default_params(ht_config_params_t *params, uint8_t n_features, uint8_t n_classes)`
+- `ht_status_t ht_tree_init(ht_tree_t *tree, const ht_config_params_t *params)`: Inicializa os pools e aloca o nó raiz (`root_idx = 0`) como folha ativa.
+- `uint16_t ht_tree_route(const ht_tree_t *tree, const ht_value_t x[HT_MAX_FEATURES], uint16_t *out_parent_idx, uint8_t *out_parent_branch, uint16_t *out_depth)`: Roteamento iterativo (`while`) da raiz até a folha, usando `most_common_path` quando `x[f]` está ausente (`NaN` ou `< 0`).
+- `ht_status_t ht_tree_predict_proba(const ht_tree_t *tree, const ht_value_t x[HT_MAX_FEATURES], ht_float_t proba_out[HT_MAX_CLASSES])`
+- `uint8_t ht_tree_predict(const ht_tree_t *tree, const ht_value_t x[HT_MAX_FEATURES])`
+- `ht_status_t ht_tree_learn_one(ht_tree_t *tree, const ht_value_t x[HT_MAX_FEATURES], uint8_t y, ht_float_t weight)`
+- `ht_status_t ht_tree_save(const ht_tree_t *tree, void *buffer, size_t buffer_cap, size_t *out_bytes_written, bool include_training_stats)`
+- `ht_status_t ht_tree_load(ht_tree_t *tree, const void *buffer, size_t buffer_len)`
+
+---
+
+## 4. Matriz de Testes Progressivos em 3 Níveis (`tests/`)
+
+Conforme a skill [`embedded-c-tree`](file:///home/julio/Documentos/pessoal_minimal-decision-tree/.agents/skills/embedded-c-tree/SKILL.md), **nenhuma entrega avança para a próxima sem passar nos 3 níveis de testes abaixo**, compilados e executados tanto em `float` quanto em `double`:
+
+```bash
+make clean && make test
+make clean && make test CFLAGS_EXTRA="-DHT_USE_DOUBLE"
+```
+
+```mermaid
+flowchart LR
+    L1["Nível 1: Função / Unidade<br/>(test_memory.c, test_observer.c,<br/>test_criterion.c, test_tree.c)"] --> L2["Nível 2: Integração Meso<br/>(Interação entre Pool +<br/>Observer + Criterion + Tree)"]
+    L2 --> L3["Nível 3: Fluxo Total Acumulado<br/>(test_e2e_flow.c — Pipeline<br/>completo até a entrega atual)"]
+```
+
+1. **Entrega 1.1 (`Makefile` + `ht_config.h` + `test_harness.h`):**
+   - Validação das macros de asserção, constantes matemáticas, `HT_ISNAN` e `_Static_assert` dos tipos base em `float` e `double`.
+2. **Entrega 1.2 (`ht_memory` + `test_memory.c`):**
+   - **Nível 1:** Alocação até `HT_MAX_NODES` e `HT_MAX_ACTIVE_LEAVES`, retorno de `HT_INVALID_IDX` quando lotado, zeramento por `memset`.
+   - **Nível 2:** 100.000 ciclos de alocação e liberação alternadas provando ausência de vazamento/fragmentação e complexidade $O(1)$.
+   - **Nível 3 (`test_e2e_flow.c`):** Simulação da topologia de splits reciclando `stats_idx` da folha mãe antes de alocar as duas folhas filhas e verificação de `ht_memory_bytes_used <= 1 MB`.
+3. **Entrega 1.3 (`ht_observer` + `test_observer.c`):**
+   - **Nível 1:** Welford contra média/variância analítica exata; bordas $n=0, 1, 2$, amostras constantes ($s^2 = 0$), `NaN` ignorado; valores exatos de $\Phi(0) = 0.5$, $\Phi(1) \approx 0.841345$.
+   - **Nível 2:** Observadores operando dentro de blocos `ht_leaf_stats_t` alocados do `stats_pool`.
+   - **Nível 3 (`test_e2e_flow.c`):** Stream sintético alimentando todos os 16 observadores de uma folha ativa e gerando distribuições `lhs_dist` / `rhs_dist` consistentes.
+4. **Entrega 1.4 (`ht_criterion` + `test_criterion.c`):**
+   - **Nível 1:** Gini e InfoGain contra valores calculados à mão; rejeição por `min_branch_fraction`; cálculo de $\epsilon$ para $\delta = 10^{-7}$.
+   - **Nível 2:** Seleção do atributo e ponto de corte ótimos a partir de múltiplos observadores Gaussianos e Categóricos populados; desempate por $\tau$ e empate `-inf`.
+   - **Nível 3 (`test_e2e_flow.c`):** Pipeline completo desde amostras brutas `ht_value_t[]` até a decisão de split ($\Delta \bar{G} > \epsilon$) e reciclagem do bloco no pool.
+5. **Entrega 1.5 (`ht_tree` + `test_tree.c` + `test_e2e_flow.c`):**
+   - **Nível 1:** Roteamento com e sem `NaN`, predição MC, NB (com *Log-Sum-Exp*) e NBA (ordem *prequential*), cálculo de `Promise(l)`.
+   - **Nível 2:** Crescimento automático de árvore com múltiplos splits, desativação automática da folha de menor `Promise(l)` quando `stats_pool` lota.
+   - **Nível 3 (`test_e2e_flow.c`):** Treinamento *prequential* ponta a ponta em dataset sintético multiclasse comprovando ganho de acurácia, seguido de `ht_tree_save` $\to$ `ht_tree_load` (modo completo e somente-inferência) com 100% de igualdade nas predições.
