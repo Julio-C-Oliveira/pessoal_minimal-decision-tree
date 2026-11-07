@@ -157,9 +157,9 @@ pessoal_minimal-decision-tree/
 
 - [x] Configurar `Makefile`, `code/include/ht_config.h` e `code/tests/test_harness.h` (suporte a `float`/`double`, `ht_value_t`, `stdint.h`, compilação limpa com `-Wall -Wextra -Werror -std=c11`).
 - [x] Implementar `ht_memory` + `code/tests/test_memory.c`: Pool/Slab allocator estático baseado em índices `uint16_t` para `ht_node_t` e `ht_leaf_stats_t` (zero `malloc` em runtime, medição exata de bytes usados, stress test de reciclagem).
-- [ ] Implementar `ht_observer` + `code/tests/test_observer.c`:
-  - [ ] Observador numérico Gaussiano incremental (Welford) + avaliação de $k$ thresholds candidatos usando PDF/CDF normal.
-  - [ ] Observador categórico nominal com busca do melhor split binário ($x_i == c$ vs $x_i \neq c$).
+- [x] Implementar `ht_observer` + `code/tests/test_observer.c`:
+  - [x] Observador numérico Gaussiano incremental (Welford) + avaliação de $k$ thresholds candidatos usando PDF/CDF normal.
+  - [x] Observador categórico nominal com busca do melhor split binário ($x_i == c$ vs $x_i \neq c$).
 - [ ] Implementar `ht_criterion` + `code/tests/test_criterion.c`:
   - [ ] Vtable (`ht_criterion_vtable_t`) + implementações de *Gini Impurity* e *Information Gain (Entropia)*.
   - [ ] Cálculo do *Hoeffding Bound* ($\epsilon$) e verificação de split ($\Delta G > \epsilon$ ou $\epsilon < \tau$) integrado aos observadores.
