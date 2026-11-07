@@ -1653,7 +1653,7 @@ def generate_memory_markdown_report(report_path: str, all_results: List[Dict[str
                 f.write("\n")
             else:
                 f.write("| Capacidade (Folhas / Nós) | Solução / Algoritmo | Holdout MAE | Holdout RMSE | Holdout $R^2$ | Prequential MAE | Total Nós | Folhas Ativas | RAM Estática Modelo | Pico Heap Dinâmico | Tempo/amostra (µs) | Speedup vs River |\n")
-                f.write("| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |\n")
+                f.write("| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |\n")
                 for td in item["tier_results"]:
                     tier = td["tier"]
                     nodes = td["nodes"]

@@ -125,7 +125,7 @@ Em microcontroladores e dispositivos na borda (*TinyML*), a memória SRAM dispon
 ### 2.5 Friedman #1 Continuous Regression (10 features)
 
 | Capacidade (Folhas / Nós) | Solução / Algoritmo | Holdout MAE | Holdout RMSE | Holdout $R^2$ | Prequential MAE | Total Nós | Folhas Ativas | RAM Estática Modelo | Pico Heap Dinâmico | Tempo/amostra (µs) | Speedup vs River |
-| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
 | **Tier 256** (256F / 4096N) | **C11 VFDT-R (`float32`)** | **1.8094** | **2.3078** | **0.7857** | 2.0536 | 71 | 36 | **524.7 KB** | **0.0 KB (Zero malloc)** | **0.90 µs** | **285.9x** |
 | | River HTR (Adaptive) | 1.6722 | 2.1198 | 0.8192 | 1.8807 | 81 | 41 | 218.6 KB | 1596.3 KB | 256.70 µs | 1.0x |
 | | Scikit-Learn (CART Batch) | 1.6501 | 2.0804 | 0.8258 | N/A | 511 | N/A | 67.9 KB | 835.1 KB | 11.47 µs | Baseline |
