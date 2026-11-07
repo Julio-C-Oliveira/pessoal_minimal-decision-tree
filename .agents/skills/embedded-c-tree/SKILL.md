@@ -39,6 +39,11 @@ Esta skill define o protocolo de engenharia para desenvolver e validar os módul
    - **Naive Bayes / NBA nas Folhas:**
      - Calcule as probabilidades em espaço logarítmico (`log_pdf`) com *log-sum-exp* trick para evitar *underflow* em `float` 32-bit quando houver muitos atributos.
 
+4. **Proibição de Sobre-Engenharia (Compile-Time Macros vs Runtime Limits):**
+   - Evite o viés de bibliotecas desktop (Scikit-Learn/River), onde limites de memória/nós (`max_leaf_nodes`) são hiperparâmetros de runtime porque o heap cresce dinamicamente.
+   - Em MCUs embarcados, limitar logicamente uma árvore dentro de uma struct que já alocou 524 KB de SRAM é inútil; a redução real de RAM exige compilar com `-DHT_MAX_ACTIVE_LEAVES=N -DHT_MAX_NODES=M`.
+   - Como o esgotamento físico de `stats_pool` e `node_pool` já aciona automaticamente a desativação por promessa (`ht_tree_deactivate_least_promising_leaf`) e o bloqueio de split (`HT_ERR_OUT_OF_NODES`), **nunca adicione contadores ou limites paralelos de runtime em `ht_tree.c`**.
+
 ---
 
 ## 2. Protocolo de Testes Progressivos (Da Função ao Fluxo Total)

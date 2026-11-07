@@ -14,6 +14,11 @@ Este repositório desenvolve uma **Hoeffding Tree (VFDT / HAT)** ultraleve em **
 - **Precisão Configurável (`ht_float_t`):**
   - Todo cálculo de ponto flutuante deve usar `ht_float_t` (`float` 32-bit por padrão; `double` 64-bit quando compilado com `-DHT_USE_DOUBLE` para testes de paridade com o River).
 - **Sem Recursão Profunda:** O roteamento da raiz até a folha deve usar loops iterativos (`while`), nunca recursão na pilha de chamadas (stack limitada em microcontroladores).
+- **Dimensionamento Estrito via Macros de Compilação (Zero Redundância em Runtime):**
+  - Limites de capacidade (`HT_MAX_NODES`, `HT_MAX_ACTIVE_LEAVES`, `HT_MAX_FEATURES`, `HT_MAX_CLASSES`, `HT_MAX_CATEGORIES`) são definidos exclusivamente em tempo de compilação (`code/include/ht_config.h` ou flags `-D` no `Makefile`) para reduzir fisicamente `sizeof(ht_tree_t)` na SRAM.
+  - É **proibido** duplicar esses limites como parâmetros dinâmicos em `ht_config_params_t` ou adicionar checagens extras em `code/src/` para restringir em runtime o que o alocador estático (`ht_memory`) já impõe nativamente por exaustão do pool (`free_nodes_top`, `free_stats_top`).
+- **Trava de Minimalismo antes de tocar em `code/`:**
+  - Tarefas de benchmark (`benchmarks/`) não devem alterar `code/include/` ou `code/src/`. Antes de propor qualquer novo campo em structs ou lógica extra no núcleo C11, verifique se o mecanismo nativo de macros + pools estáticos já resolve o problema; em caso de dúvida, pergunte ao usuário antes de modificar `code/`.
 
 ## 2. Regra de Commits Atômicos (Git)
 

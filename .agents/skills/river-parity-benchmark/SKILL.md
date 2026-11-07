@@ -39,5 +39,9 @@ Esta skill guia a validação experimental da nossa implementação em C11 compa
    - Rode o executável C compilado com `-DHT_USE_DOUBLE` para verificar se o número de splits e a acurácia convergem com o River (que usa `float64` do Python).
    - Em seguida, rode o executável C no modo padrão `float` (32-bit) para medir o ganho de memória (50% menos RAM nos observadores) e confirmar que a acurácia prequential se mantém equivalente ($\Delta < 0.5\%$).
 
-4. **Commit Atômico:**
+4. **Benchmarks de Orçamento e Escalonamento de RAM (`bench-memory`):**
+   - Ao avaliar diferentes limites de nós ou folhas (ex: 256, 128, 64, 32, 16, 8, 4), gere binários dedicados no `code/Makefile` passando `-DHT_MAX_ACTIVE_LEAVES=<L> -DHT_MAX_NODES=<N>`.
+   - **Jamais modifique `code/include/` ou `code/src/`** para criar limitadores de software em runtime; deixe que o tamanho físico do pool compilado governe o limite e meça o `sizeof(ht_tree_t)` real de cada binário.
+
+5. **Commit Atômico:**
    - Faça commits dedicados para scripts e relatórios de benchmark usando o prefixo `bench: ...`.
