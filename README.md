@@ -187,7 +187,45 @@ Para mapear os limites teóricos e práticos do paradigma VFDT em problemas de v
 
 ---
 
-## 5. Documentação Completa (Wiki, Estudos e Benchmarks)
+## 5. Limitações e Pontos Fracos do Modelo
+
+Embora a implementação ofereça latência sub-microssegundo e opere com determinismo estrito de memória em microcontroladores ($\le 1\text{ MB}$ de RAM com 0,0 KB de heap dinâmico), o modelo e a arquitetura impõem compromissos (*trade-offs*) importantes que devem ser avaliados no dimensionamento da solução:
+
+### 5.1 Limitações Algorítmicas do Paradigma de Streaming (VFDT / Hoeffding Bound)
+- **Atraso Amostral no Crescimento da Árvore (*Sample Inefficiency*):** O critério estatístico do Limite de Hoeffding $\epsilon = \sqrt{\frac{R^2 \ln(1/\delta)}{2n}}$ é rigoroso e conservador. Em datasets pequenos ($< 1.000$ amostras) ou regimes de dados esparsos, o modelo demora centenas de amostras para realizar os primeiros splits, enquanto um algoritmo em lote (CART) já construiria uma árvore profunda imediatamente.
+- **Dificuldade em Atributos Fortemente Concorrentes (*Tie-Breaking* $\tau$):** Quando dois atributos apresentam ganhos de impureza idênticos ($\Delta \bar{G} \approx 0$), o split só ocorre quando $\epsilon < \tau$, o que pode exigir dezenas de milhares de amostras para desempatar, retardando o aprendizado local.
+- **Divisões Estritamente Ortogonais (Eixo-Alinhadas):** As decisões de split particionam o espaço exclusivamente por limiares paralelos aos eixos ($X_f \le \theta$). Para fronteiras diagonais ou funções com rotação linear contínua (ex: $X_1 + X_2 > c$), a árvore necessita de dezenas de nós em padrão de escada para aproximar o que um modelo linear simples resolveria com uma única equação.
+- **Hipótese de Gaussianidade Unimodal para Variáveis Contínuas:** Os observadores numéricos de Welford aproximam cada atributo por $\mathcal{N}(\mu, \sigma^2)$ condicionado à classe. Em distribuições multimodais, fortemente enviesadas ou com caudas pesadas, as sugestões de pontos de corte e as probabilidades do Naive Bayes podem sofrer imprecisão.
+- **Ausência de Poda Retrospectiva (*Post-Pruning*) no VFDT Estático:** Na versão estática (VFDT), decisões de split tomadas no início do fluxo são irrevogáveis (não há *cost-complexity pruning* como no CART). Apenas a variante adaptativa (HAT / HAT-R) possui capacidade de substituição de ramos obsoletos ao detectar drift.
+
+### 5.2 Limitações de Firmware e Dimensionamento Estático em C11
+- **Rigidez em Tempo de Compilação (Zero Dimensionamento Dinâmico em Runtime):** A capacidade máxima de nós (`HT_MAX_NODES`), folhas ativas (`HT_MAX_ACTIVE_LEAVES`), atributos (`HT_MAX_FEATURES`), classes (`HT_MAX_CLASSES`) e categorias nominais (`HT_MAX_CATEGORIES`) é fixada na compilação via macros. Alterar dimensões do problema exige recompilar o firmware.
+- **Degradação de Aprendizado sob Esgotamento do Pool de Folhas:** Em perfis com extrema restrição de RAM (como o Tier 8, limitado a 8 folhas ativas), quando a capacidade é atingida o algoritmo desativa as folhas menos promissoras. Embora preserve as folhas ativas com NBA, folhas inativas não geram novos ramos até que sejam reativadas.
+- **Processamento Single-Core Sequencial:** O núcleo C11 é 100% sequencial, livre de chamadas de threads (`pthread`), primitivas de sincronização (`mutex`) ou alocação dinâmica. Aplicações multi-core embarcadas (ex: RP2040 dual-core ou ESP32) devem isolar instâncias independentes por núcleo.
+- **Sem Pipelines Internos de Pré-Processamento:** O modelo espera que os dados de entrada já estejam normalizados, discretizados (para atributos categóricos) e validados pelo firmware. Não há rotinas embutidas de *One-Hot Encoding*, redução de dimensionalidade (PCA) ou imputação avançada.
+
+### 5.3 Inadequação para Dados Não-Tabulares e Alta Cardinalidade
+- **Incompatibilidade Prática com Imagens, Áudio e Texto (Dados Não-Tabulares):** Conforme demonstrado no benchmark do MNIST, árvores ortogonais não capturam dependências espaciais 2D, e o Naive Bayes das folhas quebra gravemente com pixels vizinhos fortemente correlacionados.
+- **Limite Fixo para Variáveis Categóricas:** A macro `HT_MAX_CATEGORIES` (padrão 8) impede o tratamento direto de variáveis categóricas de alta cardinalidade (ex: CEPs, IDs de dispositivos, hashes).
+
+### 5.4 Precisão de Ponto Flutuante em Fluxos Ultra-Longos
+- **Sensibilidade de Cancelamento em `float32`:** Embora suficiente para microcontroladores com FPU simples, somatórios acumulados de Welford ao longo de centenas de milhões de amostras em `float32` podem acumular erro de arredondamento em casos de variância ínfima somada a médias elevadas ($\sigma^2 \ll \mu^2$).
+
+### 5.5 Matriz de Decisão: Quando Usar vs Quando Evitar
+
+| Cenário / Requisito | Usar Hoeffding Tree C11? | Abordagem Alternativa Recomendada |
+| :--- | :---: | :--- |
+| **Telemetria de Sensores IoT / Dados Tabulares Online** | **SIM (Ideal)** | — |
+| **Ambientes com $\le 1\text{ MB}$ de RAM e Zero Heap (`malloc`)** | **SIM (Ideal)** | — |
+| **Regimes com Mudança de Conceito (*Concept Drift*)** | **SIM (HAT / HAT-R)** | — |
+| **Visão Computacional / Classificação de Imagens** | **NÃO** | CNNs quantizadas em `int8` (ex: TensorFlow Lite Micro) |
+| **Áudio Bruto / Espectrogramas Densos** | **NÃO** | 1D-CNN ou DSCNN (ex: Edge Impulse) |
+| **Processamento de Linguagem Natural / Texto Não-Estruturado** | **NÃO** | Embeddings compactos + Regressores Lineares / TinyTransformers |
+| **Datasets Pequenos em Lote (< 1.000 amostras offline)** | **NÃO** | Scikit-Learn CART / Random Forest offline em Python |
+
+---
+
+## 6. Documentação Completa (Wiki, Estudos e Benchmarks)
 
 Toda a documentação detalhada do projeto está organizada na pasta **[`wiki/`](wiki/Home.md)** (sincronizada com a aba **Wiki** do GitHub), além dos estudos teóricos em `docs/` e relatórios em `benchmarks/`:
 
@@ -204,7 +242,7 @@ Toda a documentação detalhada do projeto está organizada na pasta **[`wiki/`]
 
 ---
 
-## 6. Estrutura do Repositório
+## 7. Estrutura do Repositório
 
 ```text
 pessoal_minimal-decision-tree/
@@ -221,6 +259,6 @@ pessoal_minimal-decision-tree/
 
 ---
 
-## 7. Licença (`BSD 3-Clause`)
+## 8. Licença (`BSD 3-Clause`)
 
 Distribuído sob a licença permissiva **[BSD 3-Clause License](LICENSE)** (`SPDX-License-Identifier: BSD-3-Clause`), permitindo uso livre acadêmico, pessoal ou comercial (em código-fonte ou firmware binário) e preservando integralmente os avisos de direitos autorais dos projetos de referência **River** ([`references/river_tree/LICENSE`](references/river_tree/LICENSE)) e **Scikit-Learn** ([`references/sklearn_tree/COPYING`](references/sklearn_tree/COPYING)).
