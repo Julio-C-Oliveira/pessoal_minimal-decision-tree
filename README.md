@@ -101,7 +101,8 @@ pessoal_minimal-decision-tree/
 │   ├── 03_concept_drift_hat.md
 │   ├── 04_river_mapping.md
 │   ├── 05_sklearn_architecture.md
-│   └── 06_implementation_plan.md # Plano de implementação persistente multi-chat/agente
+│   ├── 06_implementation_plan.md # Plano de implementação persistente multi-chat/agente
+│   └── 07_regression_trees_fimtdd.md # Estudo teórico de regressão incremental (FIMT-DD / HAT-R)
 ├── code/                        # Implementação em C11 e testes (organização limpa do código)
 │   ├── Makefile                 # Build C11 puro (lib, testes, flags float/double)
 │   ├── include/                 # Headers públicos e internos (C11)
