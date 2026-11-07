@@ -68,6 +68,18 @@ typedef float ht_float_t;
 #define HT_GAUSSIAN_SPLITS   10U
 #endif
 
+#ifndef HT_ADWIN_MAX_BUCKETS
+#define HT_ADWIN_MAX_BUCKETS 5U
+#endif
+
+#ifndef HT_ADWIN_LEVELS
+#define HT_ADWIN_LEVELS      14U
+#endif
+
+#ifndef HT_MAX_ADWIN_DETECTORS
+#define HT_MAX_ADWIN_DETECTORS 128U
+#endif
+
 #define HT_INVALID_IDX       ((uint16_t)0xFFFFU)
 #define HT_NO_FEATURE        ((uint8_t)0xFFU)
 

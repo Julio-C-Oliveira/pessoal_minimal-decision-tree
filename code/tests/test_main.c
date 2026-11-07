@@ -24,6 +24,10 @@ static void test_config_constants(void) {
     HT_ASSERT_EQ(HT_MAX_ACTIVE_LEAVES, 256U);
     HT_ASSERT_EQ(HT_GAUSSIAN_SPLITS, 10U);
 
+    HT_ASSERT_EQ(HT_ADWIN_MAX_BUCKETS, 5U);
+    HT_ASSERT_EQ(HT_ADWIN_LEVELS, 14U);
+    HT_ASSERT_EQ(HT_MAX_ADWIN_DETECTORS, 128U);
+
     HT_ASSERT_EQ(HT_INVALID_IDX, 0xFFFFU);
     HT_ASSERT_EQ(HT_NO_FEATURE, 0xFFU);
 
@@ -152,6 +156,9 @@ int main(void) {
 
     /* Nível 1 & 2: Árvore VFDT Completa */
     test_tree_run();
+
+    /* Nível 1 & 2: Detector ADWIN com Histograma Exponencial Fixo */
+    test_drift_run();
 
     /* Nível 3: Fluxo Ponta a Ponta Acumulado */
     test_e2e_flow_run();

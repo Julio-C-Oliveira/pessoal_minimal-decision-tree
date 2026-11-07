@@ -13,6 +13,7 @@
 #include "ht_observer.h"
 #include "ht_criterion.h"
 #include "ht_tree.h"
+#include "ht_drift.h"
 
 static void test_e2e_sample_vector_ingestion(void) {
     ht_value_t x[HT_MAX_FEATURES];
@@ -653,6 +654,66 @@ static void test_e2e_full_tree_prequential_and_serialization(void) {
     }
 }
 
+static void test_e2e_drift_stream_pipeline(void) {
+    ht_adwin_pool_t adwin_pool;
+    HT_ASSERT_EQ(ht_adwin_pool_init(&adwin_pool), HT_OK);
+
+    /* Allocate ADWIN detector from pool */
+    uint16_t det_idx = ht_adwin_pool_alloc(&adwin_pool, NULL);
+    HT_ASSERT_NEQ(det_idx, HT_INVALID_IDX);
+    ht_adwin_t *ad = ht_adwin_pool_get(&adwin_pool, det_idx);
+    HT_ASSERT_NOT_NULL(ad);
+
+    /* Stream with 3 distinct regimes:
+     * Regime 1: 0..499 -> mean ~ 0.0
+     * Regime 2: 500..999 -> mean ~ 5.0 (drift 1)
+     * Regime 3: 1000..1499 -> mean ~ -3.0 (drift 2)
+     */
+    uint32_t total_drifts_r2 = 0;
+    uint32_t total_drifts_r3 = 0;
+    uint32_t lcg = 987654321U;
+
+    for (uint32_t t = 0; t < 1500; ++t) {
+        lcg = lcg * 1664525U + 1013904223U;
+        ht_float_t noise = ((ht_float_t)(lcg & 0xFFFFU) / (ht_float_t)65536.0 - (ht_float_t)0.5) * (ht_float_t)0.4;
+
+        ht_float_t center;
+        if (t < 500) {
+            center = (ht_float_t)0.0;
+        } else if (t < 1000) {
+            center = (ht_float_t)5.0;
+        } else {
+            center = (ht_float_t)-3.0;
+        }
+
+        ht_float_t val = center + noise;
+        bool drift = ht_adwin_update(ad, val);
+
+        if (drift) {
+            if (t >= 500 && t < 1000) {
+                total_drifts_r2++;
+            } else if (t >= 1000) {
+                total_drifts_r3++;
+            }
+        }
+    }
+
+    /* Drift must be detected in regimes 2 and 3 */
+    HT_ASSERT(total_drifts_r2 > 0);
+    HT_ASSERT(total_drifts_r3 > 0);
+
+    /* Final estimation must adapt close to -3.0 */
+    HT_ASSERT_FLOAT_NEAR(ht_adwin_get_estimation(ad), (ht_float_t)-3.0, (ht_float_t)0.3);
+
+    /* Combined memory budget check: ADWIN pool + Tree memory <= 1 MB */
+    size_t adwin_bytes = ht_adwin_pool_bytes_used(&adwin_pool);
+    HT_ASSERT(adwin_bytes <= (256U * 1024U));
+
+    /* Free detector back to pool */
+    HT_ASSERT_EQ(ht_adwin_pool_free(&adwin_pool, det_idx), HT_OK);
+    HT_ASSERT_EQ(adwin_pool.allocated_count, 0U);
+}
+
 void test_e2e_flow_run(void) {
     HT_TEST_SUITE_BEGIN("Nivel 3: Fluxo Ponta a Ponta Acumulado (E2E)");
     HT_RUN_TEST(test_e2e_sample_vector_ingestion);
@@ -661,4 +722,5 @@ void test_e2e_flow_run(void) {
     HT_RUN_TEST(test_e2e_stream_observer_pipeline);
     HT_RUN_TEST(test_e2e_split_decision_pipeline);
     HT_RUN_TEST(test_e2e_full_tree_prequential_and_serialization);
+    HT_RUN_TEST(test_e2e_drift_stream_pipeline);
 }
