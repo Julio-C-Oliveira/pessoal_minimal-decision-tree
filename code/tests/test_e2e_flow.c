@@ -11,6 +11,7 @@
 #include "test_harness.h"
 #include "ht_memory.h"
 #include "ht_observer.h"
+#include "ht_criterion.h"
 
 static void test_e2e_sample_vector_ingestion(void) {
     ht_value_t x[HT_MAX_FEATURES];
@@ -417,10 +418,140 @@ static void test_e2e_stream_observer_pipeline(void) {
     HT_ASSERT_EQ(ht_memory_bytes_used(&s_e2e_pool), 0);
 }
 
+static void test_e2e_split_decision_pipeline(void) {
+    /* 1. Initialize standalone memory pool */
+    static ht_memory_pool_t pool;
+    ht_memory_init(&pool);
+
+    /* 2. Allocate root leaf node and associated stats */
+    uint16_t root_idx = ht_node_alloc(&pool);
+    HT_ASSERT_NEQ(root_idx, HT_INVALID_IDX);
+    ht_node_t *root = &pool.node_pool[root_idx];
+
+    uint16_t stats_idx = ht_stats_alloc(&pool);
+    HT_ASSERT_NEQ(stats_idx, HT_INVALID_IDX);
+    root->stats_idx = stats_idx;
+    ht_leaf_stats_t *stats = &pool.stats_pool[stats_idx];
+
+    /* 3. Configure mixed schema: 4 features
+     * Feature 0: Numeric, discriminatory (class 0 in [1..4], class 1 in [6..9])
+     * Feature 1: Numeric, noise (both classes uniformly spread in [0..10])
+     * Feature 2: Categorical, discriminatory (class 0 has cat 0, class 1 has cat 1)
+     * Feature 3: Categorical, noise (both classes in cat 0..3)
+     */
+    const uint8_t n_features = 4;
+    const uint8_t n_classes = 2;
+    ht_feature_type_t types[HT_MAX_FEATURES];
+    types[0] = HT_FEAT_NUMERIC;
+    types[1] = HT_FEAT_NUMERIC;
+    types[2] = HT_FEAT_CATEGORICAL;
+    types[3] = HT_FEAT_CATEGORICAL;
+
+    /* 4. Stream 400 synthetic samples (200 of Class 0, 200 of Class 1) */
+    for (int i = 0; i < 200; i++) {
+        /* Sample for Class 0 */
+        ht_value_t x0[HT_MAX_FEATURES];
+        x0[0].num = (ht_float_t)(1.0 + (i % 30) * 0.1); /* [1.0 .. 3.9] */
+        x0[1].num = (ht_float_t)((i % 50) * 0.2);        /* [0.0 .. 9.8] noise */
+        x0[2].cat = 0;                                   /* Category 0 */
+        x0[3].cat = (int32_t)(i % 4);                    /* Category noise */
+
+        root->class_counts[0] += (ht_float_t)1.0;
+        ht_gaussian_update(stats->observers[0].num, 0, x0[0].num, (ht_float_t)1.0);
+        ht_gaussian_update(stats->observers[1].num, 0, x0[1].num, (ht_float_t)1.0);
+        ht_categorical_update(&stats->observers[2].cat, 0, x0[2].cat, (ht_float_t)1.0);
+        ht_categorical_update(&stats->observers[3].cat, 0, x0[3].cat, (ht_float_t)1.0);
+
+        /* Sample for Class 1 */
+        ht_value_t x1[HT_MAX_FEATURES];
+        x1[0].num = (ht_float_t)(6.0 + (i % 30) * 0.1); /* [6.0 .. 8.9] */
+        x1[1].num = (ht_float_t)((i % 50) * 0.2);        /* [0.0 .. 9.8] noise */
+        x1[2].cat = 1;                                   /* Category 1 */
+        x1[3].cat = (int32_t)(i % 4);                    /* Category noise */
+
+        root->class_counts[1] += (ht_float_t)1.0;
+        ht_gaussian_update(stats->observers[0].num, 1, x1[0].num, (ht_float_t)1.0);
+        ht_gaussian_update(stats->observers[1].num, 1, x1[1].num, (ht_float_t)1.0);
+        ht_categorical_update(&stats->observers[2].cat, 1, x1[2].cat, (ht_float_t)1.0);
+        ht_categorical_update(&stats->observers[3].cat, 1, x1[3].cat, (ht_float_t)1.0);
+    }
+
+    HT_ASSERT_FLOAT_EQ(root->class_counts[0], (ht_float_t)200.0);
+    HT_ASSERT_FLOAT_EQ(root->class_counts[1], (ht_float_t)200.0);
+    ht_float_t total_weight = root->class_counts[0] + root->class_counts[1]; /* 400.0 */
+
+    /* 5. Evaluate split using Gini criterion */
+    const ht_criterion_vtable_t *crit = ht_criterion_get_vtable(HT_CRIT_GINI);
+    HT_ASSERT_NOT_NULL(crit);
+
+    ht_split_candidate_t best, second_best;
+    ht_find_best_split_candidates(stats, root->class_counts, types,
+                                  n_features, n_classes, crit,
+                                  (ht_float_t)0.01, true, &best, &second_best);
+
+    /* 6. Verify top candidates: either Feature 0 or Feature 2 */
+    HT_ASSERT_FLOAT_NEAR(best.merit, (ht_float_t)1.0, 1e-4);
+    HT_ASSERT(best.feature_idx == 0 || best.feature_idx == 2);
+
+    /* 7. Compute Hoeffding bound for delta = 1e-7 and total_weight = 400.0 */
+    ht_float_t r = crit->range_of_merit(root->class_counts, n_classes);
+    ht_float_t delta = (ht_float_t)1e-7;
+    ht_float_t tau = (ht_float_t)0.05;
+    ht_float_t eps = ht_hoeffding_bound(r, delta, total_weight);
+    HT_ASSERT_FLOAT_NEAR(eps, (ht_float_t)0.141942, 1e-3);
+
+    /* 8. Split decision with tau */
+    HT_ASSERT(ht_should_split(&best, &second_best, (ht_float_t)0.0, tau));
+
+    /* 9. Execute split: allocate left and right children in the pool */
+    uint16_t left_child = ht_node_alloc(&pool);
+    uint16_t right_child = ht_node_alloc(&pool);
+    HT_ASSERT_NEQ(left_child, HT_INVALID_IDX);
+    HT_ASSERT_NEQ(right_child, HT_INVALID_IDX);
+
+    /* Structural conversion of root from leaf to internal branch */
+    root->left_child = left_child;
+    root->right_child = right_child;
+    root->feature_idx = best.feature_idx;
+    root->flags &= ~HT_NODE_IS_LEAF;
+    if (best.is_categorical) {
+        root->split_val.cat_val = best.split_val.cat_val;
+        root->flags |= HT_NODE_SPLIT_CAT;
+    } else {
+        root->split_val.threshold = best.split_val.threshold;
+    }
+
+    /* Initialize child nodes with branch distributions */
+    ht_node_t *left = &pool.node_pool[left_child];
+    ht_node_t *right = &pool.node_pool[right_child];
+    for (uint8_t c = 0; c < n_classes; c++) {
+        left->class_counts[c] = best.lhs_dist[c];
+        right->class_counts[c] = best.rhs_dist[c];
+    }
+
+    /* 10. IMMEDIATE STATS RECYCLING (Core VFDT rule): return leaf stats to pool */
+    ht_stats_free(&pool, root->stats_idx);
+    root->stats_idx = HT_INVALID_IDX;
+
+    /* Verify memory usage: exactly 3 nodes allocated, 0 stats blocks allocated */
+    HT_ASSERT_EQ(ht_node_count(&pool), 3);
+    HT_ASSERT_EQ(ht_stats_count(&pool), 0);
+    HT_ASSERT_EQ(ht_memory_bytes_used(&pool), 3 * sizeof(ht_node_t));
+
+    /* 11. Cleanup all nodes */
+    ht_node_free(&pool, left_child);
+    ht_node_free(&pool, right_child);
+    ht_node_free(&pool, root_idx);
+
+    HT_ASSERT_EQ(ht_node_count(&pool), 0);
+    HT_ASSERT_EQ(ht_memory_bytes_used(&pool), 0);
+}
+
 void test_e2e_flow_run(void) {
     HT_TEST_SUITE_BEGIN("Nivel 3: Fluxo Ponta a Ponta Acumulado (E2E)");
     HT_RUN_TEST(test_e2e_sample_vector_ingestion);
     HT_RUN_TEST(test_e2e_math_numerical_pipeline);
     HT_RUN_TEST(test_e2e_memory_split_simulation);
     HT_RUN_TEST(test_e2e_stream_observer_pipeline);
+    HT_RUN_TEST(test_e2e_split_decision_pipeline);
 }

@@ -160,6 +160,7 @@ extern bool g_current_test_failed;
 void test_config_run(void);
 void test_memory_run(void);
 void test_observer_run(void);
+void test_criterion_run(void);
 void test_e2e_flow_run(void);
 
 #endif /* TEST_HARNESS_H */
