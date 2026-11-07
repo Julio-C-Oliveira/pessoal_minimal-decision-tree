@@ -90,7 +90,7 @@ Considere um problema com $F = 16$ atributos numéricos, $C = 4$ classes e `floa
 ```text
 pessoal_minimal-decision-tree/
 ├── README.md
-├── Makefile                     # Build C11 puro (lib, testes, benchmarks, flags float/double)
+├── Makefile                     # Root Makefile (repassa comandos para code/)
 ├── references/                  # Materiais de referência (Artigos + Código fonte de base)
 │   ├── papers/                  # PDFs dos artigos originais (VFDT, Hoeffding, Bifet, HAT)
 │   ├── river_tree/              # Código extraído de online-ml/river (river/tree + river/drift)
@@ -102,28 +102,30 @@ pessoal_minimal-decision-tree/
 │   ├── 04_river_mapping.md
 │   ├── 05_sklearn_architecture.md
 │   └── 06_implementation_plan.md # Plano de implementação persistente multi-chat/agente
-├── include/                     # Headers públicos e internos (C11)
-│   ├── ht_config.h              # Tipos (ht_float_t, ht_value_t), limites e constantes
-│   ├── ht_memory.h              # Slab/Pool allocator determinístico baseado em índices uint16_t
-│   ├── ht_observer.h            # Observadores Gaussianos (Welford) e Categóricos
-│   ├── ht_criterion.h           # Vtable e implementações de Gini Impurity, Info Gain e Hoeffding Bound
-│   ├── ht_tree.h                # API da VFDT (init, predict, learn_one, serialize/deserialize)
-│   └── ht_drift.h               # Fase 3: ADWIN com buckets fixos e HAT
-├── src/                         # Implementação em C11 (zero dependências além de math.h/stdint.h)
-│   ├── ht_memory.c
-│   ├── ht_observer.c
-│   ├── ht_criterion.c
-│   ├── ht_tree.c
-│   └── ht_drift.c
-├── tests/                       # Suíte modular de testes em C (função -> integração -> fluxo total)
-│   ├── test_harness.h           # Macros de asserção sem dependências (tolerância adaptativa float/double)
-│   ├── test_memory.c            # Testes de unidade, stress e reciclagem do ht_memory
-│   ├── test_observer.c          # Testes do Welford Gaussiano, PDF/CDF e observador categórico
-│   ├── test_criterion.c         # Testes de Gini, Info Gain, Hoeffding Bound e busca de split
-│   ├── test_tree.c              # Testes de roteamento, folhas MC/NB/NBA, splits, desativação e dump
-│   ├── test_drift.c             # Testes de ADWIN estático e subárvores alternativas (HAT)
-│   ├── test_e2e_flow.c          # Testes do fluxo completo ponta a ponta acumulado
-│   └── test_main.c              # Runner principal que orquestra todas as suítes
+├── code/                        # Implementação em C11 e testes (organização limpa do código)
+│   ├── Makefile                 # Build C11 puro (lib, testes, flags float/double)
+│   ├── include/                 # Headers públicos e internos (C11)
+│   │   ├── ht_config.h          # Tipos (ht_float_t, ht_value_t), limites e constantes
+│   │   ├── ht_memory.h          # Slab/Pool allocator determinístico baseado em índices uint16_t
+│   │   ├── ht_observer.h        # Observadores Gaussianos (Welford) e Categóricos
+│   │   ├── ht_criterion.h       # Vtable e implementações de Gini Impurity, Info Gain e Hoeffding Bound
+│   │   ├── ht_tree.h            # API da VFDT (init, predict, learn_one, serialize/deserialize)
+│   │   └── ht_drift.h           # Fase 3: ADWIN com buckets fixos e HAT
+│   ├── src/                     # Implementação em C11 (zero dependências além de math.h/stdint.h)
+│   │   ├── ht_memory.c
+│   │   ├── ht_observer.c
+│   │   ├── ht_criterion.c
+│   │   ├── ht_tree.c
+│   │   └── ht_drift.c
+│   └── tests/                   # Suíte modular de testes em C (função -> integração -> fluxo total)
+│       ├── test_harness.h       # Macros de asserção sem dependências (tolerância adaptativa float/double)
+│       ├── test_memory.c        # Testes de unidade, stress e reciclagem do ht_memory
+│       ├── test_observer.c      # Testes do Welford Gaussiano, PDF/CDF e observador categórico
+│       ├── test_criterion.c     # Testes de Gini, Info Gain, Hoeffding Bound e busca de split
+│       ├── test_tree.c          # Testes de roteamento, folhas MC/NB/NBA, splits, desativação e dump
+│       ├── test_drift.c         # Testes de ADWIN estático e subárvores alternativas (HAT)
+│       ├── test_e2e_flow.c      # Testes do fluxo completo ponta a ponta acumulado
+│       └── test_main.c          # Runner principal que orquestra todas as suítes
 └── benchmarks/                  # Comparação prequential (C vs River em Python)
     ├── generate_streams.py      # Gera datasets sintéticos (SEA, Agrawal, Hyperplane, LED)
     ├── compare_river.py         # Compara Acurácia Prequential, Tempo e Memória (River vs C)
@@ -150,18 +152,18 @@ pessoal_minimal-decision-tree/
   - [x] [`_criterion.pxd`](file:///home/julio/Documentos/pessoal_minimal-decision-tree/references/sklearn_tree/_criterion.pxd) / [`_criterion.pyx`](file:///home/julio/Documentos/pessoal_minimal-decision-tree/references/sklearn_tree/_criterion.pyx) (Design modular dos critérios de impureza e avaliação incremental de partições).
   - [x] [`_splitter.pxd`](file:///home/julio/Documentos/pessoal_minimal-decision-tree/references/sklearn_tree/_splitter.pxd) / [`_splitter.pyx`](file:///home/julio/Documentos/pessoal_minimal-decision-tree/references/sklearn_tree/_splitter.pyx) (Registro `SplitRecord` para retorno de candidatos a ponto de corte).
 
-### Fase 1: Núcleo VFDT em C11 + Gestão de Memória (`<= 1MB`) + Testes Progressivos (`tests/`)
+### Fase 1: Núcleo VFDT em C11 + Gestão de Memória (`<= 1MB`) + Testes Progressivos (`code/tests/`)
 > **Protocolo de Testes em 3 Níveis:** Cada módulo implementado abaixo deve vir imediatamente acompanhado de seus testes de **Nível 1 (Função/Unidade)**, **Nível 2 (Integração com camadas anteriores)** e **Nível 3 (Fluxo Total Acumulado em `test_e2e_flow.c`)**, validados em `float` e `double` antes de avançar ao próximo item.
 
-- [x] Configurar `Makefile`, `ht_config.h` e `tests/test_harness.h` (suporte a `float`/`double`, `ht_value_t`, `stdint.h`, compilação limpa com `-Wall -Wextra -Werror -std=c11`).
-- [ ] Implementar `ht_memory` + `tests/test_memory.c`: Pool/Slab allocator estático baseado em índices `uint16_t` para `ht_node_t` e `ht_leaf_stats_t` (zero `malloc` em runtime, medição exata de bytes usados, stress test de reciclagem).
-- [ ] Implementar `ht_observer` + `tests/test_observer.c`:
+- [x] Configurar `Makefile`, `code/include/ht_config.h` e `code/tests/test_harness.h` (suporte a `float`/`double`, `ht_value_t`, `stdint.h`, compilação limpa com `-Wall -Wextra -Werror -std=c11`).
+- [ ] Implementar `ht_memory` + `code/tests/test_memory.c`: Pool/Slab allocator estático baseado em índices `uint16_t` para `ht_node_t` e `ht_leaf_stats_t` (zero `malloc` em runtime, medição exata de bytes usados, stress test de reciclagem).
+- [ ] Implementar `ht_observer` + `code/tests/test_observer.c`:
   - [ ] Observador numérico Gaussiano incremental (Welford) + avaliação de $k$ thresholds candidatos usando PDF/CDF normal.
   - [ ] Observador categórico nominal com busca do melhor split binário ($x_i == c$ vs $x_i \neq c$).
-- [ ] Implementar `ht_criterion` + `tests/test_criterion.c`:
+- [ ] Implementar `ht_criterion` + `code/tests/test_criterion.c`:
   - [ ] Vtable (`ht_criterion_vtable_t`) + implementações de *Gini Impurity* e *Information Gain (Entropia)*.
   - [ ] Cálculo do *Hoeffding Bound* ($\epsilon$) e verificação de split ($\Delta G > \epsilon$ ou $\epsilon < \tau$) integrado aos observadores.
-- [ ] Implementar `ht_tree` (VFDT) + `tests/test_tree.c` + `tests/test_e2e_flow.c`:
+- [ ] Implementar `ht_tree` (VFDT) + `code/tests/test_tree.c` + `code/tests/test_e2e_flow.c`:
   - [ ] Roteamento de amostras da raiz até a folha (incluindo fallback para filho mais populoso em caso de `NaN`).
   - [ ] Predição nas folhas via *Majority Class* (MC), *Naive Bayes* (NB) e *Naive Bayes Adaptive* (NBA).
   - [ ] Ciclo `learn_one`: atualização de estatísticas, checagem a cada `grace_period`, execução de split e reciclagem do `ht_leaf_stats_t`.

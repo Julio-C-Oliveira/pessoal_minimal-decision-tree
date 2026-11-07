@@ -18,14 +18,14 @@ Este repositório desenvolve uma **Hoeffding Tree (VFDT / HAT)** ultraleve em **
 ## 2. Regra de Commits Atômicos (Git)
 
 - **Um Conceito Lógico por Commit:** Nunca misture mudanças de naturezas distintas no mesmo commit (ex: não misture notas teóricas em `docs/`, adição de referências em `references/`, configuração de agentes em `.agents/` e implementação em `src/`).
-- **Estado Sempre Verde:** Todo commit que toque em `include/`, `src/` ou `tests/` deve compilar sem warnings e passar em todos os testes unitários (tanto em `float` quanto em `double`).
+- **Estado Sempre Verde:** Todo commit que toque em `code/include/`, `code/src/` ou `code/tests/` deve compilar sem warnings e passar em todos os testes unitários (tanto em `float` quanto em `double`).
 - **Mensagens Padronizadas (Conventional Commits):**
   - `docs:` criação/atualização de documentação em `docs/` ou `README.md`
-  - `feat(<escopo>):` nova funcionalidade em C (`memory`, `observer`, `criterion`, `tree`, `drift`)
+  - `feat(<escopo>):` nova funcionalidade em C (`memory`, `observer`, `criterion`, `tree`, `drift` em `code/`)
   - `fix(<escopo>):` correção de bug ou precisão numérica
-  - `test(<escopo>):` adição ou ajuste de testes unitários em `tests/`
+  - `test(<escopo>):` adição ou ajuste de testes unitários em `code/tests/`
   - `bench:` scripts e executáveis de validação/benchmark em `benchmarks/`
-  - `chore:` build (`Makefile`), materiais de referência (`references/`) ou configuração de agentes (`AGENTS.md`, `.agents/`)
+  - `chore:` build (`Makefile`, `code/Makefile`), materiais de referência (`references/`) ou configuração de agentes (`AGENTS.md`, `.agents/`)
 
 ## 3. Uso de Contexto, Referências e Subagentes
 
@@ -44,5 +44,5 @@ Este repositório desenvolve uma **Hoeffding Tree (VFDT / HAT)** ultraleve em **
 Ative a skill correspondente antes de iniciar cada tipo de tarefa:
 - **`study-reference`**: Para estudar os papers e mapear algoritmos do River / estruturas do Scikit-Learn em `docs/`.
 - **`implementation-plan`**: Para criar, consultar ou atualizar o plano de implementação persistente em [`docs/06_implementation_plan.md`](docs/06_implementation_plan.md) entre diferentes chats e agentes.
-- **`embedded-c-tree`**: Para implementar, revisar ou otimizar módulos em `include/`, `src/` e `tests/` respeitando o orçamento de 1 MB e o protocolo de testes em 3 níveis.
+- **`embedded-c-tree`**: Para implementar, revisar ou otimizar módulos em `code/include/`, `code/src/` e `code/tests/` respeitando o orçamento de 1 MB e o protocolo de testes em 3 níveis.
 - **`river-parity-benchmark`**: Para validar acurácia *prequential*, número de splits e consumo de RAM em `benchmarks/` contra o River.

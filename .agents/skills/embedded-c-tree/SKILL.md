@@ -7,7 +7,7 @@ description: >-
 
 # Embedded C11 Decision Tree Skill (`embedded-c-tree`)
 
-Esta skill define o protocolo de engenharia para desenvolver e validar os módulos em C11 (`include/`, `src/`, `tests/`) garantindo o limite rígido de **$\le 1\text{ MB}$ de RAM**, compatibilidade com microcontroladores e cobertura progressiva de testes desde o nível de função individual até o fluxo total ponta a ponta.
+Esta skill define o protocolo de engenharia para desenvolver e validar os módulos em C11 (`code/include/`, `code/src/`, `code/tests/`) garantindo o limite rígido de **$\le 1\text{ MB}$ de RAM**, compatibilidade com microcontroladores e cobertura progressiva de testes desde o nível de função individual até o fluxo total ponta a ponta.
 
 > **Consulta Rápida ao Plano Persistente e às Referências (River & Scikit-Learn):**
 > - **Plano de Implementação Multi-Chat:** Consulte sempre [`docs/06_implementation_plan.md`](../../../docs/06_implementation_plan.md) antes de iniciar uma entrega para seguir os contratos exatos de structs, funções e testes planejados.
@@ -46,18 +46,18 @@ Esta skill define o protocolo de engenharia para desenvolver e validar os módul
 **Regra Inviolável ("Implementou $\rightarrow$ Testou em Todas as Camadas"):**
 Nenhuma parte ou módulo em `src/` é considerado concluído sem que seus testes correspondentes sejam gerados e executados imediatamente após a implementação. **Nunca avance para a implementação do próximo módulo antes de validar a parte atual nos 3 níveis abaixo.**
 
-### Arquitetura Modular da Suíte em `tests/`
+### Arquitetura Modular da Suíte em `code/tests/`
 
-A pasta `tests/` deve ser organizada de forma modular, com um cabeçalho de asserções e arquivos dedicados por camada orquestrados por `test_main.c`:
+A pasta `code/tests/` deve ser organizada de forma modular, com um cabeçalho de asserções e arquivos dedicados por camada orquestrados por `test_main.c`:
 
-- `tests/test_harness.h`: Macros leves de asserção sem dependências externas (`HT_ASSERT(cond)`, `HT_ASSERT_EQ(a, b)`, `HT_ASSERT_FLOAT_EQ(a, b)` com tolerância adaptativa `1e-5f` para `float` e `1e-12` para `double`) e contadores de testes executados/aprovados.
-- `tests/test_memory.c`: Testes unitários, de stress e reciclagem do `ht_memory`.
-- `tests/test_observer.c`: Testes das funções de atualização e busca de split em `ht_observer` (Gaussiano de Welford e Categórico).
-- `tests/test_criterion.c`: Testes de Gini, Info Gain, Hoeffding Bound e integração com observadores.
-- `tests/test_tree.c`: Testes de roteamento, folhas (MC, NB, NBA), ciclo `learn_one`, splits, desativação de folhas e serialização.
-- `tests/test_drift.c`: Testes de ADWIN com pool de buckets fixos e subárvores alternativas da HAT.
-- `tests/test_e2e_flow.c`: Testes do **fluxo total acumulado** (pipeline ponta a ponta integrando todos os módulos implementados até o momento).
-- `tests/test_main.c`: Ponto de entrada único que executa sequencialmente todas as suítes de nível 1, 2 e 3 disponíveis e retorna código `0` apenas se 100% passarem.
+- `code/tests/test_harness.h`: Macros leves de asserção sem dependências externas (`HT_ASSERT(cond)`, `HT_ASSERT_EQ(a, b)`, `HT_ASSERT_FLOAT_EQ(a, b)` com tolerância adaptativa `1e-5f` para `float` e `1e-12` para `double`) e contadores de testes executados/aprovados.
+- `code/tests/test_memory.c`: Testes unitários, de stress e reciclagem do `ht_memory`.
+- `code/tests/test_observer.c`: Testes das funções de atualização e busca de split em `ht_observer` (Gaussiano de Welford e Categórico).
+- `code/tests/test_criterion.c`: Testes de Gini, Info Gain, Hoeffding Bound e integração com observadores.
+- `code/tests/test_tree.c`: Testes de roteamento, folhas (MC, NB, NBA), ciclo `learn_one`, splits, desativação de folhas e serialização.
+- `code/tests/test_drift.c`: Testes de ADWIN com pool de buckets fixos e subárvores alternativas da HAT.
+- `code/tests/test_e2e_flow.c`: Testes do **fluxo total acumulado** (pipeline ponta a ponta integrando todos os módulos implementados até o momento).
+- `code/tests/test_main.c`: Ponto de entrada único que executa sequencialmente todas as suítes de nível 1, 2 e 3 disponíveis e retorna código `0` apenas se 100% passarem.
 
 ### Os 3 Níveis Obrigatórios de Teste a Cada Entrega
 
