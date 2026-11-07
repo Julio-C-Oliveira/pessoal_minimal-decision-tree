@@ -586,3 +586,82 @@ void ht_hat_combine_leaf_predictions(const ht_float_t *leaf_probas,
         }
     }
 }
+
+bool ht_hat_check_reg_error_drift(ht_adwin_t *adwin,
+                                  ht_float_t *mean_error,
+                                  ht_float_t *error_m2,
+                                  uint32_t *error_count,
+                                  ht_float_t abs_error) {
+    if (adwin == NULL || mean_error == NULL || error_m2 == NULL || error_count == NULL) {
+        return false;
+    }
+
+    ht_float_t old_error = *mean_error;
+
+    bool error_change = ht_adwin_update(adwin, abs_error);
+
+    /* Update Welford accumulators for absolute error */
+    (*error_count)++;
+    uint32_t n = *error_count;
+    ht_float_t delta = abs_error - *mean_error;
+    *mean_error += delta / (ht_float_t)n;
+    ht_float_t delta2 = abs_error - *mean_error;
+    *error_m2 += delta * delta2;
+
+    /* Unilateral error filter: if error is decreasing or unchanged, filter out change */
+    if (error_change && (*mean_error <= old_error)) {
+        /* Reset error estimator */
+        *mean_error = (ht_float_t)0.0;
+        *error_m2 = (ht_float_t)0.0;
+        *error_count = 0U;
+        return false;
+    }
+
+    if (error_change) {
+        /* Genuine drift: reset error estimator and signal drift */
+        *mean_error = (ht_float_t)0.0;
+        *error_m2 = (ht_float_t)0.0;
+        *error_count = 0U;
+        return true;
+    }
+
+    return false;
+}
+
+ht_hat_action_t ht_hat_evaluate_reg_alternate(ht_float_t e_old,
+                                              ht_float_t var_old,
+                                              uint32_t n_old,
+                                              ht_float_t e_alt,
+                                              ht_float_t var_alt,
+                                              uint32_t n_alt,
+                                              uint32_t min_obs,
+                                              ht_float_t alpha) {
+    if (n_old <= min_obs || n_alt <= min_obs) {
+        return HT_HAT_ACTION_NONE;
+    }
+
+    ht_float_t se2 = (var_alt / (ht_float_t)n_alt) + (var_old / (ht_float_t)n_old);
+    ht_float_t diff = e_alt - e_old;
+    ht_float_t p_value;
+
+    if (se2 <= (ht_float_t)0.0) {
+        if (diff == (ht_float_t)0.0) {
+            return HT_HAT_ACTION_NONE;
+        }
+        p_value = (ht_float_t)0.0;
+    } else {
+        ht_float_t z = diff / HT_SQRT(se2);
+        ht_float_t abs_z = HT_FABS(z);
+        p_value = HT_ERFC(abs_z / HT_SQRT2);
+    }
+
+    if (p_value <= alpha) {
+        if (e_alt < e_old) {
+            return HT_HAT_ACTION_SWITCH;
+        } else {
+            return HT_HAT_ACTION_PRUNE;
+        }
+    }
+
+    return HT_HAT_ACTION_NONE;
+}

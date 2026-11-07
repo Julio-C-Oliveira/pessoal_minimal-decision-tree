@@ -568,6 +568,335 @@ static void test_tree_serialization_roundtrip_full_and_inference(void) {
 }
 
 /* ========================================================================= */
+/* --- Milestone 4.4: Regression Trees (VFDT-R & HAT-R) Tests -------------- */
+/* ========================================================================= */
+
+static void test_tree_reg_default_params_and_init(void) {
+    ht_config_params_t params;
+    ht_default_reg_params(&params, 4);
+
+    HT_ASSERT_EQ(params.task_type, HT_TASK_REGRESSION);
+    HT_ASSERT_EQ(params.n_features, 4U);
+    HT_ASSERT_EQ(params.n_classes, 1U);
+    HT_ASSERT_EQ(params.criterion, HT_CRIT_VARIANCE_REDUCTION);
+    HT_ASSERT_EQ(params.leaf_prediction, HT_LEAF_ADAPTIVE);
+    HT_ASSERT_EQ(params.grace_period, 200U);
+    HT_ASSERT_FLOAT_NEAR(params.delta, (ht_float_t)1e-7, (ht_float_t)1e-12);
+    HT_ASSERT_FLOAT_NEAR(params.tau, (ht_float_t)0.05, (ht_float_t)1e-6);
+    HT_ASSERT_FLOAT_NEAR(params.learning_rate, (ht_float_t)0.01, (ht_float_t)1e-6);
+    HT_ASSERT_FLOAT_NEAR(params.l2_regularization, (ht_float_t)1e-4, (ht_float_t)1e-8);
+    HT_ASSERT_FLOAT_NEAR(params.model_selector_decay, (ht_float_t)0.95, (ht_float_t)1e-6);
+    HT_ASSERT_FLOAT_NEAR(params.min_samples_split, (ht_float_t)5.0, (ht_float_t)1e-6);
+    HT_ASSERT(!params.enable_hat);
+
+    ht_config_params_t hat_params;
+    ht_default_hat_reg_params(&hat_params, 4);
+    HT_ASSERT(hat_params.enable_hat);
+    HT_ASSERT(hat_params.bootstrap_sampling);
+
+    /* Init tree */
+    ht_tree_t tree;
+    HT_ASSERT_EQ(ht_tree_init(&tree, &params), HT_OK);
+    HT_ASSERT_EQ(tree.root_idx, 0U);
+    HT_ASSERT_EQ(tree.n_active_leaves, 1U);
+    HT_ASSERT_EQ(tree.n_decision_nodes, 0U);
+    HT_ASSERT_FLOAT_EQ(tree.memory.node_pool[0].reg_stats.count, (ht_float_t)0.0);
+    HT_ASSERT_FLOAT_EQ(tree.memory.node_pool[0].reg_stats.mean, (ht_float_t)0.0);
+    HT_ASSERT_FLOAT_EQ(tree.memory.node_pool[0].reg_stats.m2, (ht_float_t)0.0);
+}
+
+static void test_tree_reg_predict_leaf_mean(void) {
+    ht_config_params_t params;
+    ht_default_reg_params(&params, 2);
+    params.leaf_prediction = HT_LEAF_MEAN;
+
+    ht_tree_t tree;
+    HT_ASSERT_EQ(ht_tree_init(&tree, &params), HT_OK);
+
+    ht_value_t x[HT_MAX_FEATURES];
+    memset(x, 0, sizeof(x));
+
+    /* Empty tree prediction is 0.0 */
+    HT_ASSERT_FLOAT_EQ(ht_tree_predict_reg(&tree, x), (ht_float_t)0.0);
+
+    /* Feed 3 samples: y = 10, 20, 30 */
+    x[0].num = (ht_float_t)1.0;
+    HT_ASSERT_EQ(ht_tree_learn_one_reg(&tree, x, (ht_float_t)10.0, (ht_float_t)1.0), HT_OK);
+    HT_ASSERT_FLOAT_NEAR(ht_tree_predict_reg(&tree, x), (ht_float_t)10.0, (ht_float_t)1e-5);
+
+    HT_ASSERT_EQ(ht_tree_learn_one_reg(&tree, x, (ht_float_t)20.0, (ht_float_t)1.0), HT_OK);
+    HT_ASSERT_FLOAT_NEAR(ht_tree_predict_reg(&tree, x), (ht_float_t)15.0, (ht_float_t)1e-5);
+
+    HT_ASSERT_EQ(ht_tree_learn_one_reg(&tree, x, (ht_float_t)30.0, (ht_float_t)1.0), HT_OK);
+    HT_ASSERT_FLOAT_NEAR(ht_tree_predict_reg(&tree, x), (ht_float_t)20.0, (ht_float_t)1e-5);
+
+    /* Deactivate leaf: prediction remains target mean (20.0) */
+    HT_ASSERT_EQ(ht_tree_deactivate_leaf(&tree, tree.root_idx), HT_OK);
+    HT_ASSERT_FLOAT_NEAR(ht_tree_predict_reg(&tree, x), (ht_float_t)20.0, (ht_float_t)1e-5);
+}
+
+static void test_tree_reg_predict_leaf_model_sgd_and_clipping(void) {
+    ht_config_params_t params;
+    ht_default_reg_params(&params, 2);
+    params.leaf_prediction = HT_LEAF_MODEL;
+    params.learning_rate = (ht_float_t)0.05;
+    params.l2_regularization = (ht_float_t)1e-4;
+    params.grace_period = 1000U; /* Retain leaf without splitting during SGD tests */
+
+    ht_tree_t tree;
+    HT_ASSERT_EQ(ht_tree_init(&tree, &params), HT_OK);
+
+    ht_value_t x[HT_MAX_FEATURES];
+    memset(x, 0, sizeof(x));
+
+    /* Train on linear target y = 3.0 * x_0 + 2.0 */
+    for (int i = 0; i < 300; ++i) {
+        ht_float_t x_val = (ht_float_t)(i % 10) * (ht_float_t)0.5;
+        ht_float_t y_val = (ht_float_t)3.0 * x_val + (ht_float_t)2.0;
+        x[0].num = x_val;
+        HT_ASSERT_EQ(ht_tree_learn_one_reg(&tree, x, y_val, (ht_float_t)1.0), HT_OK);
+    }
+
+    /* Test linear model prediction on unseen points */
+    x[0].num = (ht_float_t)2.0; /* Expected ~ 8.0 */
+    ht_float_t pred = ht_tree_predict_reg(&tree, x);
+    HT_ASSERT_FLOAT_NEAR(pred, (ht_float_t)8.0, (ht_float_t)1.0);
+
+    /* Test gradient clipping with extreme values */
+    x[0].num = (ht_float_t)1e8;
+    HT_ASSERT_EQ(ht_tree_learn_one_reg(&tree, x, (ht_float_t)1e14, (ht_float_t)1.0), HT_OK);
+    uint16_t s_idx = tree.memory.node_pool[tree.root_idx].stats_idx;
+    HT_ASSERT(tree.memory.stats_pool[s_idx].reg_weights[0] <= (ht_float_t)1e12);
+    HT_ASSERT(tree.memory.stats_pool[s_idx].reg_weights[0] >= (ht_float_t)-1e12);
+    HT_ASSERT(tree.memory.stats_pool[s_idx].reg_intercept <= (ht_float_t)1e12);
+    HT_ASSERT(tree.memory.stats_pool[s_idx].reg_intercept >= (ht_float_t)-1e12);
+}
+
+static void test_tree_reg_predict_leaf_adaptive_fmse(void) {
+    ht_config_params_t params;
+    ht_default_reg_params(&params, 2);
+    params.leaf_prediction = HT_LEAF_ADAPTIVE;
+    params.model_selector_decay = (ht_float_t)0.95;
+    params.grace_period = 1000U; /* Retain leaf without splitting during adaptive selector tests */
+
+    ht_tree_t tree;
+    HT_ASSERT_EQ(ht_tree_init(&tree, &params), HT_OK);
+
+    ht_value_t x[HT_MAX_FEATURES];
+    memset(x, 0, sizeof(x));
+
+    /* 1. Feed strong linear relationship y = 5.0 * x_0 */
+    for (int i = 0; i < 200; ++i) {
+        ht_float_t x_val = (ht_float_t)(i % 5);
+        ht_float_t y_val = (ht_float_t)5.0 * x_val;
+        x[0].num = x_val;
+        HT_ASSERT_EQ(ht_tree_learn_one_reg(&tree, x, y_val, (ht_float_t)1.0), HT_OK);
+    }
+
+    uint16_t s_idx = tree.memory.node_pool[tree.root_idx].stats_idx;
+    ht_leaf_stats_t *st = &tree.memory.stats_pool[s_idx];
+
+    /* For linear stream, model error is smaller than mean error */
+    HT_ASSERT(st->fmse_model < st->fmse_mean);
+
+    /* Adaptive predicts using linear model */
+    x[0].num = (ht_float_t)2.0; /* Expected ~ 10.0 */
+    HT_ASSERT_FLOAT_NEAR(ht_tree_predict_reg(&tree, x), (ht_float_t)10.0, (ht_float_t)1.5);
+}
+
+static void test_tree_reg_split_and_weight_inheritance(void) {
+    ht_config_params_t params;
+    ht_default_reg_params(&params, 2);
+    params.grace_period = 25U;
+    params.delta = (ht_float_t)1e-3;
+    params.min_samples_split = (ht_float_t)5.0;
+    params.min_branch_fraction = (ht_float_t)0.01;
+
+    ht_tree_t tree;
+    HT_ASSERT_EQ(ht_tree_init(&tree, &params), HT_OK);
+
+    ht_value_t x[HT_MAX_FEATURES];
+    memset(x, 0, sizeof(x));
+
+    /* Train on step function:
+     * If x_0 <= 5.0: y ~ 10.0
+     * If x_0 > 5.0:  y ~ 100.0
+     */
+    for (int i = 0; i < 200; ++i) {
+        ht_float_t x_val = (ht_float_t)(i % 10);
+        ht_float_t y_val = (x_val <= (ht_float_t)4.5) ? (ht_float_t)10.0 : (ht_float_t)100.0;
+        x[0].num = x_val;
+        x[1].num = (ht_float_t)1.0;
+        HT_ASSERT_EQ(ht_tree_learn_one_reg(&tree, x, y_val, (ht_float_t)1.0), HT_OK);
+        if (!(tree.memory.node_pool[tree.root_idx].flags & HT_NODE_IS_LEAF)) {
+            break; /* Stop immediately after root split to inspect children */
+        }
+    }
+
+    /* Verify split occurred at root */
+    ht_node_t *root = &tree.memory.node_pool[tree.root_idx];
+    HT_ASSERT(!(root->flags & HT_NODE_IS_LEAF));
+    HT_ASSERT_EQ(root->feature_idx, 0U);
+    HT_ASSERT_NEQ(root->left_child, HT_INVALID_IDX);
+    HT_ASSERT_NEQ(root->right_child, HT_INVALID_IDX);
+    HT_ASSERT_EQ(root->stats_idx, HT_INVALID_IDX); /* Recycled! */
+
+    /* Verify children inherited SGD weights and fmse */
+    ht_node_t *left = &tree.memory.node_pool[root->left_child];
+    ht_node_t *right = &tree.memory.node_pool[root->right_child];
+    HT_ASSERT(left->flags & HT_NODE_IS_LEAF);
+    HT_ASSERT(right->flags & HT_NODE_IS_LEAF);
+    HT_ASSERT_NEQ(left->stats_idx, HT_INVALID_IDX);
+    HT_ASSERT_NEQ(right->stats_idx, HT_INVALID_IDX);
+
+    /* Left child target mean should be low (< 40), Right child target mean high (> 60) */
+    HT_ASSERT(left->reg_stats.mean < (ht_float_t)40.0);
+    HT_ASSERT(right->reg_stats.mean > (ht_float_t)60.0);
+
+    /* Test predictions follow the split */
+    x[0].num = (ht_float_t)2.0;
+    HT_ASSERT(ht_tree_predict_reg(&tree, x) < (ht_float_t)40.0);
+
+    x[0].num = (ht_float_t)8.0;
+    HT_ASSERT(ht_tree_predict_reg(&tree, x) > (ht_float_t)70.0);
+}
+
+static void test_tree_reg_leaf_deactivation_by_depth(void) {
+    ht_config_params_t params;
+    ht_default_reg_params(&params, 2);
+    params.grace_period = 20U;
+    params.delta = (ht_float_t)1e-2;
+    params.min_samples_split = (ht_float_t)5.0;
+
+    ht_tree_t tree;
+    HT_ASSERT_EQ(ht_tree_init(&tree, &params), HT_OK);
+
+    ht_value_t x[HT_MAX_FEATURES];
+    memset(x, 0, sizeof(x));
+
+    /* Create splits to produce leaves at depth 1 and depth 2 */
+    for (int i = 0; i < 200; ++i) {
+        ht_float_t x0 = (ht_float_t)(i % 10);
+        ht_float_t y = (x0 < (ht_float_t)3.0) ? (ht_float_t)5.0 :
+                       (x0 < (ht_float_t)7.0) ? (ht_float_t)50.0 : (ht_float_t)200.0;
+        x[0].num = x0;
+        HT_ASSERT_EQ(ht_tree_learn_one_reg(&tree, x, y, (ht_float_t)1.0), HT_OK);
+    }
+
+    uint16_t active_before = tree.n_active_leaves;
+    HT_ASSERT(active_before >= 2);
+
+    /* Deactivate least promising leaf */
+    HT_ASSERT_EQ(ht_tree_deactivate_least_promising_leaf(&tree), HT_OK);
+    HT_ASSERT_EQ(tree.n_active_leaves, (uint16_t)(active_before - 1));
+    HT_ASSERT_EQ(tree.n_inactive_leaves, 1U);
+}
+
+static void test_tree_reg_serialization_roundtrip(void) {
+    ht_config_params_t params;
+    ht_default_reg_params(&params, 3);
+    params.grace_period = 30U;
+    params.delta = (ht_float_t)1e-2;
+
+    ht_tree_t orig_tree;
+    HT_ASSERT_EQ(ht_tree_init(&orig_tree, &params), HT_OK);
+
+    ht_value_t x[HT_MAX_FEATURES];
+    memset(x, 0, sizeof(x));
+
+    for (int i = 0; i < 150; ++i) {
+        x[0].num = (ht_float_t)(i % 10);
+        x[1].num = (ht_float_t)(i % 5);
+        x[2].num = (ht_float_t)(i * 0.1);
+        ht_float_t y = (ht_float_t)2.5 * x[0].num + (ht_float_t)1.5 * x[1].num;
+        HT_ASSERT_EQ(ht_tree_learn_one_reg(&orig_tree, x, y, (ht_float_t)1.0), HT_OK);
+    }
+
+    /* Save full model */
+    size_t written = 0;
+    HT_ASSERT_EQ(ht_tree_save(&orig_tree, NULL, 0, &written, true), HT_OK);
+    uint8_t full_buf[32768];
+    HT_ASSERT(sizeof(full_buf) >= written);
+    HT_ASSERT_EQ(ht_tree_save(&orig_tree, full_buf, sizeof(full_buf), &written, true), HT_OK);
+
+    /* Load into fresh tree */
+    ht_tree_t loaded_tree;
+    HT_ASSERT_EQ(ht_tree_load(&loaded_tree, full_buf, written), HT_OK);
+    HT_ASSERT_EQ(loaded_tree.params.task_type, HT_TASK_REGRESSION);
+
+    /* Verify prediction equality */
+    for (int i = 0; i < 10; ++i) {
+        x[0].num = (ht_float_t)(i * 0.7);
+        x[1].num = (ht_float_t)(i * 0.3);
+        x[2].num = (ht_float_t)(i * 0.1);
+        ht_float_t p_orig = ht_tree_predict_reg(&orig_tree, x);
+        ht_float_t p_load = ht_tree_predict_reg(&loaded_tree, x);
+        HT_ASSERT_FLOAT_NEAR(p_orig, p_load, (ht_float_t)1e-5);
+    }
+}
+
+static void test_tree_hat_reg_alternate_tree_switch_and_prune(void) {
+    ht_adwin_pool_t ad_pool;
+    HT_ASSERT_EQ(ht_adwin_pool_init(&ad_pool), HT_OK);
+
+    ht_config_params_t params;
+    ht_default_hat_reg_params(&params, 2);
+    params.drift_window_threshold = 10U; /* Small threshold for test */
+    params.switch_significance = (ht_float_t)0.05;
+
+    ht_tree_t tree;
+    HT_ASSERT_EQ(ht_tree_init_hat(&tree, &params, &ad_pool), HT_OK);
+
+    /* 1. Simulate alternate tree instantiation */
+    uint16_t alt_root = ht_node_alloc(&tree.memory);
+    uint16_t alt_stats = ht_stats_alloc(&tree.memory);
+    tree.memory.node_pool[alt_root].stats_idx = alt_stats;
+    ht_var_init(&tree.memory.node_pool[alt_root].reg_stats);
+    tree.node_drift[alt_root].adwin_idx = ht_adwin_pool_alloc(&ad_pool, NULL);
+    tree.node_drift[tree.root_idx].alt_tree_idx = alt_root;
+    tree.n_alternate_trees++;
+
+    /* 2. Configure alt tree with lower error than main tree (Switch case) */
+    tree.node_drift[tree.root_idx].mean_error = (ht_float_t)10.0;
+    tree.node_drift[tree.root_idx].error_m2 = (ht_float_t)5.0;
+    tree.node_drift[tree.root_idx].error_count = 50U;
+
+    tree.node_drift[alt_root].mean_error = (ht_float_t)1.0;
+    tree.node_drift[alt_root].error_m2 = (ht_float_t)2.0;
+    tree.node_drift[alt_root].error_count = 50U;
+
+    ht_hat_action_t act = ht_hat_evaluate_reg_alternate(
+        tree.node_drift[tree.root_idx].mean_error,
+        tree.node_drift[tree.root_idx].error_m2 / (ht_float_t)49.0,
+        tree.node_drift[tree.root_idx].error_count,
+        tree.node_drift[alt_root].mean_error,
+        tree.node_drift[alt_root].error_m2 / (ht_float_t)49.0,
+        tree.node_drift[alt_root].error_count,
+        tree.params.drift_window_threshold,
+        tree.params.switch_significance
+    );
+    HT_ASSERT_EQ(act, HT_HAT_ACTION_SWITCH);
+
+    /* 3. Configure alt tree with higher error (Prune case) */
+    tree.node_drift[alt_root].mean_error = (ht_float_t)25.0;
+    act = ht_hat_evaluate_reg_alternate(
+        tree.node_drift[tree.root_idx].mean_error,
+        tree.node_drift[tree.root_idx].error_m2 / (ht_float_t)49.0,
+        tree.node_drift[tree.root_idx].error_count,
+        tree.node_drift[alt_root].mean_error,
+        tree.node_drift[alt_root].error_m2 / (ht_float_t)49.0,
+        tree.node_drift[alt_root].error_count,
+        tree.params.drift_window_threshold,
+        tree.params.switch_significance
+    );
+    HT_ASSERT_EQ(act, HT_HAT_ACTION_PRUNE);
+
+    /* Clean up */
+    HT_ASSERT_EQ(ht_tree_free_subtree(&tree, alt_root), HT_OK);
+    HT_ASSERT_EQ(ht_tree_free_subtree(&tree, tree.root_idx), HT_OK);
+}
+
+/* ========================================================================= */
 /* --- Test Runner Entry Point --------------------------------------------- */
 /* ========================================================================= */
 
@@ -589,4 +918,14 @@ void test_tree_run(void) {
     HT_RUN_TEST(test_tree_leaf_deactivation_least_promising_selection);
     HT_RUN_TEST(test_tree_leaf_deactivation_pool_exhaustion_stress);
     HT_RUN_TEST(test_tree_serialization_roundtrip_full_and_inference);
+
+    /* Nível 1 & 2: Regressão Contínua (VFDT-R & HAT-R) */
+    HT_RUN_TEST(test_tree_reg_default_params_and_init);
+    HT_RUN_TEST(test_tree_reg_predict_leaf_mean);
+    HT_RUN_TEST(test_tree_reg_predict_leaf_model_sgd_and_clipping);
+    HT_RUN_TEST(test_tree_reg_predict_leaf_adaptive_fmse);
+    HT_RUN_TEST(test_tree_reg_split_and_weight_inheritance);
+    HT_RUN_TEST(test_tree_reg_leaf_deactivation_by_depth);
+    HT_RUN_TEST(test_tree_reg_serialization_roundtrip);
+    HT_RUN_TEST(test_tree_hat_reg_alternate_tree_switch_and_prune);
 }

@@ -30,20 +30,24 @@
  * @brief Supported leaf prediction strategies.
  */
 typedef enum {
-    HT_LEAF_MC  = 0, /**< Majority Class: predicts class distribution at leaf */
-    HT_LEAF_NB  = 1, /**< Naive Bayes: computes joint likelihood with Log-Sum-Exp */
-    HT_LEAF_NBA = 2  /**< Naive Bayes Adaptive: dynamically switches between MC and NB */
+    HT_LEAF_MC       = 0, /**< Majority Class: predicts class distribution at leaf (Classification) */
+    HT_LEAF_MEAN     = 0, /**< Target Mean: predicts target average at leaf (Regression) */
+    HT_LEAF_NB       = 1, /**< Naive Bayes: computes joint likelihood with Log-Sum-Exp (Classification) */
+    HT_LEAF_MODEL    = 1, /**< Model: linear model trained via online SGD (Regression) */
+    HT_LEAF_NBA      = 2, /**< Naive Bayes Adaptive: dynamically switches between MC and NB (Classification) */
+    HT_LEAF_ADAPTIVE = 2  /**< Adaptive: dynamically switches between Mean and Model using fMSE (Regression) */
 } ht_leaf_pred_t;
 
 /**
  * @brief Configuration parameters for Hoeffding Tree induction.
  */
 typedef struct {
+    ht_task_type_t      task_type;                      /**< Classification or Continuous Regression */
     uint8_t             n_features;                     /**< Number of stream features */
     uint8_t             n_classes;                      /**< Number of target classes */
     ht_feature_type_t   feature_types[HT_MAX_FEATURES]; /**< Type per feature */
-    ht_criterion_type_t criterion;                      /**< HT_CRIT_INFO_GAIN or HT_CRIT_GINI */
-    ht_leaf_pred_t      leaf_prediction;                /**< MC, NB, or NBA */
+    ht_criterion_type_t criterion;                      /**< HT_CRIT_INFO_GAIN, HT_CRIT_GINI, or HT_CRIT_VARIANCE_REDUCTION */
+    ht_leaf_pred_t      leaf_prediction;                /**< MC/MEAN, NB/MODEL, or NBA/ADAPTIVE */
     uint16_t            grace_period;                   /**< Samples between split attempts (default: 200) */
     uint16_t            max_depth;                      /**< Maximum tree depth allowed (default: 64) */
     ht_float_t          delta;                          /**< Split confidence parameter (default: 1e-7) */
@@ -57,13 +61,18 @@ typedef struct {
     uint16_t            drift_window_threshold;         /**< Min samples before alternate tree replacement (default: 300) */
     ht_float_t          switch_significance;            /**< Significance for alternate tree replacement (default: 0.05) */
     ht_float_t          adwin_delta;                    /**< Confidence parameter for ADWIN detectors (default: 0.002) */
+    ht_float_t          learning_rate;                  /**< SGD base learning rate eta_0 (default: 0.01) */
+    ht_float_t          l2_regularization;              /**< SGD L2 penalty lambda (default: 1e-4) */
+    ht_float_t          model_selector_decay;           /**< fMSE exponential decay alpha (default: 0.95) */
+    ht_float_t          min_samples_split;              /**< Min sample weight per branch for regression split (default: 5.0) */
 } ht_config_params_t;
 
 /**
  * @brief Node concept drift monitoring and alternate subtree metadata for HAT.
  */
 typedef struct {
-    ht_float_t mean_error;   /**< Online error rate tracked at this node */
+    ht_float_t mean_error;   /**< Online error rate / absolute error mean tracked at this node */
+    ht_float_t error_m2;     /**< Centered sum of squared errors M2 for bilateral Z-test */
     uint32_t   error_count;  /**< Number of error updates observed */
     uint16_t   adwin_idx;    /**< Index in ht_adwin_pool_t, or HT_INVALID_IDX */
     uint16_t   alt_tree_idx; /**< Root of alternate subtree in node_pool, or HT_INVALID_IDX */
@@ -102,6 +111,7 @@ _Static_assert(sizeof(ht_tree_t) <= (1024 * 1024), "ht_tree_t exceeds 1 MB RAM b
 #define HT_SERIAL_VERSION     1U
 #define HT_SERIAL_FLAG_DOUBLE (1U << 0)
 #define HT_SERIAL_FLAG_STATS  (1U << 1)
+#define HT_SERIAL_FLAG_REG    (1U << 2)
 
 /**
  * @brief Binary image header for serialized Hoeffding Tree models.
@@ -328,5 +338,53 @@ ht_status_t ht_tree_set_adwin_pool(ht_tree_t *tree, ht_adwin_pool_t *adwin_pool)
  * @return HT_OK on success, or negative error code.
  */
 ht_status_t ht_tree_free_subtree(ht_tree_t *tree, uint16_t subtree_root_idx);
+
+/* --- VFDT-R and HAT-R Continuous Regression API --- */
+
+/**
+ * @brief Fills configuration parameters with standard VFDT-R regression defaults.
+ *
+ * @param params Output parameters struct.
+ * @param n_features Number of stream features.
+ */
+void ht_default_reg_params(ht_config_params_t *params, uint8_t n_features);
+
+/**
+ * @brief Fills configuration parameters with standard HAT-R regression defaults.
+ *
+ * @param params Output parameters struct.
+ * @param n_features Number of stream features.
+ */
+void ht_default_hat_reg_params(ht_config_params_t *params, uint8_t n_features);
+
+/**
+ * @brief Predicts continuous target value for regression stream.
+ *
+ * In HAT-R, combines predictions by averaging across leaves reached in both
+ * the main branch and any active alternate subtrees along the routing path.
+ * In VFDT-R, routes directly to the leaf and evaluates:
+ * - HT_LEAF_MEAN: average target accumulated at leaf.
+ * - HT_LEAF_MODEL: linear model fitted with online SGD.
+ * - HT_LEAF_ADAPTIVE: dynamically selects between Mean and Model using faded MSE.
+ *
+ * @param tree Pointer to tree instance.
+ * @param x Input feature vector.
+ * @return Predicted continuous scalar y_hat.
+ */
+ht_float_t ht_tree_predict_reg(const ht_tree_t *tree, const ht_value_t x[HT_MAX_FEATURES]);
+
+/**
+ * @brief Online incremental learning step with a single continuous regression sample (x, y, weight).
+ *
+ * @param tree Pointer to tree instance.
+ * @param x Input feature vector.
+ * @param y Target continuous scalar.
+ * @param weight Sample weight (> 0.0).
+ * @return HT_OK on success, or error code.
+ */
+ht_status_t ht_tree_learn_one_reg(ht_tree_t *tree,
+                                  const ht_value_t x[HT_MAX_FEATURES],
+                                  ht_float_t y,
+                                  ht_float_t weight);
 
 #endif /* HT_TREE_H */

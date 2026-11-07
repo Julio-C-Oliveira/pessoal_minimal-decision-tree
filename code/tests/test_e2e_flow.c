@@ -1095,6 +1095,207 @@ static void test_e2e_regression_split_decision_pipeline(void) {
     HT_ASSERT_EQ(ht_memory_bytes_used(&s_e2e_pool), 0);
 }
 
+static void test_e2e_vfdt_reg_prequential_and_serialization(void) {
+    static ht_tree_t tree;
+    ht_config_params_t params;
+    ht_default_reg_params(&params, 3);
+    params.feature_types[0] = HT_FEAT_NUMERIC;
+    params.feature_types[1] = HT_FEAT_NUMERIC;
+    params.feature_types[2] = HT_FEAT_CATEGORICAL;
+    params.leaf_prediction = HT_LEAF_ADAPTIVE;
+    params.grace_period = 30U;
+    params.delta = (ht_float_t)1e-3;
+    params.learning_rate = (ht_float_t)0.02;
+    params.l2_regularization = (ht_float_t)1e-4;
+    params.model_selector_decay = (ht_float_t)0.95;
+    params.min_samples_split = (ht_float_t)5.0;
+
+    HT_ASSERT_EQ(ht_tree_init(&tree, &params), HT_OK);
+    HT_ASSERT(sizeof(ht_tree_t) <= 1024 * 1024);
+
+    /* Stream 1000 samples:
+     * Piecewise linear regression:
+     * If x[0] <= 5.0: y = 2.0 * x[0] + 1.0 * x[1] + (x[2] == 1 ? 5.0 : 0.0) + noise
+     * If x[0] > 5.0:  y = 50.0 + 3.0 * x[0] + 1.0 * x[1] + (x[2] == 1 ? 5.0 : 0.0) + noise
+     */
+    uint32_t lcg = 42U;
+    ht_float_t early_mae_sum = (ht_float_t)0.0;
+    uint32_t early_count = 0;
+    ht_float_t late_mae_sum = (ht_float_t)0.0;
+    uint32_t late_count = 0;
+
+    for (uint32_t i = 0; i < 1000U; ++i) {
+        lcg = lcg * 1664525U + 1013904223U;
+        ht_float_t x0 = ((ht_float_t)(lcg & 0xFFFFU) / (ht_float_t)65536.0) * (ht_float_t)10.0;
+        lcg = lcg * 1664525U + 1013904223U;
+        ht_float_t x1 = ((ht_float_t)(lcg & 0xFFFFU) / (ht_float_t)65536.0) * (ht_float_t)5.0;
+        int32_t x2 = (i % 2 == 0) ? 1 : 0;
+
+        lcg = lcg * 1664525U + 1013904223U;
+        ht_float_t noise = (((ht_float_t)(lcg & 0xFFU) / (ht_float_t)256.0) - (ht_float_t)0.5) * (ht_float_t)1.0;
+
+        ht_float_t y = (x0 <= (ht_float_t)5.0)
+            ? ((ht_float_t)2.0 * x0 + (ht_float_t)1.0 * x1 + (x2 == 1 ? (ht_float_t)5.0 : (ht_float_t)0.0) + noise)
+            : ((ht_float_t)50.0 + (ht_float_t)3.0 * x0 + (ht_float_t)1.0 * x1 + (x2 == 1 ? (ht_float_t)5.0 : (ht_float_t)0.0) + noise);
+
+        ht_value_t x[HT_MAX_FEATURES];
+        memset(x, 0, sizeof(x));
+        x[0].num = x0;
+        x[1].num = x1;
+        x[2].cat = x2;
+
+        /* Prequential prediction */
+        ht_float_t pred = ht_tree_predict_reg(&tree, x);
+        ht_float_t err = HT_FABS(y - pred);
+
+        if (i < 100U) {
+            early_mae_sum += err;
+            early_count++;
+        }
+        if (i >= 800U) {
+            late_mae_sum += err;
+            late_count++;
+        }
+
+        HT_ASSERT_EQ(ht_tree_learn_one_reg(&tree, x, y, (ht_float_t)1.0), HT_OK);
+    }
+
+    /* Verify splitting and depth */
+    HT_ASSERT(tree.n_decision_nodes >= 1U);
+    HT_ASSERT(tree.n_active_leaves >= 2U);
+    HT_ASSERT(tree.max_depth_seen >= 1U);
+
+    /* Verify error reduction: late MAE must improve significantly over early MAE */
+    ht_float_t early_mae = early_mae_sum / (ht_float_t)early_count;
+    ht_float_t late_mae = late_mae_sum / (ht_float_t)late_count;
+    HT_ASSERT(late_mae < early_mae);
+    HT_ASSERT(late_mae < (ht_float_t)8.0);
+
+    /* Verify memory usage */
+    HT_ASSERT(ht_memory_bytes_used(&tree.memory) <= (1024U * 1024U));
+
+    /* Serialization roundtrip */
+    size_t needed = 0;
+    HT_ASSERT_EQ(ht_tree_save(&tree, NULL, 0, &needed, true), HT_OK);
+    HT_ASSERT(needed < 65536);
+
+    uint8_t save_buf[65536];
+    size_t written = 0;
+    HT_ASSERT_EQ(ht_tree_save(&tree, save_buf, sizeof(save_buf), &written, true), HT_OK);
+    HT_ASSERT_EQ(written, needed);
+
+    static ht_tree_t loaded_tree;
+    HT_ASSERT_EQ(ht_tree_load(&loaded_tree, save_buf, written), HT_OK);
+    HT_ASSERT_EQ(loaded_tree.params.task_type, HT_TASK_REGRESSION);
+
+    /* Verify identical predictions */
+    for (int t = 0; t < 50; ++t) {
+        ht_value_t x[HT_MAX_FEATURES];
+        memset(x, 0, sizeof(x));
+        x[0].num = (ht_float_t)(t * 0.2);
+        x[1].num = (ht_float_t)(t * 0.1);
+        x[2].cat = t % 2;
+
+        ht_float_t p_orig = ht_tree_predict_reg(&tree, x);
+        ht_float_t p_load = ht_tree_predict_reg(&loaded_tree, x);
+        HT_ASSERT_FLOAT_NEAR(p_orig, p_load, (ht_float_t)1e-5);
+    }
+}
+
+static void test_e2e_hat_reg_abrupt_drift_recovery(void) {
+    static ht_adwin_pool_t adwin_pool;
+    HT_ASSERT_EQ(ht_adwin_pool_init(&adwin_pool), HT_OK);
+
+    ht_config_params_t params;
+    ht_default_hat_reg_params(&params, 2);
+    params.grace_period = 30U;
+    params.delta = (ht_float_t)1e-2;
+    params.drift_window_threshold = 20U;
+    params.switch_significance = (ht_float_t)0.05;
+    params.adwin_delta = (ht_float_t)0.002;
+
+    static ht_tree_t tree;
+    HT_ASSERT_EQ(ht_tree_init_hat(&tree, &params, &adwin_pool), HT_OK);
+
+    uint32_t lcg = 999U;
+    ht_value_t x[HT_MAX_FEATURES];
+    memset(x, 0, sizeof(x));
+
+    /* Concept A: samples 0 .. 500: y = 5.0 + 3.0 * x0 */
+    ht_float_t sum_err_a = (ht_float_t)0.0;
+    uint32_t count_a = 0;
+
+    for (uint32_t i = 0; i < 500U; ++i) {
+        lcg = lcg * 1664525U + 1013904223U;
+        ht_float_t x0 = ((ht_float_t)(lcg & 0xFFFFU) / (ht_float_t)65536.0) * (ht_float_t)10.0;
+        x[0].num = x0;
+        x[1].num = (ht_float_t)1.0;
+
+        ht_float_t y = (ht_float_t)5.0 + (ht_float_t)3.0 * x0;
+
+        if (i >= 350U) {
+            ht_float_t pred = ht_tree_predict_reg(&tree, x);
+            sum_err_a += HT_FABS(y - pred);
+            count_a++;
+        }
+
+        HT_ASSERT_EQ(ht_tree_learn_one_reg(&tree, x, y, (ht_float_t)1.0), HT_OK);
+    }
+
+    ht_float_t mae_a = sum_err_a / (ht_float_t)count_a;
+    HT_ASSERT(mae_a < (ht_float_t)10.0);
+
+    /* Concept B: samples 500 .. 2000 (abrupt shift to y = 150.0 - 4.0 * x0) */
+    ht_float_t sum_err_b_spike = (ht_float_t)0.0;
+    uint32_t count_b_spike = 0;
+    ht_float_t sum_err_b_late = (ht_float_t)0.0;
+    uint32_t count_b_late = 0;
+
+    for (uint32_t i = 500U; i < 2000U; ++i) {
+        lcg = lcg * 1664525U + 1013904223U;
+        ht_float_t x0 = ((ht_float_t)(lcg & 0xFFFFU) / (ht_float_t)65536.0) * (ht_float_t)10.0;
+        x[0].num = x0;
+        x[1].num = (ht_float_t)1.0;
+
+        ht_float_t y = (ht_float_t)150.0 - (ht_float_t)4.0 * x0;
+
+        ht_float_t pred = ht_tree_predict_reg(&tree, x);
+        ht_float_t err = HT_FABS(y - pred);
+
+        if (i >= 500U && i < 600U) {
+            sum_err_b_spike += err;
+            count_b_spike++;
+        }
+        if (i >= 1700U) {
+            sum_err_b_late += err;
+            count_b_late++;
+        }
+
+        HT_ASSERT_EQ(ht_tree_learn_one_reg(&tree, x, y, (ht_float_t)1.0), HT_OK);
+    }
+
+    ht_float_t mae_spike = sum_err_b_spike / (ht_float_t)count_b_spike;
+    ht_float_t mae_late = sum_err_b_late / (ht_float_t)count_b_late;
+
+    /* Assert drift was detected and alternate tree switched */
+    HT_ASSERT(tree.n_alternate_trees > 0U);
+    HT_ASSERT(tree.n_switch_alternate_trees > 0U);
+
+    /* Assert error recovered: late MAE after switch is much lower than post-drift spike */
+    HT_ASSERT(mae_late < mae_spike * (ht_float_t)0.5);
+
+    /* Verify RAM budget */
+    size_t tree_bytes = ht_memory_bytes_used(&tree.memory);
+    size_t adwin_bytes = ht_adwin_pool_bytes_used(&adwin_pool);
+    HT_ASSERT((tree_bytes + adwin_bytes) <= (1024U * 1024U));
+
+    /* Clean up without leaks */
+    HT_ASSERT_EQ(ht_tree_free_subtree(&tree, tree.root_idx), HT_OK);
+    HT_ASSERT_EQ(tree.memory.nodes_allocated, 0U);
+    HT_ASSERT_EQ(tree.memory.stats_allocated, 0U);
+    HT_ASSERT_EQ(adwin_pool.allocated_count, 0U);
+}
+
 void test_e2e_flow_run(void) {
     HT_TEST_SUITE_BEGIN("Nivel 3: Fluxo Ponta a Ponta Acumulado (E2E)");
     HT_RUN_TEST(test_e2e_sample_vector_ingestion);
@@ -1107,4 +1308,6 @@ void test_e2e_flow_run(void) {
     HT_RUN_TEST(test_e2e_hat_abrupt_drift_recovery);
     HT_RUN_TEST(test_e2e_continuous_regression_stream_pipeline);
     HT_RUN_TEST(test_e2e_regression_split_decision_pipeline);
+    HT_RUN_TEST(test_e2e_vfdt_reg_prequential_and_serialization);
+    HT_RUN_TEST(test_e2e_hat_reg_abrupt_drift_recovery);
 }

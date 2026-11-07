@@ -337,6 +337,60 @@ void ht_hat_combine_leaf_predictions(const ht_float_t *leaf_probas,
                                      uint8_t n_classes,
                                      ht_float_t out_proba[HT_MAX_CLASSES]);
 
+/**
+ * @brief Unilateral absolute error drift detector for HAT regression (HAT-R).
+ *
+ * Updates ADWIN and online error statistics (Welford mean and M2) with absolute prediction error.
+ * If ADWIN detects drift:
+ * - If current mean error is lower than old mean error: improvement, filtered out (false alarm),
+ *   resets error estimator and returns false.
+ * - If current mean error is higher or equal: genuine drift detected, resets error estimator
+ *   and returns true.
+ *
+ * @param adwin Pointer to ADWIN detector.
+ * @param mean_error In-out pointer to current mean absolute error.
+ * @param error_m2 In-out pointer to sum of squared differences from mean error (M2).
+ * @param error_count In-out pointer to number of error updates observed.
+ * @param abs_error Absolute error observed: |y - y_hat|.
+ * @return true if error significantly increased (drift requiring alternate tree), false otherwise.
+ */
+bool ht_hat_check_reg_error_drift(ht_adwin_t *adwin,
+                                  ht_float_t *mean_error,
+                                  ht_float_t *error_m2,
+                                  uint32_t *error_count,
+                                  ht_float_t abs_error);
+
+/**
+ * @brief Evaluates an alternate subtree against the main branch in HAT-R using a two-tailed Z-test.
+ *
+ * Implements Welch-Z test matching River's hatr_nodes.py:
+ * z = (e_alt - e_old) / sqrt(var_alt / n_alt + var_old / n_old)
+ * p_value = erfc(|z| / sqrt(2))
+ *
+ * If p_value <= alpha:
+ * - If e_alt < e_old: HT_HAT_ACTION_SWITCH
+ * - Else (e_alt >= e_old): HT_HAT_ACTION_PRUNE
+ * Else: HT_HAT_ACTION_NONE
+ *
+ * @param e_old Mean absolute error of main branch.
+ * @param var_old Error variance (sample s^2) of main branch.
+ * @param n_old Number of samples observed in main branch.
+ * @param e_alt Mean absolute error of alternate subtree.
+ * @param var_alt Error variance (sample s^2) of alternate subtree.
+ * @param n_alt Number of samples observed in alternate subtree.
+ * @param min_obs Minimum sample window threshold before decisions (e.g. 300).
+ * @param alpha Significance level (e.g. 0.05).
+ * @return HT_HAT_ACTION_SWITCH, HT_HAT_ACTION_PRUNE, or HT_HAT_ACTION_NONE.
+ */
+ht_hat_action_t ht_hat_evaluate_reg_alternate(ht_float_t e_old,
+                                              ht_float_t var_old,
+                                              uint32_t n_old,
+                                              ht_float_t e_alt,
+                                              ht_float_t var_alt,
+                                              uint32_t n_alt,
+                                              uint32_t min_obs,
+                                              ht_float_t alpha);
+
 #ifdef __cplusplus
 }
 #endif

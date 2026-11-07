@@ -714,6 +714,110 @@ static void test_hat_alternate_tree_pruning_and_recycling(void) {
     HT_ASSERT_EQ(ad_pool.allocated_count, 0U);
 }
 
+static void test_hat_reg_error_drift_unilateral_filter(void) {
+    ht_adwin_t ad;
+    ht_adwin_config_t cfg;
+    ht_adwin_default_config(&cfg);
+    cfg.grace_period = 10;
+    cfg.min_window_length = 5;
+    HT_ASSERT_EQ(ht_adwin_init(&ad, &cfg), HT_OK);
+
+    ht_float_t mean_error = (ht_float_t)0.0;
+    ht_float_t error_m2 = (ht_float_t)0.0;
+    uint32_t error_count = 0;
+
+    /* Feed baseline error of 10.0 for 50 samples */
+    for (int i = 0; i < 50; ++i) {
+        bool drift = ht_hat_check_reg_error_drift(&ad, &mean_error, &error_m2, &error_count, (ht_float_t)10.0);
+        HT_ASSERT(!drift);
+    }
+    HT_ASSERT_FLOAT_NEAR(mean_error, (ht_float_t)10.0, (ht_float_t)1e-4);
+    HT_ASSERT_EQ(error_count, 50U);
+
+    /* Feed improving (lower) error: 0.1 for 50 samples.
+     * ADWIN detects change, but mean_error is decreasing -> unilateral filter suppresses drift! */
+    for (int i = 0; i < 50; ++i) {
+        bool drift = ht_hat_check_reg_error_drift(&ad, &mean_error, &error_m2, &error_count, (ht_float_t)0.1);
+        HT_ASSERT(!drift);
+    }
+
+    /* Reset detector */
+    ht_adwin_reset(&ad);
+    mean_error = (ht_float_t)0.0;
+    error_m2 = (ht_float_t)0.0;
+    error_count = 0;
+
+    /* Feed baseline error of 0.5 for 50 samples */
+    for (int i = 0; i < 50; ++i) {
+        bool drift = ht_hat_check_reg_error_drift(&ad, &mean_error, &error_m2, &error_count, (ht_float_t)0.5);
+        HT_ASSERT(!drift);
+    }
+
+    /* Feed worsening error: 50.0. Drift detected! */
+    bool drift_detected = false;
+    for (int i = 0; i < 60; ++i) {
+        bool drift = ht_hat_check_reg_error_drift(&ad, &mean_error, &error_m2, &error_count, (ht_float_t)50.0);
+        if (drift) {
+            drift_detected = true;
+            break;
+        }
+    }
+    HT_ASSERT(drift_detected);
+
+    /* Null pointer guard checks */
+    HT_ASSERT(!ht_hat_check_reg_error_drift(NULL, &mean_error, &error_m2, &error_count, (ht_float_t)1.0));
+    HT_ASSERT(!ht_hat_check_reg_error_drift(&ad, NULL, &error_m2, &error_count, (ht_float_t)1.0));
+}
+
+static void test_hat_evaluate_reg_alternate_z_test_analytical(void) {
+    /* 1. min_obs guard: when n_old <= min_obs or n_alt <= min_obs */
+    ht_hat_action_t act = ht_hat_evaluate_reg_alternate(
+        (ht_float_t)10.0, (ht_float_t)1.0, 200,
+        (ht_float_t)2.0,  (ht_float_t)1.0, 400,
+        300, (ht_float_t)0.05
+    );
+    HT_ASSERT_EQ(act, HT_HAT_ACTION_NONE);
+
+    act = ht_hat_evaluate_reg_alternate(
+        (ht_float_t)10.0, (ht_float_t)1.0, 400,
+        (ht_float_t)2.0,  (ht_float_t)1.0, 200,
+        300, (ht_float_t)0.05
+    );
+    HT_ASSERT_EQ(act, HT_HAT_ACTION_NONE);
+
+    /* 2. Analytical Switch test: alt is significantly better (lower error) */
+    act = ht_hat_evaluate_reg_alternate(
+        (ht_float_t)5.0, (ht_float_t)2.0, 500,
+        (ht_float_t)2.0, (ht_float_t)2.0, 500,
+        300, (ht_float_t)0.05
+    );
+    HT_ASSERT_EQ(act, HT_HAT_ACTION_SWITCH);
+
+    /* 3. Analytical Prune test: alt is significantly worse (higher error) */
+    act = ht_hat_evaluate_reg_alternate(
+        (ht_float_t)2.0, (ht_float_t)2.0, 500,
+        (ht_float_t)5.0, (ht_float_t)2.0, 500,
+        300, (ht_float_t)0.05
+    );
+    HT_ASSERT_EQ(act, HT_HAT_ACTION_PRUNE);
+
+    /* 4. Insignificant difference test: p > alpha -> NONE */
+    act = ht_hat_evaluate_reg_alternate(
+        (ht_float_t)2.00, (ht_float_t)10.0, 400,
+        (ht_float_t)1.99, (ht_float_t)10.0, 400,
+        300, (ht_float_t)0.05
+    );
+    HT_ASSERT_EQ(act, HT_HAT_ACTION_NONE);
+
+    /* 5. Identical errors test: diff == 0.0 -> NONE */
+    act = ht_hat_evaluate_reg_alternate(
+        (ht_float_t)3.0, (ht_float_t)1.0, 400,
+        (ht_float_t)3.0, (ht_float_t)1.0, 400,
+        300, (ht_float_t)0.05
+    );
+    HT_ASSERT_EQ(act, HT_HAT_ACTION_NONE);
+}
+
 /* Master suite runner for test_drift */
 void test_drift_run(void) {
     HT_TEST_SUITE_BEGIN("Nivel 1 & 2: Detector ADWIN com Histograma Exponencial Fixo (ht_drift)");
@@ -730,6 +834,8 @@ void test_drift_run(void) {
     HT_RUN_TEST(test_hat_switch_prune_bound_analytical);
     HT_RUN_TEST(test_hat_evaluate_alternate_switch_and_prune);
     HT_RUN_TEST(test_hat_weighted_voting_one_over_error_squared);
+    HT_RUN_TEST(test_hat_reg_error_drift_unilateral_filter);
+    HT_RUN_TEST(test_hat_evaluate_reg_alternate_z_test_analytical);
 
     /* Nível 2: Integração, Paridade River e Pool Estático */
     HT_RUN_TEST(test_adwin_drift_detection_step_change_river_parity);

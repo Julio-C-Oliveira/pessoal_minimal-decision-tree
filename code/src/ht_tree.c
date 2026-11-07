@@ -19,18 +19,68 @@ static uint16_t ht_most_common_child(const ht_tree_t *tree, const ht_node_t *nod
 
     if (node->left_child != HT_INVALID_IDX) {
         const ht_node_t *left = &tree->memory.node_pool[node->left_child];
-        for (uint8_t c = 0; c < tree->params.n_classes; ++c) {
-            left_w += left->class_counts[c];
+        if (tree->params.task_type == HT_TASK_REGRESSION) {
+            left_w = left->reg_stats.count;
+        } else {
+            for (uint8_t c = 0; c < tree->params.n_classes; ++c) {
+                left_w += left->class_counts[c];
+            }
         }
     }
     if (node->right_child != HT_INVALID_IDX) {
         const ht_node_t *right = &tree->memory.node_pool[node->right_child];
-        for (uint8_t c = 0; c < tree->params.n_classes; ++c) {
-            right_w += right->class_counts[c];
+        if (tree->params.task_type == HT_TASK_REGRESSION) {
+            right_w = right->reg_stats.count;
+        } else {
+            for (uint8_t c = 0; c < tree->params.n_classes; ++c) {
+                right_w += right->class_counts[c];
+            }
         }
     }
 
     return (left_w >= right_w) ? node->left_child : node->right_child;
+}
+
+static ht_float_t ht_leaf_predict_linear_model(const ht_tree_t *tree,
+                                               const ht_leaf_stats_t *stats,
+                                               const ht_value_t x[HT_MAX_FEATURES]) {
+    ht_float_t pred = stats->reg_intercept;
+    for (uint8_t f = 0; f < tree->params.n_features; ++f) {
+        if (tree->params.feature_types[f] == HT_FEAT_NUMERIC) {
+            if (!HT_ISNAN(x[f].num)) {
+                pred += stats->reg_weights[f] * x[f].num;
+            }
+        }
+    }
+    return pred;
+}
+
+static ht_float_t ht_predict_reg_at_leaf(const ht_tree_t *tree,
+                                        uint16_t leaf_idx,
+                                        const ht_value_t x[HT_MAX_FEATURES]) {
+    if (tree == NULL || leaf_idx == HT_INVALID_IDX) {
+        return (ht_float_t)0.0;
+    }
+
+    const ht_node_t *node = &tree->memory.node_pool[leaf_idx];
+    if (node->stats_idx == HT_INVALID_IDX) {
+        /* Inactive leaf fallback: mean target */
+        return node->reg_stats.mean;
+    }
+
+    const ht_leaf_stats_t *stats = &tree->memory.stats_pool[node->stats_idx];
+
+    if (tree->params.leaf_prediction == HT_LEAF_MEAN) {
+        return node->reg_stats.mean;
+    } else if (tree->params.leaf_prediction == HT_LEAF_MODEL) {
+        return ht_leaf_predict_linear_model(tree, stats, x);
+    } else { /* HT_LEAF_ADAPTIVE */
+        if (stats->fmse_mean < stats->fmse_model) {
+            return node->reg_stats.mean;
+        } else {
+            return ht_leaf_predict_linear_model(tree, stats, x);
+        }
+    }
 }
 
 static uint8_t ht_leaf_predict_mc_class(const ht_node_t *node, uint8_t n_classes) {
@@ -223,18 +273,68 @@ static ht_status_t ht_tree_deactivate_least_promising_leaf_except(ht_tree_t *tre
     uint16_t min_idx = HT_INVALID_IDX;
     ht_float_t min_promise = HT_INFINITY;
 
-    for (uint16_t i = 0; i < HT_MAX_NODES; ++i) {
-        if (i == except_idx) {
-            continue;
+    if (tree->params.task_type == HT_TASK_REGRESSION) {
+        /* In regression: Promise(l) = -depth(l). Deepest leaf deactivated first. */
+        uint16_t node_stack[64];
+        uint16_t depth_stack[64];
+        int top = 0;
+        if (tree->root_idx != HT_INVALID_IDX) {
+            node_stack[0] = tree->root_idx;
+            depth_stack[0] = 0;
+            top = 1;
         }
-        const ht_node_t *node = &tree->memory.node_pool[i];
-        if ((node->flags & HT_NODE_IN_USE) &&
-            (node->flags & HT_NODE_IS_LEAF) &&
-            (node->stats_idx != HT_INVALID_IDX)) {
-            ht_float_t p = ht_tree_node_promise(node, tree->params.n_classes);
-            if (p < min_promise) {
-                min_promise = p;
-                min_idx = i;
+
+        while (top > 0) {
+            top--;
+            uint16_t curr = node_stack[top];
+            uint16_t d = depth_stack[top];
+            if (curr >= HT_MAX_NODES) continue;
+            const ht_node_t *n = &tree->memory.node_pool[curr];
+            if (!(n->flags & HT_NODE_IN_USE)) continue;
+
+            if (n->flags & HT_NODE_IS_LEAF) {
+                if (curr != except_idx && n->stats_idx != HT_INVALID_IDX) {
+                    ht_float_t p = -(ht_float_t)d;
+                    if (p < min_promise) {
+                        min_promise = p;
+                        min_idx = curr;
+                    }
+                }
+            } else {
+                if (tree->params.enable_hat && tree->adwin_pool != NULL) {
+                    uint16_t alt = tree->node_drift[curr].alt_tree_idx;
+                    if (alt != HT_INVALID_IDX && top < 62) {
+                        node_stack[top] = alt;
+                        depth_stack[top] = d;
+                        top++;
+                    }
+                }
+                if (n->right_child != HT_INVALID_IDX && top < 63) {
+                    node_stack[top] = n->right_child;
+                    depth_stack[top] = (uint16_t)(d + 1);
+                    top++;
+                }
+                if (n->left_child != HT_INVALID_IDX && top < 63) {
+                    node_stack[top] = n->left_child;
+                    depth_stack[top] = (uint16_t)(d + 1);
+                    top++;
+                }
+            }
+        }
+    } else {
+        for (uint16_t i = 0; i < HT_MAX_NODES; ++i) {
+            if (i == except_idx) {
+                continue;
+            }
+            const ht_node_t *node = &tree->memory.node_pool[i];
+            if ((node->flags & HT_NODE_IN_USE) &&
+                (node->flags & HT_NODE_IS_LEAF) &&
+                (node->stats_idx != HT_INVALID_IDX)) {
+                ht_float_t p = ht_tree_node_promise(node, tree->params.n_classes);
+                if (p < min_promise) {
+                    min_promise = p;
+                    min_idx = i;
+                }
             }
         }
     }
@@ -244,6 +344,174 @@ static ht_status_t ht_tree_deactivate_least_promising_leaf_except(ht_tree_t *tre
     }
 
     return ht_tree_deactivate_leaf(tree, min_idx);
+}
+
+static ht_status_t ht_tree_attempt_split_reg(ht_tree_t *tree, uint16_t leaf_idx, uint16_t depth) {
+    ht_node_t *node = &tree->memory.node_pool[leaf_idx];
+    if (node->stats_idx == HT_INVALID_IDX) {
+        return HT_OK;
+    }
+
+    /* Need at least 2 samples and positive variance to split */
+    if (node->reg_stats.count <= (ht_float_t)2.0 || node->reg_stats.m2 <= (ht_float_t)0.0) {
+        return HT_OK;
+    }
+
+    const ht_leaf_stats_t *stats = &tree->memory.stats_pool[node->stats_idx];
+    ht_split_candidate_t best, second_best;
+
+    ht_find_best_reg_split_candidates(
+        stats,
+        &node->reg_stats,
+        tree->params.feature_types,
+        tree->params.n_features,
+        tree->params.min_samples_split,
+        tree->params.min_branch_fraction,
+        tree->params.merit_preprune,
+        &best,
+        &second_best
+    );
+
+    /* Hoeffding bound with range R = 1.0 */
+    ht_float_t eps = ht_hoeffding_bound((ht_float_t)1.0, tree->params.delta, node->reg_stats.count);
+
+    bool should_split = ht_should_split_reg(&best, &second_best, eps, tree->params.tau);
+
+    if (should_split) {
+        if (best.feature_idx == HT_NO_FEATURE) {
+            return HT_OK;
+        }
+
+        if (tree->memory.free_nodes_top < 2) {
+            return HT_ERR_OUT_OF_NODES;
+        }
+
+        /* Save mother leaf's linear model weights and fmse before recycling */
+        ht_float_t parent_weights[HT_MAX_FEATURES];
+        memcpy(parent_weights, stats->reg_weights, sizeof(parent_weights));
+        ht_float_t parent_intercept = stats->reg_intercept;
+        ht_float_t parent_fmse_mean = stats->fmse_mean;
+        ht_float_t parent_fmse_model = stats->fmse_model;
+
+        /* Immediate recycling of mother leaf's statistics block */
+        uint16_t old_stats = node->stats_idx;
+        node->stats_idx = HT_INVALID_IDX;
+        ht_stats_free(&tree->memory, old_stats);
+
+        /* Allocate left and right children */
+        uint16_t left_idx = ht_node_alloc(&tree->memory);
+        uint16_t right_idx = ht_node_alloc(&tree->memory);
+
+        if (left_idx == HT_INVALID_IDX || right_idx == HT_INVALID_IDX) {
+            if (left_idx != HT_INVALID_IDX) ht_node_free(&tree->memory, left_idx);
+            if (right_idx != HT_INVALID_IDX) ht_node_free(&tree->memory, right_idx);
+            return HT_ERR_OUT_OF_NODES;
+        }
+
+        /* Convert mother node from leaf to internal branch */
+        node->flags &= ~HT_NODE_IS_LEAF;
+        if (best.is_categorical) {
+            node->flags |= HT_NODE_SPLIT_CAT;
+            node->split_val.cat_val = best.split_val.cat_val;
+        } else {
+            node->flags &= ~HT_NODE_SPLIT_CAT;
+            node->split_val.threshold = best.split_val.threshold;
+        }
+        node->feature_idx = best.feature_idx;
+        node->left_child = left_idx;
+        node->right_child = right_idx;
+
+        tree->n_decision_nodes++;
+        if (tree->n_active_leaves > 0) {
+            tree->n_active_leaves--;
+        }
+
+        /* Initialize left child */
+        ht_node_t *left = &tree->memory.node_pool[left_idx];
+        left->reg_stats = best.lhs_var;
+        left->flags = HT_NODE_IS_LEAF | HT_NODE_IN_USE;
+        left->left_child = HT_INVALID_IDX;
+        left->right_child = HT_INVALID_IDX;
+        left->stats_idx = HT_INVALID_IDX;
+
+        /* Initialize right child */
+        ht_node_t *right = &tree->memory.node_pool[right_idx];
+        right->reg_stats = best.rhs_var;
+        right->flags = HT_NODE_IS_LEAF | HT_NODE_IN_USE;
+        right->left_child = HT_INVALID_IDX;
+        right->right_child = HT_INVALID_IDX;
+        right->stats_idx = HT_INVALID_IDX;
+
+        /* Allocate stats for left child */
+        uint16_t l_stats = ht_stats_alloc(&tree->memory);
+        if (l_stats == HT_INVALID_IDX) {
+            if (ht_tree_deactivate_least_promising_leaf(tree) == HT_OK) {
+                l_stats = ht_stats_alloc(&tree->memory);
+            }
+        }
+        if (l_stats != HT_INVALID_IDX) {
+            left->stats_idx = l_stats;
+            ht_leaf_stats_t *ls = &tree->memory.stats_pool[l_stats];
+            ls->last_split_attempt_at = left->reg_stats.count;
+            ls->fmse_mean = parent_fmse_mean;
+            ls->fmse_model = parent_fmse_model;
+            ls->reg_intercept = parent_intercept;
+            memcpy(ls->reg_weights, parent_weights, sizeof(parent_weights));
+            tree->n_active_leaves++;
+        } else {
+            tree->n_inactive_leaves++;
+        }
+
+        /* Allocate stats for right child */
+        uint16_t r_stats = ht_stats_alloc(&tree->memory);
+        if (r_stats == HT_INVALID_IDX) {
+            if (ht_tree_deactivate_least_promising_leaf_except(tree, left_idx) == HT_OK) {
+                r_stats = ht_stats_alloc(&tree->memory);
+            }
+        }
+        if (r_stats != HT_INVALID_IDX) {
+            right->stats_idx = r_stats;
+            ht_leaf_stats_t *rs = &tree->memory.stats_pool[r_stats];
+            rs->last_split_attempt_at = right->reg_stats.count;
+            rs->fmse_mean = parent_fmse_mean;
+            rs->fmse_model = parent_fmse_model;
+            rs->reg_intercept = parent_intercept;
+            memcpy(rs->reg_weights, parent_weights, sizeof(parent_weights));
+            tree->n_active_leaves++;
+        } else {
+            tree->n_inactive_leaves++;
+        }
+
+        /* HAT: initialize drift tracking for new branch and child nodes */
+        if (tree->params.enable_hat && tree->adwin_pool != NULL) {
+            tree->node_drift[leaf_idx].alt_tree_idx = HT_INVALID_IDX;
+            tree->node_drift[leaf_idx].mean_error = (ht_float_t)0.0;
+            tree->node_drift[leaf_idx].error_m2 = (ht_float_t)0.0;
+            tree->node_drift[leaf_idx].error_count = 0U;
+            if (tree->node_drift[leaf_idx].adwin_idx != HT_INVALID_IDX) {
+                ht_adwin_reset(ht_adwin_pool_get(tree->adwin_pool, tree->node_drift[leaf_idx].adwin_idx));
+            } else {
+                tree->node_drift[leaf_idx].adwin_idx = ht_adwin_pool_alloc(tree->adwin_pool, NULL);
+            }
+
+            tree->node_drift[left_idx].adwin_idx = ht_adwin_pool_alloc(tree->adwin_pool, NULL);
+            tree->node_drift[left_idx].alt_tree_idx = HT_INVALID_IDX;
+            tree->node_drift[left_idx].mean_error = (ht_float_t)0.0;
+            tree->node_drift[left_idx].error_m2 = (ht_float_t)0.0;
+            tree->node_drift[left_idx].error_count = 0U;
+
+            tree->node_drift[right_idx].adwin_idx = ht_adwin_pool_alloc(tree->adwin_pool, NULL);
+            tree->node_drift[right_idx].alt_tree_idx = HT_INVALID_IDX;
+            tree->node_drift[right_idx].mean_error = (ht_float_t)0.0;
+            tree->node_drift[right_idx].error_m2 = (ht_float_t)0.0;
+            tree->node_drift[right_idx].error_count = 0U;
+        }
+
+        if ((uint16_t)(depth + 1) > tree->max_depth_seen) {
+            tree->max_depth_seen = (uint16_t)(depth + 1);
+        }
+    }
+    return HT_OK;
 }
 
 static ht_status_t ht_tree_attempt_split(ht_tree_t *tree, uint16_t leaf_idx, uint16_t depth) {
@@ -438,6 +706,8 @@ void ht_default_params(ht_config_params_t *params, uint8_t n_features, uint8_t n
         return;
     }
 
+    memset(params, 0, sizeof(*params));
+    params->task_type = HT_TASK_CLASSIFICATION;
     params->n_features = n_features;
     params->n_classes = n_classes;
     for (uint8_t i = 0; i < HT_MAX_FEATURES; ++i) {
@@ -458,6 +728,10 @@ void ht_default_params(ht_config_params_t *params, uint8_t n_features, uint8_t n
     params->drift_window_threshold = 300U;
     params->switch_significance = (ht_float_t)0.05;
     params->adwin_delta = (ht_float_t)0.002;
+    params->learning_rate = (ht_float_t)0.01;
+    params->l2_regularization = (ht_float_t)1e-4;
+    params->model_selector_decay = (ht_float_t)0.95;
+    params->min_samples_split = (ht_float_t)5.0;
 }
 
 void ht_default_hat_params(ht_config_params_t *params, uint8_t n_features, uint8_t n_classes) {
@@ -470,6 +744,44 @@ void ht_default_hat_params(ht_config_params_t *params, uint8_t n_features, uint8
     params->adwin_delta = (ht_float_t)0.002;
 }
 
+void ht_default_reg_params(ht_config_params_t *params, uint8_t n_features) {
+    if (params == NULL) {
+        return;
+    }
+    memset(params, 0, sizeof(*params));
+    params->task_type = HT_TASK_REGRESSION;
+    params->n_features = (n_features > HT_MAX_FEATURES) ? (uint8_t)HT_MAX_FEATURES : n_features;
+    params->n_classes = 1U;
+    for (uint8_t i = 0; i < HT_MAX_FEATURES; ++i) {
+        params->feature_types[i] = HT_FEAT_NUMERIC;
+    }
+    params->criterion = HT_CRIT_VARIANCE_REDUCTION;
+    params->leaf_prediction = HT_LEAF_ADAPTIVE;
+    params->grace_period = 200U;
+    params->max_depth = 64U;
+    params->delta = (ht_float_t)1e-7;
+    params->tau = (ht_float_t)0.05;
+    params->min_branch_fraction = (ht_float_t)0.01;
+    params->max_share_to_split = (ht_float_t)0.99;
+    params->nb_threshold = (ht_float_t)0.0;
+    params->merit_preprune = true;
+    params->enable_hat = false;
+    params->bootstrap_sampling = false;
+    params->drift_window_threshold = 300U;
+    params->switch_significance = (ht_float_t)0.05;
+    params->adwin_delta = (ht_float_t)0.002;
+    params->learning_rate = (ht_float_t)0.01;
+    params->l2_regularization = (ht_float_t)1e-4;
+    params->model_selector_decay = (ht_float_t)0.95;
+    params->min_samples_split = (ht_float_t)5.0;
+}
+
+void ht_default_hat_reg_params(ht_config_params_t *params, uint8_t n_features) {
+    ht_default_reg_params(params, n_features);
+    params->enable_hat = true;
+    params->bootstrap_sampling = true;
+}
+
 ht_status_t ht_tree_init(ht_tree_t *tree, const ht_config_params_t *params) {
     if (tree == NULL || params == NULL) {
         return HT_ERR_INVALID_ARG;
@@ -477,8 +789,10 @@ ht_status_t ht_tree_init(ht_tree_t *tree, const ht_config_params_t *params) {
     if (params->n_features == 0 || params->n_features > HT_MAX_FEATURES) {
         return HT_ERR_INVALID_ARG;
     }
-    if (params->n_classes < 2 || params->n_classes > HT_MAX_CLASSES) {
-        return HT_ERR_INVALID_ARG;
+    if (params->task_type == HT_TASK_CLASSIFICATION) {
+        if (params->n_classes < 2 || params->n_classes > HT_MAX_CLASSES) {
+            return HT_ERR_INVALID_ARG;
+        }
     }
     if (params->delta <= (ht_float_t)0.0 || params->delta >= (ht_float_t)1.0) {
         return HT_ERR_INVALID_ARG;
@@ -508,6 +822,9 @@ ht_status_t ht_tree_init(ht_tree_t *tree, const ht_config_params_t *params) {
     for (uint16_t i = 0; i < HT_MAX_NODES; ++i) {
         tree->node_drift[i].adwin_idx = HT_INVALID_IDX;
         tree->node_drift[i].alt_tree_idx = HT_INVALID_IDX;
+        tree->node_drift[i].mean_error = (ht_float_t)0.0;
+        tree->node_drift[i].error_m2 = (ht_float_t)0.0;
+        tree->node_drift[i].error_count = 0U;
     }
 
     ht_memory_init(&tree->memory);
@@ -528,6 +845,9 @@ ht_status_t ht_tree_init(ht_tree_t *tree, const ht_config_params_t *params) {
     ht_node_t *root_node = &tree->memory.node_pool[root];
     root_node->stats_idx = stats;
     root_node->flags = HT_NODE_IS_LEAF | HT_NODE_IN_USE;
+    if (params->task_type == HT_TASK_REGRESSION) {
+        ht_var_init(&root_node->reg_stats);
+    }
 
     tree->root_idx = root;
     tree->n_active_leaves = 1;
@@ -1168,6 +1488,338 @@ ht_status_t ht_tree_learn_one(ht_tree_t *tree,
     return ht_tree_learn_one_subtree(tree, tree->root_idx, x, y, weight, 0);
 }
 
+ht_float_t ht_tree_predict_reg(const ht_tree_t *tree, const ht_value_t x[HT_MAX_FEATURES]) {
+    if (tree == NULL || x == NULL || tree->root_idx == HT_INVALID_IDX) {
+        return (ht_float_t)0.0;
+    }
+
+    if (tree->params.enable_hat && tree->adwin_pool != NULL) {
+        uint16_t curr_idx = tree->root_idx;
+        ht_float_t sum_pred = (ht_float_t)0.0;
+        uint32_t n_leaves = 0;
+
+        while (curr_idx != HT_INVALID_IDX) {
+            const ht_node_t *node = &tree->memory.node_pool[curr_idx];
+            if (node->flags & HT_NODE_IS_LEAF) {
+                sum_pred += ht_predict_reg_at_leaf(tree, curr_idx, x);
+                n_leaves++;
+                break;
+            }
+
+            const ht_node_drift_t *nd = &tree->node_drift[curr_idx];
+            if (nd->alt_tree_idx != HT_INVALID_IDX) {
+                uint16_t alt_leaf = ht_tree_route_from(tree, nd->alt_tree_idx, x);
+                if (alt_leaf != HT_INVALID_IDX) {
+                    sum_pred += ht_predict_reg_at_leaf(tree, alt_leaf, x);
+                    n_leaves++;
+                }
+            }
+
+            uint8_t f = node->feature_idx;
+            uint16_t next_idx;
+            if (node->flags & HT_NODE_SPLIT_CAT) {
+                int32_t cat = x[f].cat;
+                if (cat < 0 || cat >= (int32_t)HT_MAX_CATEGORIES) {
+                    next_idx = ht_most_common_child(tree, node);
+                } else if (cat == node->split_val.cat_val) {
+                    next_idx = node->left_child;
+                } else {
+                    next_idx = node->right_child;
+                }
+            } else {
+                ht_float_t num = x[f].num;
+                if (HT_ISNAN(num)) {
+                    next_idx = ht_most_common_child(tree, node);
+                } else if (num <= node->split_val.threshold) {
+                    next_idx = node->left_child;
+                } else {
+                    next_idx = node->right_child;
+                }
+            }
+            curr_idx = next_idx;
+        }
+
+        if (n_leaves == 0) {
+            return (ht_float_t)0.0;
+        }
+        return sum_pred / (ht_float_t)n_leaves;
+    }
+
+    uint16_t leaf_idx = ht_tree_route(tree, x, NULL, NULL, NULL);
+    return ht_predict_reg_at_leaf(tree, leaf_idx, x);
+}
+
+static ht_status_t ht_tree_learn_one_reg_subtree(ht_tree_t *tree,
+                                                 uint16_t sub_root,
+                                                 const ht_value_t x[HT_MAX_FEATURES],
+                                                 ht_float_t y,
+                                                 ht_float_t weight,
+                                                 uint16_t depth) {
+    if (sub_root == HT_INVALID_IDX) {
+        return HT_OK;
+    }
+
+    ht_float_t abs_error = (ht_float_t)0.0;
+    if (tree->params.enable_hat && tree->adwin_pool != NULL) {
+        uint16_t pred_leaf = ht_tree_route_from(tree, sub_root, x);
+        if (pred_leaf != HT_INVALID_IDX) {
+            ht_float_t y_pred = ht_predict_reg_at_leaf(tree, pred_leaf, x);
+            abs_error = HT_FABS(y - y_pred);
+        }
+    }
+
+    uint16_t curr_idx = sub_root;
+    uint16_t parent_idx = HT_INVALID_IDX;
+    uint8_t parent_branch = 0;
+
+    while (curr_idx != HT_INVALID_IDX) {
+        ht_node_t *node = &tree->memory.node_pool[curr_idx];
+        if (node->flags & HT_NODE_IS_LEAF) {
+            break;
+        }
+
+        ht_var_update(&node->reg_stats, y, weight);
+
+        if (tree->params.enable_hat && tree->adwin_pool != NULL) {
+            ht_node_drift_t *nd = &tree->node_drift[curr_idx];
+            bool error_drift = false;
+            if (nd->adwin_idx != HT_INVALID_IDX) {
+                ht_adwin_t *ad = ht_adwin_pool_get(tree->adwin_pool, nd->adwin_idx);
+                error_drift = ht_hat_check_reg_error_drift(ad, &nd->mean_error, &nd->error_m2, &nd->error_count, abs_error);
+            }
+
+            if (error_drift) {
+                if (nd->alt_tree_idx != HT_INVALID_IDX) {
+                    ht_tree_free_subtree(tree, nd->alt_tree_idx);
+                    tree->n_pruned_alternate_trees++;
+                    nd->alt_tree_idx = HT_INVALID_IDX;
+                }
+
+                uint16_t alt_leaf = ht_node_alloc(&tree->memory);
+                if (alt_leaf != HT_INVALID_IDX) {
+                    uint16_t alt_stats = ht_stats_alloc(&tree->memory);
+                    if (alt_stats == HT_INVALID_IDX) {
+                        if (ht_tree_deactivate_least_promising_leaf(tree) == HT_OK) {
+                            alt_stats = ht_stats_alloc(&tree->memory);
+                        }
+                    }
+                    if (alt_stats != HT_INVALID_IDX) {
+                        ht_node_t *al = &tree->memory.node_pool[alt_leaf];
+                        al->stats_idx = alt_stats;
+                        ht_leaf_stats_t *als = &tree->memory.stats_pool[alt_stats];
+                        als->last_split_attempt_at = (ht_float_t)0.0;
+                        als->fmse_mean = (ht_float_t)0.0;
+                        als->fmse_model = (ht_float_t)0.0;
+                        als->reg_intercept = (ht_float_t)0.0;
+                        memset(als->reg_weights, 0, sizeof(als->reg_weights));
+                        tree->n_active_leaves++;
+                    } else {
+                        tree->n_inactive_leaves++;
+                    }
+
+                    tree->node_drift[alt_leaf].adwin_idx = ht_adwin_pool_alloc(tree->adwin_pool, NULL);
+                    tree->node_drift[alt_leaf].alt_tree_idx = HT_INVALID_IDX;
+                    tree->node_drift[alt_leaf].mean_error = (ht_float_t)0.0;
+                    tree->node_drift[alt_leaf].error_m2 = (ht_float_t)0.0;
+                    tree->node_drift[alt_leaf].error_count = 0U;
+
+                    nd->alt_tree_idx = alt_leaf;
+                    tree->n_alternate_trees++;
+                }
+            } else if (nd->alt_tree_idx != HT_INVALID_IDX) {
+                uint16_t alt_idx = nd->alt_tree_idx;
+                ht_node_drift_t *alt_nd = &tree->node_drift[alt_idx];
+
+                ht_float_t var_old = (nd->error_count > 1) ? (nd->error_m2 / (ht_float_t)(nd->error_count - 1)) : (ht_float_t)0.0;
+                ht_float_t var_alt = (alt_nd->error_count > 1) ? (alt_nd->error_m2 / (ht_float_t)(alt_nd->error_count - 1)) : (ht_float_t)0.0;
+
+                ht_hat_action_t action = ht_hat_evaluate_reg_alternate(
+                    nd->mean_error,
+                    var_old,
+                    nd->error_count,
+                    alt_nd->mean_error,
+                    var_alt,
+                    alt_nd->error_count,
+                    tree->params.drift_window_threshold,
+                    tree->params.switch_significance
+                );
+
+                if (action == HT_HAT_ACTION_SWITCH) {
+                    if (parent_idx != HT_INVALID_IDX) {
+                        ht_node_t *p_node = &tree->memory.node_pool[parent_idx];
+                        if (parent_branch == 0) {
+                            p_node->left_child = alt_idx;
+                        } else {
+                            p_node->right_child = alt_idx;
+                        }
+                    } else if (tree->root_idx == curr_idx) {
+                        tree->root_idx = alt_idx;
+                    }
+
+                    nd->alt_tree_idx = HT_INVALID_IDX;
+                    ht_tree_free_subtree(tree, curr_idx);
+                    tree->n_switch_alternate_trees++;
+
+                    curr_idx = alt_idx;
+                    node = &tree->memory.node_pool[curr_idx];
+                    if (node->flags & HT_NODE_IS_LEAF) {
+                        break;
+                    }
+                } else if (action == HT_HAT_ACTION_PRUNE) {
+                    ht_tree_free_subtree(tree, alt_idx);
+                    nd->alt_tree_idx = HT_INVALID_IDX;
+                    tree->n_pruned_alternate_trees++;
+                }
+            }
+
+            if (nd->alt_tree_idx != HT_INVALID_IDX) {
+                ht_tree_learn_one_reg_subtree(tree, nd->alt_tree_idx, x, y, weight, depth);
+            }
+        }
+
+        uint8_t f = node->feature_idx;
+        uint16_t next_idx;
+        uint8_t branch;
+
+        if (node->flags & HT_NODE_SPLIT_CAT) {
+            int32_t cat = x[f].cat;
+            if (cat < 0 || cat >= (int32_t)HT_MAX_CATEGORIES) {
+                next_idx = ht_most_common_child(tree, node);
+                branch = (next_idx == node->left_child) ? 0 : 1;
+            } else if (cat == node->split_val.cat_val) {
+                next_idx = node->left_child;
+                branch = 0;
+            } else {
+                next_idx = node->right_child;
+                branch = 1;
+            }
+        } else {
+            ht_float_t num = x[f].num;
+            if (HT_ISNAN(num)) {
+                next_idx = ht_most_common_child(tree, node);
+                branch = (next_idx == node->left_child) ? 0 : 1;
+            } else if (num <= node->split_val.threshold) {
+                next_idx = node->left_child;
+                branch = 0;
+            } else {
+                next_idx = node->right_child;
+                branch = 1;
+            }
+        }
+
+        parent_idx = curr_idx;
+        parent_branch = branch;
+        curr_idx = next_idx;
+        depth++;
+    }
+
+    uint16_t leaf_idx = curr_idx;
+    ht_node_t *leaf = &tree->memory.node_pool[leaf_idx];
+
+    if (tree->params.enable_hat && tree->adwin_pool != NULL) {
+        ht_node_drift_t *leaf_nd = &tree->node_drift[leaf_idx];
+        if (leaf_nd->adwin_idx != HT_INVALID_IDX) {
+            ht_adwin_t *ad = ht_adwin_pool_get(tree->adwin_pool, leaf_nd->adwin_idx);
+            ht_hat_check_reg_error_drift(ad, &leaf_nd->mean_error, &leaf_nd->error_m2, &leaf_nd->error_count, abs_error);
+        }
+    }
+
+    if (leaf->stats_idx != HT_INVALID_IDX) {
+        ht_leaf_stats_t *stats = &tree->memory.stats_pool[leaf->stats_idx];
+
+        /* 1. Update fMSE if adaptive */
+        if (tree->params.leaf_prediction == HT_LEAF_ADAPTIVE) {
+            ht_float_t pred_mean = leaf->reg_stats.mean;
+            ht_float_t pred_model = ht_leaf_predict_linear_model(tree, stats, x);
+            ht_float_t err_mean = y - pred_mean;
+            ht_float_t err_model = y - pred_model;
+            stats->fmse_mean = tree->params.model_selector_decay * stats->fmse_mean + (err_mean * err_mean);
+            stats->fmse_model = tree->params.model_selector_decay * stats->fmse_model + (err_model * err_model);
+        }
+
+        /* 2. Update linear model via online SGD if MODEL or ADAPTIVE */
+        if (tree->params.leaf_prediction == HT_LEAF_MODEL || tree->params.leaf_prediction == HT_LEAF_ADAPTIVE) {
+            ht_float_t pred = ht_leaf_predict_linear_model(tree, stats, x);
+            ht_float_t err = y - pred;
+            ht_float_t n = leaf->reg_stats.count;
+            ht_float_t eta = tree->params.learning_rate / ((ht_float_t)1.0 + tree->params.l2_regularization * n);
+
+            stats->reg_intercept += eta * weight * err;
+            if (stats->reg_intercept > (ht_float_t)1e12) stats->reg_intercept = (ht_float_t)1e12;
+            else if (stats->reg_intercept < (ht_float_t)-1e12) stats->reg_intercept = (ht_float_t)-1e12;
+
+            ht_float_t l2_decay = (ht_float_t)1.0 - eta * tree->params.l2_regularization;
+            if (l2_decay < (ht_float_t)0.0) l2_decay = (ht_float_t)0.0;
+            for (uint8_t f = 0; f < tree->params.n_features; ++f) {
+                if (tree->params.feature_types[f] == HT_FEAT_NUMERIC) {
+                    if (!HT_ISNAN(x[f].num)) {
+                        stats->reg_weights[f] = stats->reg_weights[f] * l2_decay + eta * weight * err * x[f].num;
+                        if (stats->reg_weights[f] > (ht_float_t)1e12) stats->reg_weights[f] = (ht_float_t)1e12;
+                        else if (stats->reg_weights[f] < (ht_float_t)-1e12) stats->reg_weights[f] = (ht_float_t)-1e12;
+                    }
+                }
+            }
+        }
+
+        /* 3. Update target statistics */
+        ht_var_update(&leaf->reg_stats, y, weight);
+
+        /* 4. Update feature observers */
+        for (uint8_t f = 0; f < tree->params.n_features; ++f) {
+            if (tree->params.feature_types[f] == HT_FEAT_NUMERIC) {
+                if (!HT_ISNAN(x[f].num)) {
+                    ht_reg_numeric_update(&stats->observers[f].reg_num, x[f].num, y, weight);
+                }
+            } else {
+                int32_t cat = x[f].cat;
+                if (cat >= 0 && cat < (int32_t)HT_MAX_CATEGORIES) {
+                    ht_reg_categorical_update(&stats->observers[f].reg_cat, cat, y, weight);
+                }
+            }
+        }
+
+        /* 5. Check max depth */
+        if (depth >= tree->params.max_depth) {
+            ht_tree_deactivate_leaf(tree, leaf_idx);
+            return HT_OK;
+        }
+
+        /* 6. Check grace period */
+        ht_float_t weight_diff = leaf->reg_stats.count - stats->last_split_attempt_at;
+        if (weight_diff >= (ht_float_t)tree->params.grace_period) {
+            stats->last_split_attempt_at = leaf->reg_stats.count;
+            ht_tree_attempt_split_reg(tree, leaf_idx, depth);
+        }
+    } else {
+        ht_var_update(&leaf->reg_stats, y, weight);
+    }
+
+    return HT_OK;
+}
+
+ht_status_t ht_tree_learn_one_reg(ht_tree_t *tree,
+                                  const ht_value_t x[HT_MAX_FEATURES],
+                                  ht_float_t y,
+                                  ht_float_t weight) {
+    if (tree == NULL || x == NULL || weight <= (ht_float_t)0.0 || HT_ISNAN(y)) {
+        return HT_ERR_INVALID_ARG;
+    }
+    if (tree->params.task_type != HT_TASK_REGRESSION) {
+        return HT_ERR_INVALID_ARG;
+    }
+
+    tree->train_weight_seen += weight;
+
+    if (tree->params.enable_hat && tree->params.bootstrap_sampling) {
+        uint32_t k = ht_poisson_1(&tree->rng_state);
+        if (k > 0U) {
+            weight *= (ht_float_t)k;
+        }
+    }
+
+    return ht_tree_learn_one_reg_subtree(tree, tree->root_idx, x, y, weight, 0);
+}
+
 ht_float_t ht_tree_node_promise(const ht_node_t *node, uint8_t n_classes) {
     if (node == NULL || n_classes == 0) {
         return (ht_float_t)0.0;
@@ -1312,6 +1964,9 @@ ht_status_t ht_tree_save(const ht_tree_t *tree,
 #endif
     if (include_training_stats) {
         header.flags |= HT_SERIAL_FLAG_STATS;
+    }
+    if (tree->params.task_type == HT_TASK_REGRESSION) {
+        header.flags |= HT_SERIAL_FLAG_REG;
     }
     header.float_size = (uint16_t)sizeof(ht_float_t);
     header.num_nodes_in_use = num_nodes_in_use;
