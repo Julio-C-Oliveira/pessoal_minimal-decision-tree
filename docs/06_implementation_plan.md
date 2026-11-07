@@ -25,12 +25,17 @@
 | **3.1** | **Fase 3:** Detector ADWIN com Histograma Exponencial Fixo | `code/include/ht_drift.h`, `code/src/ht_drift.c`, `code/tests/test_drift.c`, `code/tests/test_e2e_flow.c` | **N1:** inserção, compressão de buckets $2^k$ ($M=5$), corte $\epsilon_{\text{cut}}$<br/>**N2:** pool estático de detectores ADWIN + detecção de salto de média | `[x]` | `41ab845` |
 | **3.2** | **Fase 3:** Hoeffding Adaptive Tree (HAT) | `code/include/ht_tree.h`, `code/src/ht_tree.c`, `code/src/ht_drift.c`, `code/tests/test_drift.c`, `code/tests/test_e2e_flow.c` | **N1:** filtro unilateral de erro, `bound` de troca/poda, votação $1/\hat{e}^2$<br/>**N2:** substituição de subárvore com reciclagem iterativa de nós antigos<br/>**N3:** stream E2E com drift abrupto recuperando acurácia | `[x]` | `6f36ac7` |
 | **3.3** | **Fase 3:** Benchmark de Concept Drift vs River HAT | `benchmarks/compare_river.py`, `benchmarks/bench_c_runner.c`, `benchmarks/generate_streams.py`, `benchmarks/drift_benchmark_report.md` | Paridade contra `HoeffdingAdaptiveTreeClassifier` em 5 fluxos sintéticos com drift abrupto e gradual (SEA, Agrawal, Hyperplane), switches automáticos de ramos, RAM $\le 1\text{ MB}$, zero heap dinâmico e speedup $>270\times$ a $400\times$ | `[x]` | `b405458` |
+| **4.1** | **Fase 4:** Estudo Teórico: Regressão Incremental (VFDT-R, FIMT-DD & HAT-R) | [`docs/07_regression_trees_fimtdd.md`](file:///home/julio/Documentos/pessoal_minimal-decision-tree/docs/07_regression_trees_fimtdd.md) | Revisão de West/Welford, Fórmulas de Chan, Redução de Variância, regra da razão $m_2/m_1 < 1-\epsilon$, Slots de Quantização, Folhas Mean/Model(SGD)/Adaptive e Teste Z Bilateral | `[ ]` | `—` |
+| **4.2** | **Fase 4:** Estruturas Unificadas (`union`) e Observadores de Regressão (Slots de Chan + Nominal) | `code/include/ht_config.h`, `code/include/ht_memory.h`, `code/src/ht_memory.c`, `code/include/ht_observer.h`, `code/src/ht_observer.c`, `code/tests/test_memory.c`, `code/tests/test_observer.c`, `code/tests/test_e2e_flow.c` | **N1:** `ht_var_update`, `ht_var_combine`, `ht_var_subtract` (Chan), fusão de 5 slots ordenados, `ht_reg_categorical_update`<br/>**N2:** `union` sem custo extra em `ht_node_t` ($28\text{ B}$/$48\text{ B}$) e `ht_feature_obs_t` ($80\text{ B}$/$160\text{ B}$)<br/>**N3:** ingestão de stream contínuo `y` no E2E | `[ ]` | `—` |
+| **4.3** | **Fase 4:** Critério de Redução de Variância (VR) & Split por Razão | `code/include/ht_criterion.h`, `code/src/ht_criterion.c`, `code/tests/test_criterion.c`, `code/tests/test_e2e_flow.c` | **N1:** `ht_compute_variance_reduction` (`ddof=1`), filtro `min_samples_split`, `ht_should_split_reg` ($m_2/m_1 < 1-\epsilon$)<br/>**N2:** seleção do melhor candidato numérico/categórico de regressão<br/>**N3:** decisão completa de split de regressão no E2E | `[ ]` | `—` |
+| **4.4** | **Fase 4:** Árvore de Regressão VFDT-R (Mean/Model SGD/Adaptive) e HAT-R (ADWIN + Z-Test) | `code/include/ht_tree.h`, `code/src/ht_tree.c`, `code/include/ht_drift.h`, `code/src/ht_drift.c`, `code/tests/test_tree.c`, `code/tests/test_drift.c`, `code/tests/test_e2e_flow.c` | **N1:** predição `HT_LEAF_MEAN`, `HT_LEAF_MODEL` (SGD com clip), `HT_LEAF_ADAPTIVE` ($\text{fmse}$ $\alpha=0.95$) e Teste Z bilateral ($p \le \alpha$)<br/>**N2:** herança de pesos SGD/$\text{fmse}$ no split, desativação por profundidade e Switch/Prune de subárvore em regressão<br/>**N3:** treino *prequential* E2E (estacionário + drift abrupto) e `ht_tree_save`/`ht_tree_load` | `[ ]` | `—` |
+| **4.5** | **Fase 4:** Benchmark Triplo de Regressão e Drift (C11 vs River HTR/HATR vs Scikit-Learn) | `benchmarks/generate_streams.py`, `benchmarks/bench_c_runner.c`, `benchmarks/compare_river.py`, `benchmarks/regression_benchmark_report.md`, `Makefile`, `code/Makefile` | Avaliação tripla em fluxos de regressão estacionários e com drift (Friedman, Friedman Drift, Planes2D, Piecewise Linear) em `float` e `double`: MAE, RMSE, $R^2$, Nós, RAM ($\le 1\text{ MB}$, heap 0.0 KB) e Speedup vs River | `[ ]` | `—` |
 
 ---
 
 ## 2. Orçamento Consolidado de Memória ($\le 1\text{ MB}$) e `_Static_assert`
 
-Toda a memória da árvore reside em estruturas estáticas pré-alocadas (zero chamadas a `malloc`/`calloc`/`realloc`/`free` em `ht_learn_one` e `ht_predict`).
+Toda a memória da árvore reside em estruturas estáticas pré-alocadas (zero chamadas a `malloc`/`calloc`/`realloc`/`free` em `ht_learn_one`, `ht_learn_one_reg`, `ht_predict` e `ht_predict_reg`).
 
 ### 2.1 Limites de Compilação Padrão (`include/ht_config.h`)
 
@@ -41,19 +46,23 @@ Toda a memória da árvore reside em estruturas estáticas pré-alocadas (zero c
 | `HT_MAX_CATEGORIES` | `5` | Cardinalidade máxima de um atributo categórico nominal ($V$) |
 | `HT_MAX_NODES` | `4096` | Capacidade do `node_pool` (nós internos + folhas ativas/inativas) |
 | `HT_MAX_ACTIVE_LEAVES` | `256` | Capacidade do `stats_pool` (folhas aprendendo simultaneamente) |
-| `HT_Gaussian_SPLITS` | `10` | Número de pontos de corte candidatos avaliados na Gaussiana ($k$) |
+| `HT_GAUSSIAN_SPLITS` | `10` | Número de pontos de corte candidatos avaliados na Gaussiana ($k$) |
+| `HT_REG_NUM_SLOTS` | `5` | Número de slots ordenados por atributo numérico na Regressão ($5 \times 4 = 20$ floats) |
 | `HT_INVALID_IDX` | `0xFFFFU` | Sentinela `uint16_t` para filho ou `stats_idx` inexistente |
 
-### 2.2 Tabela de Tamanhos Exatos (`sizeof`) e Verificação em Tempo de Compilação
+### 2.2 Tabela de Tamanhos Exatos (`sizeof`) e Unificação via `union` C11
+
+Graças ao uso de `union` anônima do C11 entre as estatísticas de Classificação (`class_counts[4]`, `lhs_dist[4]`, `rhs_dist[4]`, `num[4]`) e Regressão (`ht_var_stat_t` de 3 floats e `ht_reg_numeric_obs_t` de $5 \times 4 = 20$ floats), **`ht_node_t`, `ht_feature_obs_t` e `ht_split_candidate_t` não aumentam 1 único byte** ao incorporar suporte completo a Regressão:
 
 | Struct C11 | Tamanho Unitário em `float` (32-bit) | Tamanho Unitário em `double` (`-DHT_USE_DOUBLE`) | Quantidade no Pool | Total em `float` (32-bit) | Total em `double` (64-bit) |
 | :--- | :---: | :---: | :---: | :---: | :---: |
-| `ht_node_t` | **$28\text{ B}$** | **$48\text{ B}$** | `4096` (`node_pool`) | $114.688\text{ B}$ ($112.0\text{ KB}$) | $196.608\text{ B}$ ($192.0\text{ KB}$) |
-| `ht_gaussian_obs_t` | **$20\text{ B}$** | **$40\text{ B}$** | $16 \times 4$ por folha | — | — |
-| `ht_feature_obs_t` | **$80\text{ B}$** | **$160\text{ B}$** | $16$ por folha | — | — |
-| `ht_leaf_stats_t` | **$1.292\text{ B}$** | **$2.584\text{ B}$** | `256` (`stats_pool`) | $330.752\text{ B}$ ($323.0\text{ KB}$) | $661.504\text{ B}$ ($646.0\text{ KB}$) |
+| `ht_node_t` (Classif + Reg `union`) | **$28\text{ B}$** | **$48\text{ B}$** | `4096` (`node_pool`) | $114.688\text{ B}$ ($112.0\text{ KB}$) | $196.608\text{ B}$ ($192.0\text{ KB}$) |
+| `ht_gaussian_obs_t` / `ht_reg_num_slot_t` | **$20\text{ B}$ / $16\text{ B}$** | **$40\text{ B}$ / $32\text{ B}$** | $4$ ou $5$ por atributo | — | — |
+| `ht_feature_obs_t` (Classif + Reg `union`) | **$80\text{ B}$** | **$160\text{ B}$** | $16$ por folha | — | — |
+| `ht_leaf_stats_t` (Fase 1–3 / Fase 4 c/ SGD) | **$1.292\text{ B}$** ($\to 1.360\text{ B}$) | **$2.584\text{ B}$** ($\to 2.720\text{ B}$) | `256` (`stats_pool`) | $330.752\text{ B}$ ($\to 348.160\text{ B}$) | $661.504\text{ B}$ ($\to 696.320\text{ B}$) |
+| `ht_node_drift_t` (Fase 3 / Fase 4 c/ `error_m2`) | **$12\text{ B}$** ($\to 16\text{ B}$) | **$16\text{ B}$** ($\to 24\text{ B}$) | `4096` (`node_drift`) | $49.152\text{ B}$ ($\to 65.536\text{ B}$) | $65.536\text{ B}$ ($\to 98.304\text{ B}$) |
 | Free-lists + Header `ht_tree_t` | $\approx 8.8\text{ KB}$ | $\approx 8.8\text{ KB}$ | `1` instância | $8.832\text{ B}$ ($8.6\text{ KB}$) | $8.864\text{ B}$ ($8.7\text{ KB}$) |
-| **Total `sizeof(ht_tree_t)` (VFDT)** | — | — | **1 Árvore Completa** | **$454.272\text{ B}$ ($\approx 443.6\text{ KB}$)** | **$866.976\text{ B}$ ($\approx 846.7\text{ KB}$)** |
+| **Total `sizeof(ht_tree_t)` (Unificado)** | — | — | **1 Árvore Completa** | **$\le 537.2\text{ KB}$** | **$\le 1.000,1\text{ KB}$ ($\le 1\text{ MB}$)** |
 
 ```c
 /* Verificações obrigatórias em tempo de compilação: */
@@ -383,6 +392,127 @@ typedef struct {
 
 ---
 
+### Entrega 4.2: Estruturas Unificadas (`union`) e Observadores de Regressão (`include/ht_config.h`, `include/ht_memory.h`, `include/ht_observer.h`, `src/ht_observer.c`)
+
+Unifica o armazenamento de Classificação e Regressão usando `union` anônima do C11 para manter **zero bytes adicionais** em `ht_node_t`, `ht_feature_obs_t` e `ht_split_candidate_t`, e implementa as estatísticas suficientes de variância contínua (`ht_var_stat_t` com algoritmo de West/Welford + fórmulas paralelas de Chan et al. 1983) e o observador numérico de slots ordenados com fusão em $O(1)$:
+
+```c
+/* Tipo de tarefa em ht_config.h */
+#ifndef HT_REG_NUM_SLOTS
+#define HT_REG_NUM_SLOTS 5U
+#endif
+
+typedef enum {
+    HT_TASK_CLASSIFICATION = 0,
+    HT_TASK_REGRESSION     = 1
+} ht_task_type_t;
+
+/* Estatística suficiente de variância do alvo y (3 floats = 12 B em float32 / 24 B em double) */
+typedef struct {
+    ht_float_t count; /* Peso total acumulado n */
+    ht_float_t mean;  /* Média incremental \mu_y */
+    ht_float_t m2;    /* Soma de desvios quadráticos centrados S_y */
+} ht_var_stat_t;
+
+/* Slot de quantização numérica para regressão (4 floats = 16 B em float32 / 32 B em double) */
+typedef struct {
+    ht_float_t    x_mean;  /* Média incremental do atributo x no slot */
+    ht_var_stat_t y_stats; /* Estatísticas (n, \mu_y, S_y) do alvo y no slot */
+} ht_reg_num_slot_t;
+
+/* Observador numérico de regressão (5 slots * 4 floats = 20 floats = 80 B em float32) */
+typedef struct {
+    ht_reg_num_slot_t slots[HT_REG_NUM_SLOTS];
+} ht_reg_numeric_obs_t;
+
+/* Observador categórico de regressão (5 categorias * 3 floats = 15 floats <= 20 floats) */
+typedef struct {
+    ht_var_stat_t cat_stats[HT_MAX_CATEGORIES];
+} ht_reg_categorical_obs_t;
+
+/* Nó estrutural unificado (mantém 28 B em float32 / 48 B em double64) */
+typedef struct {
+    union {
+        ht_float_t    class_counts[HT_MAX_CLASSES];
+        ht_var_stat_t reg_stats;
+    };
+    union {
+        ht_float_t threshold;
+        int32_t    cat_val;
+    } split_val;
+    uint16_t left_child;
+    uint16_t right_child;
+    uint16_t stats_idx;
+    uint8_t  feature_idx;
+    uint8_t  flags;
+} ht_node_t;
+
+/* Observador de atributo unificado (mantém 80 B em float32 / 160 B em double64) */
+typedef union {
+    ht_gaussian_obs_t        num[HT_MAX_CLASSES];
+    ht_categorical_obs_t     cat;
+    ht_reg_numeric_obs_t     reg_num;
+    ht_reg_categorical_obs_t reg_cat;
+} ht_feature_obs_t;
+
+/* Estado pesado de folha ativa com pesos lineares SGD (1360 B em float32 / 2720 B em double64) */
+typedef struct {
+    ht_float_t last_split_attempt_at;
+    union {
+        ht_float_t mc_correct_weight;
+        ht_float_t fmse_mean;
+    };
+    union {
+        ht_float_t nb_correct_weight;
+        ht_float_t fmse_model;
+    };
+    ht_float_t       reg_weights[HT_MAX_FEATURES];
+    ht_float_t       reg_intercept;
+    ht_feature_obs_t observers[HT_MAX_FEATURES];
+} ht_leaf_stats_t;
+```
+
+#### API Pública de Variância e Observadores de Regressão (`ht_observer.h`):
+- `void ht_var_init(ht_var_stat_t *var)`
+- `void ht_var_update(ht_var_stat_t *var, ht_float_t y, ht_float_t weight)`
+- `ht_float_t ht_var_value(const ht_var_stat_t *var)`: Retorna $S_y / (n - 1)$ para $n > 1.0$, ou `0.0` caso contrário (`ddof = 1`).
+- `ht_var_stat_t ht_var_combine(const ht_var_stat_t *a, const ht_var_stat_t *b)`: Adição paralela exata de Chan ($S_{A+B} = S_A + S_B + (\mu_A - \mu_B)^2 \frac{n_A n_B}{n_A + n_B}$).
+- `ht_var_stat_t ht_var_subtract(const ht_var_stat_t *total, const ht_var_stat_t *part)`: Subtração paralela de Chan ($D_R = D_{\text{pre}} - D_L$).
+- `void ht_reg_numeric_update(ht_reg_numeric_obs_t *obs, ht_float_t x_val, ht_float_t y_val, ht_float_t weight)`: Insere em ordem crescente de `x_mean`; se os 5 slots estiverem ocupados, funde os dois slots adjacentes mais próximos via `ht_var_combine`.
+- `void ht_reg_categorical_update(ht_reg_categorical_obs_t *obs, int32_t cat_val, ht_float_t y_val, ht_float_t weight)`
+
+---
+
+### Entrega 4.3: Critério de Redução de Variância e Split por Razão (`include/ht_criterion.h`, `src/ht_criterion.c`)
+
+Implementa o critério `HT_CRIT_VARIANCE_REDUCTION` e a regra de decisão de split por razão ($m_2 / m_1 < 1 - \epsilon \lor \epsilon < \tau$ com alcance $R = 1.0$) em paridade com `VarianceReductionSplitCriterion` e `HoeffdingTreeRegressor` do River:
+
+#### API Pública de Critério de Regressão (`ht_criterion.h`):
+- `ht_float_t ht_compute_variance_reduction(const ht_var_stat_t *pre_var, const ht_var_stat_t *lhs_var, const ht_var_stat_t *rhs_var, ht_float_t min_samples_split, ht_float_t min_branch_frac)`:
+  - Verifica se $n_L \ge \text{min\_samples\_split}$, $n_R \ge \text{min\_samples\_split}$ e frações $\ge \text{min\_branch\_frac}$; caso contrário retorna `-HT_INFINITY`.
+  - Calcula $\text{VR} = \operatorname{Var}(D_{\text{pre}}) - \left(\frac{n_L}{n}\operatorname{Var}(D_L) + \frac{n_R}{n}\operatorname{Var}(D_R)\right)$.
+- `void ht_evaluate_reg_numeric_observer(const ht_reg_numeric_obs_t *obs, const ht_var_stat_t *pre_var, uint8_t feature_idx, ht_float_t min_samples_split, ht_float_t min_branch_frac, ht_split_candidate_t *out_best)`
+- `void ht_evaluate_reg_categorical_observer(const ht_reg_categorical_obs_t *obs, const ht_var_stat_t *pre_var, uint8_t feature_idx, ht_float_t min_samples_split, ht_float_t min_branch_frac, ht_split_candidate_t *out_best)`
+- `void ht_find_best_reg_split_candidates(const ht_leaf_stats_t *stats, const ht_var_stat_t *pre_var, const ht_feature_type_t feature_types[HT_MAX_FEATURES], uint8_t n_features, ht_float_t min_samples_split, ht_float_t min_branch_frac, bool merit_preprune, ht_split_candidate_t *out_best, ht_split_candidate_t *out_second_best)`
+- `bool ht_should_split_reg(const ht_split_candidate_t *best, const ht_split_candidate_t *second_best, ht_float_t hoeffding_bound, ht_float_t tau)`:
+  - Dispara split se `best->merit > 0.0`, `best->feature_idx != HT_NO_FEATURE` e (`second_best` inválido, ou `second_best->merit <= 0.0`, ou `(second_best->merit / best->merit) < (1.0 - hoeffding_bound)`, ou `hoeffding_bound < tau`).
+
+---
+
+### Entrega 4.4: Árvore de Regressão VFDT-R (Mean/Model/Adaptive) e HAT-R (`include/ht_tree.h`, `src/ht_tree.c`, `include/ht_drift.h`, `src/ht_drift.c`)
+
+Integra os 3 modos de predição nas folhas de regressão (`HT_LEAF_MEAN`, `HT_LEAF_MODEL` com regressão linear SGD e clipping de gradiente em $\pm 10^{12}$, e `HT_LEAF_ADAPTIVE` com erro quadrático exponencialmente decaído $\alpha = 0.95$ e herança de pesos no split), além do `HoeffdingAdaptiveTreeRegressor` com monitoramento de erro absoluto $|y - \hat{y}|$ via ADWIN2 e **Teste Z Bilateral** para troca/poda de subárvores alternativas:
+
+#### API Pública de Regressão e Drift Contínuo (`ht_tree.h` e `ht_drift.h`):
+- `void ht_default_reg_params(ht_config_params_t *params, uint8_t n_features)`
+- `void ht_default_hat_reg_params(ht_config_params_t *params, uint8_t n_features)`
+- `ht_float_t ht_tree_predict_reg(const ht_tree_t *tree, const ht_value_t x[HT_MAX_FEATURES])`
+- `ht_status_t ht_tree_learn_one_reg(ht_tree_t *tree, const ht_value_t x[HT_MAX_FEATURES], ht_float_t y, ht_float_t weight)`
+- `bool ht_hat_check_reg_error_drift(ht_adwin_t *adwin, ht_float_t *mean_error, ht_float_t *error_m2, uint32_t *error_count, ht_float_t abs_error)`
+- `ht_hat_action_t ht_hat_evaluate_reg_alternate(ht_float_t e_old, ht_float_t var_old, uint32_t n_old, ht_float_t e_alt, ht_float_t var_alt, uint32_t n_alt, uint32_t min_obs, ht_float_t alpha)`
+
+---
+
 ## 4. Matriz de Testes Progressivos em 3 Níveis (`tests/`)
 
 Conforme a skill [`embedded-c-tree`](file:///home/julio/Documentos/pessoal_minimal-decision-tree/.agents/skills/embedded-c-tree/SKILL.md), **nenhuma entrega avança para a próxima sem passar nos 3 níveis de testes abaixo**, compilados e executados tanto em `float` quanto em `double`:
@@ -424,6 +554,18 @@ flowchart LR
    - **Nível 1:** Filtro unilateral de erro (supressão quando erro decresce ou empata), bound analítico de troca/poda, avaliação de Switch e Prune, votação ponderada normalizada $1/\hat{e}^2$.
    - **Nível 2:** Substituição de subárvore (*Switch*) com reciclagem iterativa em pilha de nós, blocos de estatísticas e detectores ADWIN; poda de árvore alternativa (*Prune*).
    - **Nível 3 (`test_e2e_flow.c`):** Stream sintético com drift abrupto invertendo o conceito gerador, comprovando geração de árvore alternativa, substituição automática (*Switch*), recuperação de acurácia prequential ($> 85\%$) e desalocação com zero vazamentos e conformidade com o limite de 1 MB.
+8. **Entrega 4.2 (`ht_memory` + `ht_observer` + `test_memory.c` + `test_observer.c` + `test_e2e_flow.c`):**
+   - **Nível 1:** Validação analítica de `ht_var_update`, `ht_var_combine` e `ht_var_subtract` (fórmulas de Chan), ordenação e fusão de slots próximos em `ht_reg_numeric_update`, e atualização por categoria em `ht_reg_categorical_update`.
+   - **Nível 2:** Verificação de `_Static_assert` garantindo zero bytes extras em `ht_node_t`, `ht_feature_obs_t` e `ht_split_candidate_t`, e observadores de regressão operando dentro do `stats_pool`.
+   - **Nível 3 (`test_e2e_flow.c`):** Ingestão de stream contínuo sintético populando estatísticas de alvo e slots de atributos sem ultrapassar 1 MB.
+9. **Entrega 4.3 (`ht_criterion` + `test_criterion.c` + `test_e2e_flow.c`):**
+   - **Nível 1:** Cálculo analítico de `ht_compute_variance_reduction` (`ddof=1`), bloqueio por `min_samples_split`, e validação da condição de razão `ht_should_split_reg` ($m_2 / m_1 < 1 - \epsilon \lor \epsilon < \tau$).
+   - **Nível 2:** Seleção do atributo e ponto de corte que maximizam a redução de variância entre múltiplos observadores numéricos e categóricos.
+   - **Nível 3 (`test_e2e_flow.c`):** Pipeline desde amostras contínuas até a decisão de split por redução de variância e reciclagem do bloco no pool.
+10. **Entrega 4.4 (`ht_tree` + `ht_drift` + `test_tree.c` + `test_drift.c` + `test_e2e_flow.c`):**
+    - **Nível 1:** Predição `HT_LEAF_MEAN`, passo de gradiente `HT_LEAF_MODEL` (SGD com clipping e L2), chaveamento `HT_LEAF_ADAPTIVE` ($\text{fmse}$ com $\alpha = 0.95$), e Teste Z bilateral em `ht_hat_evaluate_reg_alternate`.
+    - **Nível 2:** Herança dos pesos SGD e $\text{fmse}$ pelas folhas filhas no split, desativação de folhas por profundidade quando `stats_pool` enche, e substituição/poda de subárvore alternativa no `HATRegressor`.
+    - **Nível 3 (`test_e2e_flow.c`):** Treinamento *prequential* ponta a ponta de regressão estacionária e com drift abrupto comprovando queda de MSE/MAE, seguido de roundtrip `ht_tree_save` $\to$ `ht_tree_load` com igualdade bit-a-bit nas predições contínuas.
 
 ---
 
@@ -465,3 +607,9 @@ flowchart LR
   - C11 HAT processa cada amostra (inferência com predição ponderada $1/\hat{e}^2$ + atualização de ADWIN2 em cada nó do caminho + treino online) em apenas **1.03 a 1.92 $\mu$s/amostra**.
   - Speedups massivos de **$275\times$ a mais de $403\times$** sobre o `HoeffdingAdaptiveTreeClassifier` do River em Python.
 - Relatório consolidado gerado automaticamente em [`benchmarks/drift_benchmark_report.md`](file:///home/julio/Documentos/pessoal_minimal-decision-tree/benchmarks/drift_benchmark_report.md).
+
+### Entrega 4.5: Benchmark Triplo de Regressão e Concept Drift vs River e Scikit-Learn (`make bench-regression`)
+- Avaliação comparativa em fluxos de regressão estacionários e com *Concept Drift* (ex: **Friedman**, **Friedman Abrupt/Gradual Drift**, **Planes2D**, **Piecewise Linear**) e ablação das folhas (`Mean` vs `Model` vs `Adaptive`).
+- Comparação tripla entre `DecisionTreeRegressor` (Scikit-Learn Batch), `HoeffdingTreeRegressor` / `HoeffdingAdaptiveTreeRegressor` (River) e C11 (`float` e `double`).
+- Métricas reportadas: MAE, RMSE, $R^2$ (Holdout e Prequential), Topologia (Nós, Switches de Subárvore), Consumo de RAM ($\le 1\text{ MB}$, 0.0 KB de heap dinâmico) e Throughput ($\mu\text{s}$/amostra e speedup sobre River).
+- Relatório consolidado gerado em [`benchmarks/regression_benchmark_report.md`](file:///home/julio/Documentos/pessoal_minimal-decision-tree/benchmarks/regression_benchmark_report.md).
