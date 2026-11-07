@@ -9,6 +9,11 @@ description: >-
 
 Esta skill define o protocolo de engenharia para desenvolver e validar os módulos em C11 (`include/`, `src/`, `tests/`) garantindo o limite rígido de **$\le 1\text{ MB}$ de RAM** e compatibilidade com microcontroladores.
 
+> **Consulta Rápida às Referências (River & Scikit-Learn):**
+> Sempre que precisar conferir uma fórmula, regra de desempate ou layout de struct original durante a implementação em C, consulte diretamente os mapas indexados em:
+> - [`.agents/skills/study-reference/references/river_architecture_map.md`](../study-reference/references/river_architecture_map.md)
+> - [`.agents/skills/study-reference/references/sklearn_architecture_map.md`](../study-reference/references/sklearn_architecture_map.md)
+
 ## Checklist de Arquitetura e Memória
 
 1. **Orçamento de Memória e Layout de Structs:**
