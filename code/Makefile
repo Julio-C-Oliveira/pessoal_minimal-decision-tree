@@ -47,8 +47,26 @@ test: $(TEST_RUNNER)
 	@echo "Executing Hoeffding Tree Test Suite..."
 	./$(TEST_RUNNER)
 
-bench:
-	@echo "Benchmarks will be configured in Phase 2."
+BENCH_SRC = ../benchmarks/bench_c_runner.c
+BENCH_RUNNER = $(BUILD_DIR)/bench_c_runner
+BENCH_RUNNER_DOUBLE = $(BUILD_DIR)/bench_c_runner_double
+PYTHON ?= ../.venv/bin/python
+
+$(BENCH_RUNNER): directories $(SRCS) $(BENCH_SRC)
+	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -pedantic -Iinclude $(SRCS) $(BENCH_SRC) $(LDFLAGS) -o $@
+
+$(BENCH_RUNNER_DOUBLE): directories $(SRCS) $(BENCH_SRC)
+	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -pedantic -Iinclude -DHT_USE_DOUBLE $(SRCS) $(BENCH_SRC) $(LDFLAGS) -o $@
+
+bench: $(BENCH_RUNNER) $(BENCH_RUNNER_DOUBLE)
+	@echo "Executing Hoeffding Tree Parity & Memory Benchmark vs River..."
+	@if [ -x "$(PYTHON)" ]; then \
+		$(PYTHON) ../benchmarks/compare_river.py --bin-float $(BENCH_RUNNER) --bin-double $(BENCH_RUNNER_DOUBLE) --data-dir ../benchmarks/data --report ../benchmarks/benchmark_report.md; \
+	elif command -v python3 >/dev/null 2>&1; then \
+		python3 ../benchmarks/compare_river.py --bin-float $(BENCH_RUNNER) --bin-double $(BENCH_RUNNER_DOUBLE) --data-dir ../benchmarks/data --report ../benchmarks/benchmark_report.md; \
+	else \
+		echo "Error: Python 3 with river not found!"; exit 1; \
+	fi
 
 clean:
 	rm -rf $(BUILD_DIR)
