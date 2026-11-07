@@ -35,10 +35,14 @@ typedef struct {
     uint16_t max_depth;
     size_t   bytes_used;
     double   avg_us_per_sample;
+    uint16_t n_alternate_trees;
+    uint16_t n_switches;
+    uint16_t n_prunes;
 } bench_checkpoint_t;
 
 /* Static memory allocations (BSS) - zero malloc in runtime */
 static ht_tree_t tree_instance;
+static ht_adwin_pool_t adwin_pool;
 static bench_checkpoint_t checkpoints[MAX_CHECKPOINTS];
 static size_t num_checkpoints = 0;
 static uint8_t test_predictions[MAX_TEST_SAMPLES];
@@ -63,6 +67,11 @@ static void print_usage(const char *prog_name) {
     fprintf(stderr, "  --checkpoint-interval <N>         Interval between checkpoints (default: 1000)\n");
     fprintf(stderr, "  --test-csv <file.csv>             Optional separate holdout test CSV for inference\n");
     fprintf(stderr, "  --json <file.json>                Save JSON benchmark results\n");
+    fprintf(stderr, "  --hat                             Enable Hoeffding Adaptive Tree (HAT) drift adaptation\n");
+    fprintf(stderr, "  --bootstrap-sampling <0|1>        Bootstrap sampling in HAT (default: 1)\n");
+    fprintf(stderr, "  --drift-window-threshold <N>      Min observations before switch (default: 300)\n");
+    fprintf(stderr, "  --switch-significance <S>         Switch significance alpha (default: 0.05)\n");
+    fprintf(stderr, "  --adwin-delta <D>                 ADWIN detector delta (default: 0.002)\n");
 }
 
 int main(int argc, char *argv[]) {
@@ -80,6 +89,11 @@ int main(int argc, char *argv[]) {
     double tau_val = 0.05;
     uint32_t checkpoint_interval = 1000;
     const char *json_out_path = NULL;
+    bool enable_hat = false;
+    bool bootstrap_sampling = true;
+    uint16_t drift_window_threshold = 300;
+    double switch_significance = 0.05;
+    double adwin_delta = 0.002;
 
     for (int i = 2; i < argc; ++i) {
         if (strcmp(argv[i], "--criterion") == 0 && i + 1 < argc) {
@@ -109,6 +123,16 @@ int main(int argc, char *argv[]) {
             test_csv_path = argv[++i];
         } else if (strcmp(argv[i], "--json") == 0 && i + 1 < argc) {
             json_out_path = argv[++i];
+        } else if (strcmp(argv[i], "--hat") == 0 || strcmp(argv[i], "--enable-hat") == 0) {
+            enable_hat = true;
+        } else if (strcmp(argv[i], "--bootstrap-sampling") == 0 && i + 1 < argc) {
+            bootstrap_sampling = (atoi(argv[++i]) != 0);
+        } else if (strcmp(argv[i], "--drift-window-threshold") == 0 && i + 1 < argc) {
+            drift_window_threshold = (uint16_t)atoi(argv[++i]);
+        } else if (strcmp(argv[i], "--switch-significance") == 0 && i + 1 < argc) {
+            switch_significance = atof(argv[++i]);
+        } else if (strcmp(argv[i], "--adwin-delta") == 0 && i + 1 < argc) {
+            adwin_delta = atof(argv[++i]);
         } else {
             fprintf(stderr, "Unknown option: %s\n", argv[i]);
             print_usage(argv[0]);
@@ -175,7 +199,15 @@ int main(int argc, char *argv[]) {
 
     /* Configure Hoeffding Tree */
     ht_config_params_t params;
-    ht_default_params(&params, (uint8_t)n_features, (uint8_t)n_classes);
+    if (enable_hat) {
+        ht_default_hat_params(&params, (uint8_t)n_features, (uint8_t)n_classes);
+        params.bootstrap_sampling = bootstrap_sampling;
+        params.drift_window_threshold = drift_window_threshold;
+        params.switch_significance = (ht_float_t)switch_significance;
+        params.adwin_delta = (ht_float_t)adwin_delta;
+    } else {
+        ht_default_params(&params, (uint8_t)n_features, (uint8_t)n_classes);
+    }
     for (uint8_t f = 0; f < n_features; ++f) {
         params.feature_types[f] = feat_types[f];
     }
@@ -189,7 +221,18 @@ int main(int argc, char *argv[]) {
     params.nb_threshold = (ht_float_t)0.0;
     params.merit_preprune = true;
 
-    ht_status_t init_status = ht_tree_init(&tree_instance, &params);
+    ht_status_t init_status;
+    if (enable_hat) {
+        ht_status_t pool_status = ht_adwin_pool_init(&adwin_pool);
+        if (pool_status != HT_OK) {
+            fprintf(stderr, "Error: Failed to initialize ADWIN pool: %d\n", pool_status);
+            fclose(fp);
+            return 1;
+        }
+        init_status = ht_tree_init_hat(&tree_instance, &params, &adwin_pool);
+    } else {
+        init_status = ht_tree_init(&tree_instance, &params);
+    }
     if (init_status != HT_OK) {
         fprintf(stderr, "Error: Failed to initialize Hoeffding Tree: %d\n", init_status);
         fclose(fp);
@@ -197,17 +240,20 @@ int main(int argc, char *argv[]) {
     }
 
     const char *mode_str = (sizeof(ht_float_t) == 8) ? "float64 (double)" : "float32 (single)";
+    size_t model_struct_bytes = sizeof(ht_tree_t) + (enable_hat ? sizeof(ht_adwin_pool_t) : 0);
 
     printf("====================================================================================\n");
-    printf(" C11 Hoeffding Tree Prequential Benchmark Runner\n");
+    printf(" C11 Hoeffding Tree Prequential Benchmark Runner (%s)\n",
+           enable_hat ? "HAT / Adaptive" : "VFDT / Static");
     printf(" Stream:          %s (features=%u, classes=%u, expected_samples=%u)\n",
            stream_name, n_features, n_classes, header_n_samples);
-    printf(" Precision Mode:  %s (tree size = %zu bytes, %.1f KB)\n",
-           mode_str, sizeof(ht_tree_t), (double)sizeof(ht_tree_t) / 1024.0);
-    printf(" Hyperparameters: Criterion=%s, Leaf=%s, GracePeriod=%u, Delta=%.1e, Tau=%.3f\n",
+    printf(" Precision Mode:  %s (model static size = %zu bytes, %.1f KB)\n",
+           mode_str, model_struct_bytes, (double)model_struct_bytes / 1024.0);
+    printf(" Hyperparameters: Criterion=%s, Leaf=%s, GracePeriod=%u, Delta=%.1e, Tau=%.3f%s\n",
            (criterion == HT_CRIT_INFO_GAIN) ? "InfoGain" : "Gini",
            (leaf_pred == HT_LEAF_NBA) ? "NBA" : ((leaf_pred == HT_LEAF_NB) ? "NB" : "MC"),
-           grace_period, delta_val, tau_val);
+           grace_period, delta_val, tau_val,
+           enable_hat ? ", HAT=enabled" : "");
     printf("====================================================================================\n");
     printf(" %-8s | %-10s | %-6s | %-7s | %-7s | %-6s | %-10s | %-10s\n",
            "Sample", "Accuracy", "Nodes", "Active", "Inact.", "Depth", "RAM (KB)", "Time/s (us)");
@@ -274,6 +320,9 @@ int main(int argc, char *argv[]) {
                                   tree_instance.n_inactive_leaves +
                                   tree_instance.n_decision_nodes;
             size_t bytes_used = ht_memory_bytes_used(&tree_instance.memory);
+            if (enable_hat) {
+                bytes_used += ht_adwin_pool_bytes_used(&adwin_pool);
+            }
             double avg_us = total_elapsed_us / (double)sample_idx;
 
             printf(" %-8u | %9.4f%% | %-6u | %-7u | %-7u | %-6u | %9.1f | %10.2f\n",
@@ -292,6 +341,9 @@ int main(int argc, char *argv[]) {
                 checkpoints[num_checkpoints].max_depth = tree_instance.max_depth_seen;
                 checkpoints[num_checkpoints].bytes_used = bytes_used;
                 checkpoints[num_checkpoints].avg_us_per_sample = avg_us;
+                checkpoints[num_checkpoints].n_alternate_trees = tree_instance.n_alternate_trees;
+                checkpoints[num_checkpoints].n_switches = tree_instance.n_switch_alternate_trees;
+                checkpoints[num_checkpoints].n_prunes = tree_instance.n_pruned_alternate_trees;
                 num_checkpoints++;
             }
         }
@@ -356,12 +408,20 @@ int main(int argc, char *argv[]) {
                           tree_instance.n_inactive_leaves +
                           tree_instance.n_decision_nodes;
     size_t final_bytes = ht_memory_bytes_used(&tree_instance.memory);
+    if (enable_hat) {
+        final_bytes += ht_adwin_pool_bytes_used(&adwin_pool);
+    }
     double final_avg_us = (sample_idx > 0) ? (total_elapsed_us / (double)sample_idx) : 0.0;
 
     printf("------------------------------------------------------------------------------------\n");
     printf(" Summary: Samples=%u, Accuracy=%.4f%%, Nodes=%u, ActiveLeaves=%u, RAM=%.1f KB (<=1024 KB), Avg=%.2f us/sample\n",
            sample_idx, final_accuracy * 100.0, final_nodes, tree_instance.n_active_leaves,
            (double)final_bytes / 1024.0, final_avg_us);
+    if (enable_hat) {
+        printf(" HAT Adaptation: AlternateTrees=%u, Switches=%u, Prunes=%u, ADWINUsed=%u\n",
+               tree_instance.n_alternate_trees, tree_instance.n_switch_alternate_trees,
+               tree_instance.n_pruned_alternate_trees, adwin_pool.allocated_count);
+    }
     if (test_csv_path) {
         double holdout_acc = (num_test_samples > 0) ? ((double)num_test_correct / (double)num_test_samples) : 0.0;
         double test_avg_us = (num_test_samples > 0) ? (test_elapsed_us / (double)num_test_samples) : 0.0;
@@ -379,6 +439,13 @@ int main(int argc, char *argv[]) {
             fprintf(jfp, "{\n");
             fprintf(jfp, "  \"stream\": \"%s\",\n", stream_name);
             fprintf(jfp, "  \"precision\": \"%s\",\n", (sizeof(ht_float_t) == 8) ? "double" : "float");
+            fprintf(jfp, "  \"enable_hat\": %s,\n", enable_hat ? "true" : "false");
+            if (enable_hat) {
+                fprintf(jfp, "  \"n_alternate_trees\": %u,\n", tree_instance.n_alternate_trees);
+                fprintf(jfp, "  \"n_switch_alternate_trees\": %u,\n", tree_instance.n_switch_alternate_trees);
+                fprintf(jfp, "  \"n_pruned_alternate_trees\": %u,\n", tree_instance.n_pruned_alternate_trees);
+                fprintf(jfp, "  \"adwin_detectors_used\": %u,\n", adwin_pool.allocated_count);
+            }
             fprintf(jfp, "  \"n_samples\": %u,\n", sample_idx);
             fprintf(jfp, "  \"n_features\": %u,\n", n_features);
             fprintf(jfp, "  \"n_classes\": %u,\n", n_classes);
@@ -414,7 +481,11 @@ int main(int argc, char *argv[]) {
                 fprintf(jfp, "      \"n_decision_nodes\": %u,\n", checkpoints[c].n_decision_nodes);
                 fprintf(jfp, "      \"max_depth\": %u,\n", checkpoints[c].max_depth);
                 fprintf(jfp, "      \"bytes_used\": %zu,\n", checkpoints[c].bytes_used);
-                fprintf(jfp, "      \"avg_us_per_sample\": %.3f\n", checkpoints[c].avg_us_per_sample);
+                fprintf(jfp, "      \"avg_us_per_sample\": %.3f%s\n", checkpoints[c].avg_us_per_sample, enable_hat ? "," : "");
+                if (enable_hat) {
+                    fprintf(jfp, "      \"n_alternate_trees\": %u,\n", checkpoints[c].n_alternate_trees);
+                    fprintf(jfp, "      \"n_switches\": %u\n", checkpoints[c].n_switches);
+                }
                 fprintf(jfp, "    }%s\n", (c + 1 < num_checkpoints) ? "," : "");
             }
 

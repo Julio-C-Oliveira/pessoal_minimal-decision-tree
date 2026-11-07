@@ -16,6 +16,7 @@ bench_c_runner and compare_river.py.
 import argparse
 import os
 import sys
+import numpy as np
 from river.datasets import synth
 
 
@@ -83,12 +84,130 @@ def generate_stagger(n_samples: int, seed: int):
     return keys, feature_types, 2, samples
 
 
+def generate_sea_drift_abrupt(n_samples: int, seed: int):
+    """SEA concept drift with abrupt transition from variant 0 to variant 3 at midpoint."""
+    feature_names = [f"f{i}" for i in range(3)]
+    feature_types = [0, 0, 0]
+    position = n_samples // 2
+
+    gen1 = synth.SEA(seed=seed, variant=0)
+    gen2 = synth.SEA(seed=seed + 1, variant=3)
+
+    samples = []
+    for i, (x, y) in enumerate(gen1.take(position)):
+        samples.append(([float(x[k]) for k in range(3)], 1 if y else 0))
+    for i, (x, y) in enumerate(gen2.take(n_samples - position)):
+        samples.append(([float(x[k]) for k in range(3)], 1 if y else 0))
+    return feature_names, feature_types, 2, samples
+
+
+def generate_sea_drift_gradual(n_samples: int, seed: int, width: int = 2000):
+    """SEA concept drift with gradual transition from variant 0 to variant 3 around midpoint."""
+    feature_names = [f"f{i}" for i in range(3)]
+    feature_types = [0, 0, 0]
+    position = n_samples // 2
+    w = min(width, n_samples // 4)
+    start = position - (w // 2)
+    end = position + (w // 2)
+
+    gen1 = synth.SEA(seed=seed, variant=0)
+    gen2 = synth.SEA(seed=seed + 1, variant=3)
+    rng = np.random.RandomState(seed)
+
+    iter1 = iter(gen1)
+    iter2 = iter(gen2)
+    samples = []
+
+    for i in range(n_samples):
+        x1, y1 = next(iter1)
+        x2, y2 = next(iter2)
+        if i < start:
+            x, y = x1, y1
+        elif i > end:
+            x, y = x2, y2
+        else:
+            p2 = float(i - start) / float(w)
+            x, y = (x2, y2) if rng.rand() < p2 else (x1, y1)
+        samples.append(([float(x[k]) for k in range(3)], 1 if y else 0))
+
+    return feature_names, feature_types, 2, samples
+
+
+def generate_agrawal_drift_abrupt(n_samples: int, seed: int):
+    """Agrawal stream with abrupt transition from function 0 to function 2 at midpoint."""
+    keys = ["salary", "commission", "age", "elevel", "car", "zipcode", "hvalue", "hyears", "loan"]
+    feature_types = [0] * len(keys)
+    position = n_samples // 2
+
+    gen1 = synth.Agrawal(seed=seed, classification_function=0)
+    gen2 = synth.Agrawal(seed=seed + 1, classification_function=2)
+
+    samples = []
+    for i, (x, y) in enumerate(gen1.take(position)):
+        samples.append(([float(x[k]) for k in keys], int(y)))
+    for i, (x, y) in enumerate(gen2.take(n_samples - position)):
+        samples.append(([float(x[k]) for k in keys], int(y)))
+    return keys, feature_types, 2, samples
+
+
+def generate_agrawal_drift_gradual(n_samples: int, seed: int, width: int = 2000):
+    """Agrawal stream with gradual transition from function 0 to function 2 around midpoint."""
+    keys = ["salary", "commission", "age", "elevel", "car", "zipcode", "hvalue", "hyears", "loan"]
+    feature_types = [0] * len(keys)
+    position = n_samples // 2
+    w = min(width, n_samples // 4)
+    start = position - (w // 2)
+    end = position + (w // 2)
+
+    gen1 = synth.Agrawal(seed=seed, classification_function=0)
+    gen2 = synth.Agrawal(seed=seed + 1, classification_function=2)
+    rng = np.random.RandomState(seed)
+
+    iter1 = iter(gen1)
+    iter2 = iter(gen2)
+    samples = []
+
+    for i in range(n_samples):
+        x1, y1 = next(iter1)
+        x2, y2 = next(iter2)
+        if i < start:
+            x, y = x1, y1
+        elif i > end:
+            x, y = x2, y2
+        else:
+            p2 = float(i - start) / float(w)
+            x, y = (x2, y2) if rng.rand() < p2 else (x1, y1)
+        samples.append(([float(x[k]) for k in keys], int(y)))
+
+    return keys, feature_types, 2, samples
+
+
+def generate_hyperplane_drift(n_samples: int, seed: int):
+    """Hyperplane stream with continuous rotating hyperplane drift."""
+    n_features = 10
+    feature_names = [f"f{i}" for i in range(n_features)]
+    feature_types = [0] * n_features
+
+    gen = synth.Hyperplane(seed=seed, n_features=n_features, n_drift_features=2, mag_change=0.001)
+    samples = []
+    for x, y in gen.take(n_samples):
+        row_x = [float(x[i]) for i in range(n_features)]
+        row_y = int(y)
+        samples.append((row_x, row_y))
+    return feature_names, feature_types, 2, samples
+
+
 STREAM_GENERATORS = {
     "sea": generate_sea,
     "agrawal": generate_agrawal,
     "hyperplane": generate_hyperplane,
     "led": generate_led,
     "stagger": generate_stagger,
+    "sea_drift_abrupt": generate_sea_drift_abrupt,
+    "sea_drift_gradual": generate_sea_drift_gradual,
+    "agrawal_drift_abrupt": generate_agrawal_drift_abrupt,
+    "agrawal_drift_gradual": generate_agrawal_drift_gradual,
+    "hyperplane_drift": generate_hyperplane_drift,
 }
 
 

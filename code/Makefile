@@ -19,7 +19,7 @@ TEST_SRCS = $(wildcard $(TEST_DIR)/*.c)
 TEST_OBJS = $(patsubst $(TEST_DIR)/%.c, $(BUILD_TESTS)/%.o, $(TEST_SRCS))
 TEST_RUNNER = $(BUILD_DIR)/test_runner
 
-.PHONY: all lib test clean bench directories
+.PHONY: all lib test clean bench bench-triple bench-drift directories
 
 all: lib test
 
@@ -84,6 +84,16 @@ bench-triple: $(BENCH_RUNNER) $(BENCH_RUNNER_DOUBLE) $(BENCH_MNIST_RUNNER) $(BEN
 		python3 ../benchmarks/compare_triple.py --bin-float $(BENCH_RUNNER) --bin-double $(BENCH_RUNNER_DOUBLE) --bin-mnist-float $(BENCH_MNIST_RUNNER) --bin-mnist-double $(BENCH_MNIST_DOUBLE) --data-dir ../benchmarks/data --report ../benchmarks/triple_benchmark_report.md; \
 	else \
 		echo "Error: Python 3 not found!"; exit 1; \
+	fi
+
+bench-drift: $(BENCH_RUNNER) $(BENCH_RUNNER_DOUBLE)
+	@echo "Executing Concept Drift & HAT Parity Benchmark vs River (Task 3.3)..."
+	@if [ -x "$(PYTHON)" ]; then \
+		$(PYTHON) ../benchmarks/compare_river.py --mode drift --bin-float $(BENCH_RUNNER) --bin-double $(BENCH_RUNNER_DOUBLE) --data-dir ../benchmarks/data --report-drift ../benchmarks/drift_benchmark_report.md; \
+	elif command -v python3 >/dev/null 2>&1; then \
+		python3 ../benchmarks/compare_river.py --mode drift --bin-float $(BENCH_RUNNER) --bin-double $(BENCH_RUNNER_DOUBLE) --data-dir ../benchmarks/data --report-drift ../benchmarks/drift_benchmark_report.md; \
+	else \
+		echo "Error: Python 3 with river not found!"; exit 1; \
 	fi
 
 clean:
