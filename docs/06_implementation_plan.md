@@ -22,7 +22,7 @@
 | **1.5** | **Fase 1:** Árvore VFDT Completa (MC/NB/NBA, Memória, Save/Load) | `code/include/ht_tree.h`, `code/src/ht_tree.c`, `code/tests/test_tree.c`, `code/tests/test_e2e_flow.c` | **N1:** roteamento iterativo (`NaN` $\to$ filho mais populoso), predição MC/NB/NBA, `Promise(l)`<br/>**N2:** split com reciclagem de `stats_idx` + desativação de folhas quando pool enche<br/>**N3:** treino *prequential* completo + `ht_save`/`ht_load` bit-a-bit | `[x]` | `e0b9739` |
 | **2.1** | **Fase 2:** Paridade Prequential e Benchmark Triplo vs River e Scikit-Learn | `benchmarks/generate_streams.py`, `benchmarks/bench_c_runner.c`, `benchmarks/compare_river.py`, `benchmarks/benchmark_report.md` | Comparação Tripla *Apples-to-Apples* (SEA, Agrawal, Hyperplane, LED, STAGGER) em `double` e `float`: Acurácia Holdout (70/30), Macro F1-Score, Acurácia Prequential, Topologia (Nós), RAM ($\le 1\text{ MB}$, heap 0.0 KB) e Speedup vs River (>110x a 397x) | `[x]` | `b151090` |
 | **2.2** | **Fase 2:** Benchmark Triplo MNIST (C11 vs River vs Scikit-Learn) com Profiling de RAM | `benchmarks/generate_mnist.py`, `benchmarks/compare_triple.py`, `benchmarks/bench_c_runner.c`, `benchmarks/triple_benchmark_report.md`, `code/Makefile`, `Makefile` | Avaliação tripla no MNIST (10 classes, 4 classes, binário): Holdout Acc, F1-Score Macro, Prequential Acc, Topologia (Nós), Profiling de RAM (Estrutura, Pico Heap Tracemalloc) e Throughput (Speedup >240x) | `[x]` | `45e20a5` |
-| **3.1** | **Fase 3:** Detector ADWIN com Histograma Exponencial Fixo | `code/include/ht_drift.h`, `code/src/ht_drift.c`, `code/tests/test_drift.c` | **N1:** inserção, compressão de buckets $2^k$ ($M=5$), corte $\epsilon_{\text{cut}}$<br/>**N2:** pool estático de detectores ADWIN + detecção de salto de média | `[ ]` | — |
+| **3.1** | **Fase 3:** Detector ADWIN com Histograma Exponencial Fixo | `code/include/ht_drift.h`, `code/src/ht_drift.c`, `code/tests/test_drift.c`, `code/tests/test_e2e_flow.c` | **N1:** inserção, compressão de buckets $2^k$ ($M=5$), corte $\epsilon_{\text{cut}}$<br/>**N2:** pool estático de detectores ADWIN + detecção de salto de média | `[x]` | `41ab845` |
 | **3.2** | **Fase 3:** Hoeffding Adaptive Tree (HAT) | `code/include/ht_tree.h`, `code/src/ht_tree.c`, `code/src/ht_drift.c`, `code/tests/test_drift.c`, `code/tests/test_e2e_flow.c` | **N1:** filtro unilateral de erro, `bound` de troca/poda, votação $1/\hat{e}^2$<br/>**N2:** substituição de subárvore com reciclagem iterativa de nós antigos<br/>**N3:** stream E2E com drift abrupto recuperando acurácia | `[ ]` | — |
 | **3.3** | **Fase 3:** Benchmark de Concept Drift vs River HAT | `benchmarks/compare_river.py`, `benchmarks/bench_c_runner.c` | Paridade contra `HoeffdingAdaptiveTreeClassifier` em streams com drift abrupto e gradual | `[ ]` | — |
 
@@ -281,6 +281,74 @@ typedef struct {
 - `ht_status_t ht_tree_learn_one(ht_tree_t *tree, const ht_value_t x[HT_MAX_FEATURES], uint8_t y, ht_float_t weight)`
 - `ht_status_t ht_tree_save(const ht_tree_t *tree, void *buffer, size_t buffer_cap, size_t *out_bytes_written, bool include_training_stats)`
 - `ht_status_t ht_tree_load(ht_tree_t *tree, const void *buffer, size_t buffer_len)`
+
+---
+
+### Entrega 3.1: Detector ADWIN com Histograma Exponencial Fixo (`include/ht_drift.h`, `src/ht_drift.c`)
+
+Implementa o detector de *Concept Drift* **ADWIN2** com histogramas exponenciais estáticos em $O(\log W)$, sem uso de heap e com alocador em pool determinístico (`ht_adwin_pool_t`):
+
+```c
+typedef struct {
+    ht_float_t sum[HT_ADWIN_MAX_BUCKETS + 1];      /* Soma dos elementos no bucket */
+    ht_float_t variance[HT_ADWIN_MAX_BUCKETS + 1]; /* Variância interna (M2) do bucket */
+    uint8_t    count;                              /* Buckets ativos neste nível (0..6) */
+    uint8_t    pad[3];                             /* Alinhamento */
+} ht_adwin_row_t;
+
+typedef struct {
+    ht_float_t delta;               /* Parâmetro de significância (padrão: 0.002) */
+    uint16_t   clock;               /* Período de checagem em amostras (padrão: 32) */
+    uint16_t   min_window_length;   /* Tamanho mínimo de subjanela (padrão: 5) */
+    uint16_t   grace_period;        /* Período de graça mínimo (padrão: 10) */
+    uint8_t    max_buckets;         /* Máximo de buckets por nível (padrão: 5) */
+    uint8_t    pad;
+} ht_adwin_config_t;
+
+typedef struct {
+    ht_adwin_row_t rows[HT_ADWIN_LEVELS]; /* Níveis exponenciais de capacidade 2^l */
+    ht_float_t     total_sum;            /* Soma total na janela */
+    ht_float_t     total_variance;       /* Variância acumulada M2 na janela */
+    ht_float_t     delta;                /* Delta ativo */
+    uint32_t       width;                /* Tamanho n da janela */
+    uint32_t       mint_time;            /* Total de amostras observadas */
+    uint32_t       n_detections;         /* Número de drifts detectados */
+    uint16_t       clock;                /* Período de avaliação */
+    uint16_t       min_window_length;    /* Tamanho mínimo */
+    uint16_t       grace_period;         /* Período de graça */
+    uint8_t        max_buckets;          /* Máximo de buckets */
+    uint8_t        last_bucket_row;      /* Nível ativo mais alto */
+    bool           drift_detected;       /* Flag de drift na última atualização */
+    uint8_t        pad[3];
+} ht_adwin_t;
+
+typedef struct {
+    ht_adwin_t pool[HT_MAX_ADWIN_DETECTORS];
+    uint16_t   free_indices[HT_MAX_ADWIN_DETECTORS];
+    uint32_t   in_use_mask[(HT_MAX_ADWIN_DETECTORS + 31U) / 32U];
+    uint16_t   free_top;
+    uint16_t   allocated_count;
+} ht_adwin_pool_t;
+```
+
+#### API Pública de `ht_drift.h`:
+- `void ht_adwin_default_config(ht_adwin_config_t *cfg)`
+- `ht_status_t ht_adwin_init(ht_adwin_t *adwin, const ht_adwin_config_t *cfg)`
+- `void ht_adwin_reset(ht_adwin_t *adwin)`
+- `bool ht_adwin_update(ht_adwin_t *adwin, ht_float_t value)`
+- `ht_float_t ht_adwin_get_estimation(const ht_adwin_t *adwin)`
+- `ht_float_t ht_adwin_get_variance(const ht_adwin_t *adwin)`
+- `ht_float_t ht_adwin_get_variance_in_window(const ht_adwin_t *adwin)`
+- `uint32_t ht_adwin_get_width(const ht_adwin_t *adwin)`
+- `ht_float_t ht_adwin_get_total(const ht_adwin_t *adwin)`
+- `uint32_t ht_adwin_get_n_detections(const ht_adwin_t *adwin)`
+- `ht_float_t ht_adwin_calculate_cut_epsilon(uint32_t n, uint32_t n0, uint32_t n1, ht_float_t var, ht_float_t delta, uint16_t min_w)`
+- `ht_status_t ht_adwin_pool_init(ht_adwin_pool_t *pool)`
+- `uint16_t ht_adwin_pool_alloc(ht_adwin_pool_t *pool, const ht_adwin_config_t *cfg)`
+- `ht_status_t ht_adwin_pool_free(ht_adwin_pool_t *pool, uint16_t idx)`
+- `ht_adwin_t *ht_adwin_pool_get(ht_adwin_pool_t *pool, uint16_t idx)`
+- `void ht_adwin_pool_reset(ht_adwin_pool_t *pool)`
+- `size_t ht_adwin_pool_bytes_used(const ht_adwin_pool_t *pool)`
 
 ---
 
