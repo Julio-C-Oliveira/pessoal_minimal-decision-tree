@@ -100,7 +100,8 @@ typedef struct {
     uint16_t        stats_allocated;
 } ht_memory_pool_t;
 
-/* Compile-time static assertions for exact memory layout */
+/* Compile-time static assertions for exact memory layout in default configuration */
+#if HT_MAX_CLASSES == 4 && HT_MAX_FEATURES == 16
 #ifndef HT_USE_DOUBLE
 _Static_assert(sizeof(ht_node_t) == 28, "ht_node_t must be exactly 28 bytes in float32 mode");
 _Static_assert(sizeof(ht_gaussian_obs_t) == 20, "ht_gaussian_obs_t must be 20 bytes in float32 mode");
@@ -113,6 +114,7 @@ _Static_assert(sizeof(ht_gaussian_obs_t) == 40, "ht_gaussian_obs_t must be 40 by
 _Static_assert(sizeof(ht_categorical_obs_t) == 160, "ht_categorical_obs_t must be 160 bytes in float64 mode");
 _Static_assert(sizeof(ht_feature_obs_t) == 160, "ht_feature_obs_t must be 160 bytes in float64 mode");
 _Static_assert(sizeof(ht_leaf_stats_t) == 2584, "ht_leaf_stats_t must be exactly 2584 bytes in float64 mode");
+#endif
 #endif
 _Static_assert(sizeof(ht_memory_pool_t) <= (1024 * 1024), "ht_memory_pool_t exceeds 1 MB RAM budget!");
 

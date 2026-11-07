@@ -41,11 +41,13 @@ typedef struct {
     uint8_t    is_categorical;                   /* 0 = numeric, 1 = categorical */
 } ht_split_candidate_t;
 
-/* Compile-time static assertions for exact memory layout */
+/* Compile-time static assertions for exact memory layout in default configuration */
+#if HT_MAX_CLASSES == 4
 #ifndef HT_USE_DOUBLE
 _Static_assert(sizeof(ht_split_candidate_t) == 44, "ht_split_candidate_t must be 44 bytes in float32 mode");
 #else
 _Static_assert(sizeof(ht_split_candidate_t) == 88, "ht_split_candidate_t must be 88 bytes in float64 mode");
+#endif
 #endif
 
 /* ========================================================================= */

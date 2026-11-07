@@ -50,6 +50,8 @@ test: $(TEST_RUNNER)
 BENCH_SRC = ../benchmarks/bench_c_runner.c
 BENCH_RUNNER = $(BUILD_DIR)/bench_c_runner
 BENCH_RUNNER_DOUBLE = $(BUILD_DIR)/bench_c_runner_double
+BENCH_MNIST_RUNNER = $(BUILD_DIR)/bench_c_runner_mnist
+BENCH_MNIST_DOUBLE = $(BUILD_DIR)/bench_c_runner_mnist_double
 PYTHON ?= ../.venv/bin/python
 
 $(BENCH_RUNNER): directories $(SRCS) $(BENCH_SRC)
@@ -57,6 +59,12 @@ $(BENCH_RUNNER): directories $(SRCS) $(BENCH_SRC)
 
 $(BENCH_RUNNER_DOUBLE): directories $(SRCS) $(BENCH_SRC)
 	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -pedantic -Iinclude -DHT_USE_DOUBLE $(SRCS) $(BENCH_SRC) $(LDFLAGS) -o $@
+
+$(BENCH_MNIST_RUNNER): directories $(SRCS) $(BENCH_SRC)
+	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -pedantic -Iinclude -DHT_MAX_CLASSES=10 -DHT_MAX_ACTIVE_LEAVES=128 -DHT_MAX_NODES=2048 $(SRCS) $(BENCH_SRC) $(LDFLAGS) -o $@
+
+$(BENCH_MNIST_DOUBLE): directories $(SRCS) $(BENCH_SRC)
+	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -pedantic -Iinclude -DHT_USE_DOUBLE -DHT_MAX_CLASSES=10 -DHT_MAX_ACTIVE_LEAVES=128 -DHT_MAX_NODES=2048 $(SRCS) $(BENCH_SRC) $(LDFLAGS) -o $@
 
 bench: $(BENCH_RUNNER) $(BENCH_RUNNER_DOUBLE)
 	@echo "Executing Hoeffding Tree Parity & Memory Benchmark vs River..."
@@ -66,6 +74,16 @@ bench: $(BENCH_RUNNER) $(BENCH_RUNNER_DOUBLE)
 		python3 ../benchmarks/compare_river.py --bin-float $(BENCH_RUNNER) --bin-double $(BENCH_RUNNER_DOUBLE) --data-dir ../benchmarks/data --report ../benchmarks/benchmark_report.md; \
 	else \
 		echo "Error: Python 3 with river not found!"; exit 1; \
+	fi
+
+bench-triple: $(BENCH_RUNNER) $(BENCH_RUNNER_DOUBLE) $(BENCH_MNIST_RUNNER) $(BENCH_MNIST_DOUBLE)
+	@echo "Executing Triple Benchmark: C11 vs River vs Scikit-Learn on MNIST..."
+	@if [ -x "$(PYTHON)" ]; then \
+		$(PYTHON) ../benchmarks/compare_triple.py --bin-float $(BENCH_RUNNER) --bin-double $(BENCH_RUNNER_DOUBLE) --bin-mnist-float $(BENCH_MNIST_RUNNER) --bin-mnist-double $(BENCH_MNIST_DOUBLE) --data-dir ../benchmarks/data --report ../benchmarks/triple_benchmark_report.md; \
+	elif command -v python3 >/dev/null 2>&1; then \
+		python3 ../benchmarks/compare_triple.py --bin-float $(BENCH_RUNNER) --bin-double $(BENCH_RUNNER_DOUBLE) --bin-mnist-float $(BENCH_MNIST_RUNNER) --bin-mnist-double $(BENCH_MNIST_DOUBLE) --data-dir ../benchmarks/data --report ../benchmarks/triple_benchmark_report.md; \
+	else \
+		echo "Error: Python 3 not found!"; exit 1; \
 	fi
 
 clean:
