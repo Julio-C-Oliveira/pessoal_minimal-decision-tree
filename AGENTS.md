@@ -29,6 +29,11 @@ Este repositório desenvolve uma **Hoeffding Tree (VFDT / HAT)** ultraleve em **
   - `test(<escopo>):` adição ou ajuste de testes unitários em `code/tests/`
   - `bench:` scripts e executáveis de validação/benchmark em `benchmarks/`
   - `chore:` build (`Makefile`, `code/Makefile`), materiais de referência (`references/`) ou configuração de agentes (`AGENTS.md`, `.agents/`)
+- **Versionamento Semântico e Releases (SemVer 2.0.0):**
+  - O projeto adota estritamente Semantic Versioning (`MAJOR.MINOR.PATCH`).
+  - A fonte única de verdade é mantida sincronizada em duas pontas: o arquivo `VERSION` (na raiz do projeto, para Make/scripts) e as macros `HT_VERSION_MAJOR`, `HT_VERSION_MINOR`, `HT_VERSION_PATCH`, `HT_VERSION_STRING` em `code/include/ht_config.h` (para o código C11).
+  - Nunca crie tags Git sem antes validar 100% dos testes unitários e de integração em precisão simples (`float`) e dupla (`double`).
+  - Releases no GitHub devem obrigatoriamente usar tags anotadas no padrão `vX.Y.Z` (ex: `git tag -a v0.1.0 -m "Release v0.1.0: ..."`).
 
 ## 3. Uso de Contexto, Referências e Subagentes
 
