@@ -9,10 +9,11 @@ description: >-
 
 Esta skill define o protocolo de engenharia para desenvolver e validar os módulos em C11 (`include/`, `src/`, `tests/`) garantindo o limite rígido de **$\le 1\text{ MB}$ de RAM**, compatibilidade com microcontroladores e cobertura progressiva de testes desde o nível de função individual até o fluxo total ponta a ponta.
 
-> **Consulta Rápida às Referências (River & Scikit-Learn):**
-> Sempre que precisar conferir uma fórmula, regra de desempate ou layout de struct original durante a implementação em C, consulte diretamente os mapas indexados em:
-> - [`.agents/skills/study-reference/references/river_architecture_map.md`](../study-reference/references/river_architecture_map.md)
-> - [`.agents/skills/study-reference/references/sklearn_architecture_map.md`](../study-reference/references/sklearn_architecture_map.md)
+> **Consulta Rápida ao Plano Persistente e às Referências (River & Scikit-Learn):**
+> - **Plano de Implementação Multi-Chat:** Consulte sempre [`docs/06_implementation_plan.md`](../../../docs/06_implementation_plan.md) antes de iniciar uma entrega para seguir os contratos exatos de structs, funções e testes planejados.
+> - Sempre que precisar conferir uma fórmula, regra de desempate ou layout de struct original durante a implementação em C, consulte diretamente os mapas indexados em:
+>   - [`.agents/skills/study-reference/references/river_architecture_map.md`](../study-reference/references/river_architecture_map.md)
+>   - [`.agents/skills/study-reference/references/sklearn_architecture_map.md`](../study-reference/references/sklearn_architecture_map.md)
 
 ---
 

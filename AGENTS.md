@@ -37,9 +37,12 @@ Este repositório desenvolve uma **Hoeffding Tree (VFDT / HAT)** ultraleve em **
 - **Delegação para Subagentes (`research`):**
   - Sempre que precisar explorar múltiplos arquivos de referência em `references/river_tree/`, `references/sklearn_tree/` ou ler PDFs em `references/papers/`, delegue a pesquisa ao subagente `research` para manter a janela de contexto principal limpa e focada na implementação.
 
-## 4. Skills do Projeto (`.agents/skills/`)
+## 4. Skills do Projeto (`.agents/skills/`) e Plano Persistente (`docs/06_implementation_plan.md`)
+
+- **Plano de Implementação Persistente Multi-Chat:** O arquivo [`docs/06_implementation_plan.md`](docs/06_implementation_plan.md) é a fonte única de verdade para o plano de implementação entre diferentes chats e agentes. Consulte-o antes de iniciar qualquer implementação e mantenha seu checklist atualizado a cada entrega concluída.
 
 Ative a skill correspondente antes de iniciar cada tipo de tarefa:
 - **`study-reference`**: Para estudar os papers e mapear algoritmos do River / estruturas do Scikit-Learn em `docs/`.
-- **`embedded-c-tree`**: Para implementar, revisar ou otimizar módulos em `include/`, `src/` e `tests/` respeitando o orçamento de 1 MB.
+- **`implementation-plan`**: Para criar, consultar ou atualizar o plano de implementação persistente em [`docs/06_implementation_plan.md`](docs/06_implementation_plan.md) entre diferentes chats e agentes.
+- **`embedded-c-tree`**: Para implementar, revisar ou otimizar módulos em `include/`, `src/` e `tests/` respeitando o orçamento de 1 MB e o protocolo de testes em 3 níveis.
 - **`river-parity-benchmark`**: Para validar acurácia *prequential*, número de splits e consumo de RAM em `benchmarks/` contra o River.
