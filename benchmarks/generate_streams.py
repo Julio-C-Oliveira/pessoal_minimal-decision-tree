@@ -197,6 +197,81 @@ def generate_hyperplane_drift(n_samples: int, seed: int):
     return feature_names, feature_types, 2, samples
 
 
+def generate_friedman(n_samples: int, seed: int):
+    """Friedman #1 synthetic regression stream (10 features, continuous nonlinear target)."""
+    gen = synth.Friedman(seed=seed)
+    n_features = 10
+    feature_names = [f"f{i}" for i in range(n_features)]
+    feature_types = [0] * n_features
+    samples = []
+    for x, y in gen.take(n_samples):
+        row_x = [float(x[k]) for k in sorted(x.keys())]
+        samples.append((row_x, float(y)))
+    return feature_names, feature_types, 1, samples, "regression"
+
+
+def generate_friedman_drift_abrupt(n_samples: int, seed: int):
+    """Friedman stream with abrupt global recurring concept drift at 50% and 75%."""
+    pos1 = n_samples // 2
+    pos2 = (n_samples * 3) // 4
+    gen = synth.FriedmanDrift(drift_type="gra", position=(pos1, pos2), seed=seed)
+    n_features = 10
+    feature_names = [f"f{i}" for i in range(n_features)]
+    feature_types = [0] * n_features
+    samples = []
+    for x, y in gen.take(n_samples):
+        row_x = [float(x[k]) for k in sorted(x.keys())]
+        samples.append((row_x, float(y)))
+    return feature_names, feature_types, 1, samples, "regression"
+
+
+def generate_friedman_drift_gradual(n_samples: int, seed: int, width: int = 2000):
+    """Friedman stream with slow gradual concept drift around 50% and 75%."""
+    pos1 = n_samples // 2
+    pos2 = (n_samples * 3) // 4
+    w = min(width, n_samples // 5)
+    gen = synth.FriedmanDrift(drift_type="gsg", position=(pos1, pos2), transition_window=w, seed=seed)
+    n_features = 10
+    feature_names = [f"f{i}" for i in range(n_features)]
+    feature_types = [0] * n_features
+    samples = []
+    for x, y in gen.take(n_samples):
+        row_x = [float(x[k]) for k in sorted(x.keys())]
+        samples.append((row_x, float(y)))
+    return feature_names, feature_types, 1, samples, "regression"
+
+
+def generate_planes2d(n_samples: int, seed: int):
+    """2D Planes synthetic regression stream (Breiman et al. 1984, 10 features)."""
+    gen = synth.Planes2D(seed=seed)
+    n_features = 10
+    feature_names = [f"f{i}" for i in range(n_features)]
+    feature_types = [0] * n_features
+    samples = []
+    for x, y in gen.take(n_samples):
+        row_x = [float(x[k]) for k in sorted(x.keys())]
+        samples.append((row_x, float(y)))
+    return feature_names, feature_types, 1, samples, "regression"
+
+
+def generate_piecewise_linear(n_samples: int, seed: int):
+    """Piecewise linear continuous regression stream with partitioned sub-spaces."""
+    rng = np.random.RandomState(seed)
+    n_features = 6
+    feature_names = [f"f{i}" for i in range(n_features)]
+    feature_types = [0] * n_features
+    samples = []
+    for _ in range(n_samples):
+        row_x = list(rng.uniform(0.0, 1.0, size=n_features))
+        noise = float(rng.normal(0.0, 0.1))
+        if row_x[0] < 0.5:
+            row_y = float(2.0 * row_x[1] - 3.0 * row_x[2] + 1.5 * row_x[3] + noise)
+        else:
+            row_y = float(-1.5 * row_x[1] + 2.5 * row_x[4] - 2.0 * row_x[5] + noise)
+        samples.append((row_x, row_y))
+    return feature_names, feature_types, 1, samples, "regression"
+
+
 STREAM_GENERATORS = {
     "sea": generate_sea,
     "agrawal": generate_agrawal,
@@ -208,10 +283,15 @@ STREAM_GENERATORS = {
     "agrawal_drift_abrupt": generate_agrawal_drift_abrupt,
     "agrawal_drift_gradual": generate_agrawal_drift_gradual,
     "hyperplane_drift": generate_hyperplane_drift,
+    "friedman": generate_friedman,
+    "friedman_drift_abrupt": generate_friedman_drift_abrupt,
+    "friedman_drift_gradual": generate_friedman_drift_gradual,
+    "planes2d": generate_planes2d,
+    "piecewise_linear": generate_piecewise_linear,
 }
 
 
-def write_csv(filepath: str, stream_name: str, feature_names: list, feature_types: list, n_classes: int, samples: list):
+def write_csv(filepath: str, stream_name: str, feature_names: list, feature_types: list, n_classes: int, samples: list, task: str = "classification"):
     n_samples = len(samples)
     n_features = len(feature_names)
     types_str = ",".join(str(t) for t in feature_types)
@@ -220,12 +300,12 @@ def write_csv(filepath: str, stream_name: str, feature_names: list, feature_type
     with open(filepath, "w", encoding="utf-8") as f:
         # Header line with structured metadata
         f.write(
-            f"# stream={stream_name} n_samples={n_samples} n_features={n_features} "
+            f"# stream={stream_name} task={task} n_samples={n_samples} n_features={n_features} "
             f"n_classes={n_classes} feature_types={types_str} feature_names={names_str}\n"
         )
         for row_x, row_y in samples:
-            line_vals = [str(val) for val in row_x]
-            line_vals.append(str(row_y))
+            line_vals = [f"{val:.6f}" if isinstance(val, float) else str(val) for val in row_x]
+            line_vals.append(f"{row_y:.6f}" if isinstance(row_y, float) else str(row_y))
             f.write(",".join(line_vals) + "\n")
 
 
@@ -254,9 +334,14 @@ def main():
 
         print(f"Generating stream: {stream_name} ({n_samples} samples)...", end="", flush=True)
         gen_fn = STREAM_GENERATORS[stream_name]
-        names, types, n_classes, samples = gen_fn(n_samples, args.seed)
+        res = gen_fn(n_samples, args.seed)
+        if len(res) == 5:
+            names, types, n_classes, samples, task = res
+        else:
+            names, types, n_classes, samples = res
+            task = "classification"
         out_path = os.path.join(args.outdir, f"{stream_name}.csv")
-        write_csv(out_path, stream_name, names, types, n_classes, samples)
+        write_csv(out_path, stream_name, names, types, n_classes, samples, task=task)
         file_size_kb = os.path.getsize(out_path) / 1024.0
         print(f" Done -> {out_path} ({file_size_kb:.1f} KB)")
 

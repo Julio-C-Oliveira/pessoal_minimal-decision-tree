@@ -19,7 +19,7 @@ TEST_SRCS = $(wildcard $(TEST_DIR)/*.c)
 TEST_OBJS = $(patsubst $(TEST_DIR)/%.c, $(BUILD_TESTS)/%.o, $(TEST_SRCS))
 TEST_RUNNER = $(BUILD_DIR)/test_runner
 
-.PHONY: all lib test clean bench bench-triple bench-drift directories
+.PHONY: all lib test clean bench bench-triple bench-drift bench-regression directories
 
 all: lib test
 
@@ -92,6 +92,16 @@ bench-drift: $(BENCH_RUNNER) $(BENCH_RUNNER_DOUBLE)
 		$(PYTHON) ../benchmarks/compare_river.py --mode drift --bin-float $(BENCH_RUNNER) --bin-double $(BENCH_RUNNER_DOUBLE) --data-dir ../benchmarks/data --report-drift ../benchmarks/drift_benchmark_report.md; \
 	elif command -v python3 >/dev/null 2>&1; then \
 		python3 ../benchmarks/compare_river.py --mode drift --bin-float $(BENCH_RUNNER) --bin-double $(BENCH_RUNNER_DOUBLE) --data-dir ../benchmarks/data --report-drift ../benchmarks/drift_benchmark_report.md; \
+	else \
+		echo "Error: Python 3 with river not found!"; exit 1; \
+	fi
+
+bench-regression: $(BENCH_RUNNER) $(BENCH_RUNNER_DOUBLE)
+	@echo "Executing Triple Benchmark: C11 vs River HTR/HATR vs Scikit-Learn in Regression (Task 4.5)..."
+	@if [ -x "$(PYTHON)" ]; then \
+		$(PYTHON) ../benchmarks/compare_river.py --mode regression --bin-float $(BENCH_RUNNER) --bin-double $(BENCH_RUNNER_DOUBLE) --data-dir ../benchmarks/data --report-regression ../benchmarks/regression_benchmark_report.md; \
+	elif command -v python3 >/dev/null 2>&1; then \
+		python3 ../benchmarks/compare_river.py --mode regression --bin-float $(BENCH_RUNNER) --bin-double $(BENCH_RUNNER_DOUBLE) --data-dir ../benchmarks/data --report-regression ../benchmarks/regression_benchmark_report.md; \
 	else \
 		echo "Error: Python 3 with river not found!"; exit 1; \
 	fi
