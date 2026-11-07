@@ -153,7 +153,7 @@ pessoal_minimal-decision-tree/
 ### Fase 1: Núcleo VFDT em C11 + Gestão de Memória (`<= 1MB`) + Testes Progressivos (`tests/`)
 > **Protocolo de Testes em 3 Níveis:** Cada módulo implementado abaixo deve vir imediatamente acompanhado de seus testes de **Nível 1 (Função/Unidade)**, **Nível 2 (Integração com camadas anteriores)** e **Nível 3 (Fluxo Total Acumulado em `test_e2e_flow.c`)**, validados em `float` e `double` antes de avançar ao próximo item.
 
-- [ ] Configurar `Makefile`, `ht_config.h` e `tests/test_harness.h` (suporte a `float`/`double`, `ht_value_t`, `stdint.h`, compilação limpa com `-Wall -Wextra -Werror -std=c11`).
+- [x] Configurar `Makefile`, `ht_config.h` e `tests/test_harness.h` (suporte a `float`/`double`, `ht_value_t`, `stdint.h`, compilação limpa com `-Wall -Wextra -Werror -std=c11`).
 - [ ] Implementar `ht_memory` + `tests/test_memory.c`: Pool/Slab allocator estático baseado em índices `uint16_t` para `ht_node_t` e `ht_leaf_stats_t` (zero `malloc` em runtime, medição exata de bytes usados, stress test de reciclagem).
 - [ ] Implementar `ht_observer` + `tests/test_observer.c`:
   - [ ] Observador numérico Gaussiano incremental (Welford) + avaliação de $k$ thresholds candidatos usando PDF/CDF normal.
