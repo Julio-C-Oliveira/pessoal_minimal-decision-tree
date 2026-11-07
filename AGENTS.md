@@ -23,10 +23,10 @@ Este repositório desenvolve uma **Hoeffding Tree (VFDT / HAT)** ultraleve em **
 ## 2. Regra de Commits Atômicos (Git)
 
 - **Um Conceito Lógico por Commit:** Nunca misture mudanças de naturezas distintas no mesmo commit (ex: não misture notas teóricas em `docs/`, adição de referências em `references/`, configuração de agentes em `.agents/` e implementação em `src/`).
-- **Estado Sempre Verde e Gate Obrigatório de Testes:**
-  - O commit só será realizado **após** a implementação compilar sem warnings (`-Wall -Wextra -Werror -pedantic`) e passar em todos os testes unitários e de integração (tanto em `float` quanto em `double`).
-  - Caso algum teste falhe ou ocorra erro/warning de compilação, é **expressamente proibido commitar**. O agente deve obrigatoriamente diagnosticar o problema, consertar os erros no código ou nos testes e executar a validação novamente.
-  - O commit só poderá ser realizado quando 100% dos testes passarem com sucesso.
+- **Estado Sempre Verde e Gate de Testes (Condicional a Código C11):**
+  - **Obrigatoriedade de Testes:** O gate de compilação sem warnings (`-Wall -Wextra -Werror -pedantic`) e execução de 100% dos testes unitários e de integração (em `float` e `double`) é **obrigatório exclusivamente quando houver modificações em código C ou arquivos de build/teste** (`code/include/`, `code/src/`, `code/tests/`, `code/Makefile` ou `Makefile`).
+  - **Modificações Exclusivas de Documentação/Metadados:** Quando o commit contiver apenas alterações documentais ou conceituais (ex: `README.md`, `docs/`, `wiki/`, `.agents/`, `VERSION` ou `references/`), **não** há necessidade de rodar a suíte de testes antes de commitar.
+  - Caso ocorram alterações em código e algum teste falhe ou ocorra erro/warning de compilação, é **expressamente proibido commitar**. O agente deve obrigatoriamente diagnosticar o problema, consertar os erros e validar novamente antes de commitar.
 - **Mensagens Padronizadas (Conventional Commits):**
   - `docs:` criação/atualização de documentação em `docs/` ou `README.md`
   - `feat(<escopo>):` nova funcionalidade em C (`memory`, `observer`, `criterion`, `tree`, `drift` em `code/`)
