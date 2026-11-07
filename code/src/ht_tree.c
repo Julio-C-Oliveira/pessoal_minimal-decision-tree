@@ -241,9 +241,6 @@ static ht_status_t ht_tree_attempt_split(ht_tree_t *tree, uint16_t leaf_idx, uin
 
     /* 2. Check if majority class dominates (max_share_to_split) */
     if (max_class_weight / total_weight > tree->params.max_share_to_split) {
-        if (tree->params.merit_preprune) {
-            ht_tree_deactivate_leaf(tree, leaf_idx);
-        }
         return HT_OK;
     }
 
@@ -270,6 +267,11 @@ static ht_status_t ht_tree_attempt_split(ht_tree_t *tree, uint16_t leaf_idx, uin
     bool should_split = ht_should_split(&best, &second_best, eps, tree->params.tau);
 
     if (should_split) {
+        if (best.feature_idx == HT_NO_FEATURE) {
+            /* Pre-pruning: null split won by Hoeffding bound -> no split */
+            return HT_OK;
+        }
+
         /* Need 2 free nodes in the pool */
         if (tree->memory.free_nodes_top < 2) {
             return HT_ERR_OUT_OF_NODES;
@@ -366,9 +368,6 @@ static ht_status_t ht_tree_attempt_split(ht_tree_t *tree, uint16_t leaf_idx, uin
         if (depth + 1 > tree->max_depth_seen) {
             tree->max_depth_seen = depth + 1;
         }
-    } else if (best.feature_idx == HT_NO_FEATURE && tree->params.merit_preprune) {
-        /* Pre-pruning: null split won -> deactivate leaf */
-        ht_tree_deactivate_leaf(tree, leaf_idx);
     }
 
     return HT_OK;
