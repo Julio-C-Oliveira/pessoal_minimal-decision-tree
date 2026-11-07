@@ -150,6 +150,9 @@ int main(void) {
     /* Nível 1 & 2: Critérios de Impureza e Hoeffding Bound */
     test_criterion_run();
 
+    /* Nível 1 & 2: Árvore VFDT Completa */
+    test_tree_run();
+
     /* Nível 3: Fluxo Ponta a Ponta Acumulado */
     test_e2e_flow_run();
 

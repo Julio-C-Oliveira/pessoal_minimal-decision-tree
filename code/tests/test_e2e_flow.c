@@ -12,6 +12,7 @@
 #include "ht_memory.h"
 #include "ht_observer.h"
 #include "ht_criterion.h"
+#include "ht_tree.h"
 
 static void test_e2e_sample_vector_ingestion(void) {
     ht_value_t x[HT_MAX_FEATURES];
@@ -547,6 +548,111 @@ static void test_e2e_split_decision_pipeline(void) {
     HT_ASSERT_EQ(ht_memory_bytes_used(&pool), 0);
 }
 
+static void test_e2e_full_tree_prequential_and_serialization(void) {
+    /* 1. Setup tree with 4 features (2 informative numeric, 1 categorical, 1 noise) */
+    ht_tree_t tree;
+    ht_config_params_t params;
+    ht_default_params(&params, 4, 2);
+    params.feature_types[0] = HT_FEAT_NUMERIC;
+    params.feature_types[1] = HT_FEAT_NUMERIC;
+    params.feature_types[2] = HT_FEAT_CATEGORICAL;
+    params.feature_types[3] = HT_FEAT_NUMERIC;
+    params.leaf_prediction = HT_LEAF_NBA;
+    params.grace_period = 50;
+    params.delta = (ht_float_t)1e-4;
+    params.tau = (ht_float_t)0.05;
+
+    HT_ASSERT_EQ(ht_tree_init(&tree, &params), HT_OK);
+    HT_ASSERT(sizeof(ht_tree_t) <= 1024 * 1024);
+
+    /* 2. Prequential stream of 1,000 samples */
+    int early_correct = 0;
+    int late_correct = 0;
+
+    for (int i = 0; i < 1000; ++i) {
+        ht_value_t x[HT_MAX_FEATURES];
+        memset(x, 0, sizeof(x));
+
+        /* Deterministic pseudo-random generation without dynamic allocation */
+        ht_float_t r1 = (ht_float_t)((i * 37 + 13) % 100) / (ht_float_t)100.0;
+        ht_float_t r2 = (ht_float_t)((i * 59 + 29) % 100) / (ht_float_t)100.0;
+
+        uint8_t y;
+        if (i % 2 == 0) {
+            /* Class 0: x[0] in [1.0, 4.0], other features are overlapping / noise */
+            x[0].num = (ht_float_t)1.0 + (ht_float_t)3.0 * r1;
+            x[1].num = (ht_float_t)5.0 + (ht_float_t)3.0 * r2; /* overlapping */
+            x[2].cat = (int32_t)(i % 3);                        /* independent categorical */
+            x[3].num = r1 * (ht_float_t)10.0;                  /* noise */
+            y = 0;
+        } else {
+            /* Class 1: x[0] in [6.0, 9.5], other features are overlapping / noise */
+            x[0].num = (ht_float_t)6.0 + (ht_float_t)3.5 * r1;
+            x[1].num = (ht_float_t)5.0 + (ht_float_t)3.0 * r2; /* overlapping */
+            x[2].cat = (int32_t)(i % 3);                        /* independent categorical */
+            x[3].num = r2 * (ht_float_t)10.0;                  /* noise */
+            y = 1;
+        }
+
+        /* Test-then-train (prequential evaluation) */
+        uint8_t pred = ht_tree_predict(&tree, x);
+        if (pred == y) {
+            if (i < 100) early_correct++;
+            if (i >= 800) late_correct++;
+        }
+
+        HT_ASSERT_EQ(ht_tree_learn_one(&tree, x, y, (ht_float_t)1.0), HT_OK);
+    }
+
+    /* 3. Verify that learning and splitting took place */
+    HT_ASSERT(tree.n_decision_nodes >= 1);
+    HT_ASSERT(tree.n_active_leaves >= 2);
+    HT_ASSERT(tree.max_depth_seen >= 1);
+    HT_ASSERT(tree.train_weight_seen >= (ht_float_t)1000.0);
+
+    /* 4. Verify accuracy improvement: late accuracy (> 90%) must significantly exceed early */
+    double early_acc = (double)early_correct / 100.0;
+    double late_acc = (double)late_correct / 200.0;
+    HT_ASSERT(late_acc >= 0.90);
+    HT_ASSERT(late_acc >= early_acc);
+
+    /* 5. Memory budget check */
+    HT_ASSERT(ht_memory_bytes_used(&tree.memory) <= 1024 * 1024);
+
+    /* 6. Binary serialization: save and reload full model */
+    size_t needed = 0;
+    HT_ASSERT_EQ(ht_tree_save(&tree, NULL, 0, &needed, true), HT_OK);
+    HT_ASSERT(needed < 65536);
+
+    uint8_t save_buf[65536];
+    size_t written = 0;
+    HT_ASSERT_EQ(ht_tree_save(&tree, save_buf, sizeof(save_buf), &written, true), HT_OK);
+    HT_ASSERT_EQ(written, needed);
+
+    ht_tree_t loaded_tree;
+    HT_ASSERT_EQ(ht_tree_load(&loaded_tree, save_buf, written), HT_OK);
+
+    /* 7. Verify 100% bit-identical prediction match between original and loaded tree */
+    for (int t = 0; t < 100; ++t) {
+        ht_value_t x[HT_MAX_FEATURES];
+        memset(x, 0, sizeof(x));
+        x[0].num = (ht_float_t)(t * 0.1);
+        x[1].num = (ht_float_t)(10.0 - t * 0.1);
+        x[2].cat = t % 2;
+        x[3].num = (ht_float_t)5.0;
+
+        ht_float_t p_orig[HT_MAX_CLASSES];
+        ht_float_t p_load[HT_MAX_CLASSES];
+
+        HT_ASSERT_EQ(ht_tree_predict_proba(&tree, x, p_orig), HT_OK);
+        HT_ASSERT_EQ(ht_tree_predict_proba(&loaded_tree, x, p_load), HT_OK);
+
+        HT_ASSERT_FLOAT_NEAR(p_orig[0], p_load[0], 1e-6);
+        HT_ASSERT_FLOAT_NEAR(p_orig[1], p_load[1], 1e-6);
+        HT_ASSERT_EQ(ht_tree_predict(&tree, x), ht_tree_predict(&loaded_tree, x));
+    }
+}
+
 void test_e2e_flow_run(void) {
     HT_TEST_SUITE_BEGIN("Nivel 3: Fluxo Ponta a Ponta Acumulado (E2E)");
     HT_RUN_TEST(test_e2e_sample_vector_ingestion);
@@ -554,4 +660,5 @@ void test_e2e_flow_run(void) {
     HT_RUN_TEST(test_e2e_memory_split_simulation);
     HT_RUN_TEST(test_e2e_stream_observer_pipeline);
     HT_RUN_TEST(test_e2e_split_decision_pipeline);
+    HT_RUN_TEST(test_e2e_full_tree_prequential_and_serialization);
 }
