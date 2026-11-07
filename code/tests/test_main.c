@@ -144,6 +144,9 @@ int main(void) {
     /* Nível 1 & 2: Slab / Pool Allocator */
     test_memory_run();
 
+    /* Nível 1 & 2: Observadores de Atributos */
+    test_observer_run();
+
     /* Nível 3: Fluxo Ponta a Ponta Acumulado */
     test_e2e_flow_run();
 
