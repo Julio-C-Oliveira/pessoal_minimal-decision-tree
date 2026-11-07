@@ -114,8 +114,15 @@ pessoal_minimal-decision-tree/
 │   ├── ht_criterion.c
 │   ├── ht_tree.c
 │   └── ht_drift.c
-├── tests/                       # Testes unitários em C (memória, Welford, Gini/Entropia, splits, dump)
-│   └── test_main.c
+├── tests/                       # Suíte modular de testes em C (função -> integração -> fluxo total)
+│   ├── test_harness.h           # Macros de asserção sem dependências (tolerância adaptativa float/double)
+│   ├── test_memory.c            # Testes de unidade, stress e reciclagem do ht_memory
+│   ├── test_observer.c          # Testes do Welford Gaussiano, PDF/CDF e observador categórico
+│   ├── test_criterion.c         # Testes de Gini, Info Gain, Hoeffding Bound e busca de split
+│   ├── test_tree.c              # Testes de roteamento, folhas MC/NB/NBA, splits, desativação e dump
+│   ├── test_drift.c             # Testes de ADWIN estático e subárvores alternativas (HAT)
+│   ├── test_e2e_flow.c          # Testes do fluxo completo ponta a ponta acumulado
+│   └── test_main.c              # Runner principal que orquestra todas as suítes
 └── benchmarks/                  # Comparação prequential (C vs River em Python)
     ├── generate_streams.py      # Gera datasets sintéticos (SEA, Agrawal, Hyperplane, LED)
     ├── compare_river.py         # Compara Acurácia Prequential, Tempo e Memória (River vs C)
@@ -142,27 +149,28 @@ pessoal_minimal-decision-tree/
   - [ ] [`_criterion.pxd`](file:///home/julio/Documentos/pessoal_minimal-decision-tree/references/sklearn_tree/_criterion.pxd) / [`_criterion.pyx`](file:///home/julio/Documentos/pessoal_minimal-decision-tree/references/sklearn_tree/_criterion.pyx) (Design modular dos critérios de impureza e avaliação incremental de partições).
   - [ ] [`_splitter.pxd`](file:///home/julio/Documentos/pessoal_minimal-decision-tree/references/sklearn_tree/_splitter.pxd) / [`_splitter.pyx`](file:///home/julio/Documentos/pessoal_minimal-decision-tree/references/sklearn_tree/_splitter.pyx) (Registro `SplitRecord` para retorno de candidatos a ponto de corte).
 
-### Fase 1: Núcleo VFDT em C11 + Gestão de Memória (`<= 1MB`)
-- [ ] Configurar `Makefile` e `ht_config.h` (suporte a `float`/`double`, `ht_value_t`, `stdint.h`, compilação limpa com `-Wall -Wextra -Werror -std=c11`).
-- [ ] Implementar `ht_memory`: Pool/Slab allocator estático baseado em índices `uint16_t` para `ht_node_t` e `ht_leaf_stats_t` (zero `malloc` em runtime, medição exata de bytes usados).
-- [ ] Implementar `ht_observer`:
+### Fase 1: Núcleo VFDT em C11 + Gestão de Memória (`<= 1MB`) + Testes Progressivos (`tests/`)
+> **Protocolo de Testes em 3 Níveis:** Cada módulo implementado abaixo deve vir imediatamente acompanhado de seus testes de **Nível 1 (Função/Unidade)**, **Nível 2 (Integração com camadas anteriores)** e **Nível 3 (Fluxo Total Acumulado em `test_e2e_flow.c`)**, validados em `float` e `double` antes de avançar ao próximo item.
+
+- [ ] Configurar `Makefile`, `ht_config.h` e `tests/test_harness.h` (suporte a `float`/`double`, `ht_value_t`, `stdint.h`, compilação limpa com `-Wall -Wextra -Werror -std=c11`).
+- [ ] Implementar `ht_memory` + `tests/test_memory.c`: Pool/Slab allocator estático baseado em índices `uint16_t` para `ht_node_t` e `ht_leaf_stats_t` (zero `malloc` em runtime, medição exata de bytes usados, stress test de reciclagem).
+- [ ] Implementar `ht_observer` + `tests/test_observer.c`:
   - [ ] Observador numérico Gaussiano incremental (Welford) + avaliação de $k$ thresholds candidatos usando PDF/CDF normal.
   - [ ] Observador categórico nominal com busca do melhor split binário ($x_i == c$ vs $x_i \neq c$).
-- [ ] Implementar `ht_criterion`:
+- [ ] Implementar `ht_criterion` + `tests/test_criterion.c`:
   - [ ] Vtable (`ht_criterion_vtable_t`) + implementações de *Gini Impurity* e *Information Gain (Entropia)*.
-  - [ ] Cálculo do *Hoeffding Bound* ($\epsilon$) e verificação de split ($\Delta G > \epsilon$ ou $\epsilon < \tau$).
-- [ ] Implementar `ht_tree` (VFDT):
+  - [ ] Cálculo do *Hoeffding Bound* ($\epsilon$) e verificação de split ($\Delta G > \epsilon$ ou $\epsilon < \tau$) integrado aos observadores.
+- [ ] Implementar `ht_tree` (VFDT) + `tests/test_tree.c` + `tests/test_e2e_flow.c`:
   - [ ] Roteamento de amostras da raiz até a folha (incluindo fallback para filho mais populoso em caso de `NaN`).
   - [ ] Predição nas folhas via *Majority Class* (MC), *Naive Bayes* (NB) e *Naive Bayes Adaptive* (NBA).
   - [ ] Ciclo `learn_one`: atualização de estatísticas, checagem a cada `grace_period`, execução de split e reciclagem do `ht_leaf_stats_t`.
   - [ ] Gestão de memória VFDT: cálculo de folha menos promissora ($p_l \cdot e_l$) e desativação automática quando o `stats_pool` encher.
-  - [ ] Serialização binária (`ht_save` / `ht_load` em modo completo ou somente-inferência).
+  - [ ] Serialização binária (`ht_save` / `ht_load` em modo completo ou somente-inferência) e validação do fluxo ponta a ponta completo.
 
-### Fase 2: Validação e Benchmark contra o River (`benchmarks/`)
-- [ ] Criar testes unitários em C (`tests/test_main.c`) cobrindo alocador, Welford, Gini/InfoGain, splits e serialização.
+### Fase 2: Validação Prequential e Benchmark contra o River (`benchmarks/`)
 - [ ] Criar script Python com `river` para gerar streams clássicos (ex: *SEA*, *Agrawal*, *Hyperplane*) e comparar curva de acurácia *prequential*, número de nós, número de splits e consumo de RAM entre o River e nossa implementação em C.
 
 ### Fase 3: Concept Drift — Hoeffding Adaptive Tree (HAT)
-- [ ] Implementar detector **ADWIN** em C com lista de buckets estática (alocada a partir de um pool dedicado).
-- [ ] Adicionar suporte a subárvores alternativas (`alternate_tree`) nos nós internos da árvore quando o ADWIN detectar mudança de distribuição, substituindo a subárvore antiga caso a alternativa atinja menor erro.
+- [ ] Implementar detector **ADWIN** em C com lista de buckets estática (alocada a partir de um pool dedicado) + testes unitários em `tests/test_drift.c`.
+- [ ] Adicionar suporte a subárvores alternativas (`alternate_tree`) nos nós internos da árvore quando o ADWIN detectar mudança de distribuição, substituindo a subárvore antiga caso a alternativa atinja menor erro + teste de fluxo total com drift em `tests/test_e2e_flow.c`.
 - [ ] Validar em streams com *Concept Drift* abrupto e gradual contra `river.tree.HoeffdingAdaptiveTreeClassifier`.
