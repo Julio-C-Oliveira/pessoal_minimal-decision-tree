@@ -619,6 +619,9 @@ Embora todas as fases planejadas (Fases 0 a 4, incluindo Classificação, Adapta
      - **Modo de Treinamento:** Aprendizado incremental *on-device* (`ht_tree_learn_one` / `ht_tree_learn_one_reg`) e persistência do modelo em Flash/NVS (`ht_tree_save`).
      - **Modo de Inferência:** Predição em tempo real de ultrabaixa latência (`ht_tree_predict` / `ht_tree_predict_reg`) com possibilidade de carregar o modelo salvo (`ht_tree_load`).
 
+6. **Criação e Publicação da Wiki Oficial no GitHub:**
+   - Estruturar a aba **Wiki** do repositório no GitHub para organizar toda a documentação técnica (`docs/`), os fluxogramas de arquitetura (`arquitetura.md`), os relatórios de benchmark (`benchmarks/*_report.md`) e tutoriais passo a passo de integração em microcontroladores em páginas navegáveis.
+
 ---
 
 ## 11. Versionamento do Projeto e Releases no GitHub
