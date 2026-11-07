@@ -163,12 +163,12 @@ pessoal_minimal-decision-tree/
 - [x] Implementar `ht_criterion` + `code/tests/test_criterion.c`:
   - [x] Vtable (`ht_criterion_vtable_t`) + implementações de *Gini Impurity* e *Information Gain (Entropia)*.
   - [x] Cálculo do *Hoeffding Bound* ($\epsilon$) e verificação de split ($\Delta G > \epsilon$ ou $\epsilon < \tau$) integrado aos observadores.
-- [ ] Implementar `ht_tree` (VFDT) + `code/tests/test_tree.c` + `code/tests/test_e2e_flow.c`:
-  - [ ] Roteamento de amostras da raiz até a folha (incluindo fallback para filho mais populoso em caso de `NaN`).
-  - [ ] Predição nas folhas via *Majority Class* (MC), *Naive Bayes* (NB) e *Naive Bayes Adaptive* (NBA).
-  - [ ] Ciclo `learn_one`: atualização de estatísticas, checagem a cada `grace_period`, execução de split e reciclagem do `ht_leaf_stats_t`.
-  - [ ] Gestão de memória VFDT: cálculo de folha menos promissora ($p_l \cdot e_l$) e desativação automática quando o `stats_pool` encher.
-  - [ ] Serialização binária (`ht_save` / `ht_load` em modo completo ou somente-inferência) e validação do fluxo ponta a ponta completo.
+- [x] Implementar `ht_tree` (VFDT) + `code/tests/test_tree.c` + `code/tests/test_e2e_flow.c`:
+  - [x] Roteamento de amostras da raiz até a folha (incluindo fallback para filho mais populoso em caso de `NaN`).
+  - [x] Predição nas folhas via *Majority Class* (MC), *Naive Bayes* (NB) e *Naive Bayes Adaptive* (NBA).
+  - [x] Ciclo `learn_one`: atualização de estatísticas, checagem a cada `grace_period`, execução de split e reciclagem do `ht_leaf_stats_t`.
+  - [x] Gestão de memória VFDT: cálculo de folha menos promissora ($p_l \cdot e_l$) e desativação automática quando o `stats_pool` encher.
+  - [x] Serialização binária (`ht_save` / `ht_load` em modo completo ou somente-inferência) e validação do fluxo ponta a ponta completo.
 
 ### Fase 2: Validação Prequential e Benchmark contra o River (`benchmarks/`)
 - [ ] Criar script Python com `river` para gerar streams clássicos (ex: *SEA*, *Agrawal*, *Hyperplane*) e comparar curva de acurácia *prequential*, número de nós, número de splits e consumo de RAM entre o River e nossa implementação em C.
