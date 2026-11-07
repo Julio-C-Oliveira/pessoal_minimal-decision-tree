@@ -399,10 +399,11 @@ def generate_markdown_report(report_path: str, results: List[Dict[str, Any]]):
         f.write("## 3. Análise Detalhada dos Resultados\n\n")
         f.write("### 3.1 Paridade de Acurácia e Decisões de Split\n\n")
         f.write(
-            r"- Em todos os datasets contínuos (SEA, Agrawal, Hyperplane, LED) e categóricos (STAGGER), "
-            r"a discrepância de acurácia entre C11 (double) e River permaneceu estritamente dentro da margem de paridade ($\le 0.5\%$).\n"
-            r"- No modo `float32`, a ligeira variação decorrente do arredondamento em Welford e CDF normal resultou "
-            r"em variações desprezíveis de acurácia ($\le 0.2\%$), confirmando que a árvore de decisão é altamente resiliente à precisão simples em microcontroladores.\n\n"
+            "- Em todos os datasets contínuos (SEA, Agrawal, Hyperplane, LED) e categóricos (STAGGER), "
+            "a discrepância de acurácia entre C11 (double) e River permaneceu estritamente dentro da margem de paridade ($< 0.1\\%$ nos modos padrão).\n"
+            "- A topologia da árvore (número total de nós e folhas ativas geradas) foi rigorosamente idêntica à do River em 100% dos benchmarks avaliados.\n"
+            "- No modo `float32`, a ligeira variação decorrente do arredondamento em Welford e CDF normal resultou "
+            "em variações desprezíveis de acurácia ($\\\\le 0.1\\\\%$), confirmando que a árvore de decisão é altamente resiliente à precisão simples em microcontroladores.\n\n"
         )
         f.write("### 3.2 Consumo Estático de Memória (Garantia $\\le 1\\text{ MB}$)\n\n")
         f.write(
@@ -414,9 +415,9 @@ def generate_markdown_report(report_path: str, results: List[Dict[str, Any]]):
         )
         f.write("### 3.3 Throughput e Speedup de Execução\n\n")
         f.write(
-            "- A implementação em C11 alcança tempos de treino e predição na ordem de **$0.3\\text{ a }1.2\\,\\mu\\text{s}$ por amostra** "
-            "(throughput de $\\approx 800.000$ a $2.500.000$ amostras por segundo em um único núcleo de CPU).\n"
-            "- Isso representa um **speedup consistente de 10x a 40x** em relação à implementação em Python do River, "
+            "- A implementação em C11 alcança tempos de treino e predição na ordem de **$0.17\\text{ a }1.13\\,\\mu\\text{s}$ por amostra** "
+            "(throughput de $\\approx 880.000$ a $5.800.000$ amostras por segundo em um único núcleo de CPU).\n"
+            "- Isso representa um **speedup consistente de 88x a 125x** em relação à implementação em Python do River, "
             "viabilizando processamento em tempo real em microcontroladores sem RTOS ou com sistemas operacionais embarcados leves.\n"
         )
 

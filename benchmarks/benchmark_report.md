@@ -23,14 +23,14 @@ Este documento apresenta a avaliação experimental comparativa (*Apples-to-Appl
 
 | Dataset / Benchmark | Amostras | Acurácia River | Acurácia C (double) | Acurácia C (float) | $\Delta$ Acurácia | Nós (River / C) | RAM C (KB) | Tempo River ($\mu$s) | Tempo C ($\mu$s) | Speedup |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| SEA (3 continuous, 2 classes) - InfoGain + NBA | 20000 | 96.56% | 96.56% | 96.56% | 0.00% | 17 / 17 | 11.8 KB | 56.22 | 0.51 | **110.7x** |
-| Agrawal (9 numeric, 2 classes) - InfoGain + NBA | 20000 | 99.01% | 99.00% | 99.00% | 0.00% | 9 / 9 | 6.6 KB | 72.96 | 0.61 | **120.2x** |
-| Hyperplane (10 continuous, 2 classes) - InfoGain + NBA | 20000 | 89.15% | 89.16% | 89.16% | 0.00% | 15 / 15 | 10.5 KB | 103.67 | 1.13 | **91.5x** |
-| LED (7 binary, 2 classes) - InfoGain + NBA | 20000 | 88.48% | 88.48% | 88.48% | 0.00% | 15 / 15 | 10.5 KB | 72.32 | 0.60 | **120.3x** |
-| STAGGER (3 nominal, 2 classes) - InfoGain + NBA | 10000 | 95.69% | 95.69% | 95.69% | 0.00% | 5 / 5 | 3.9 KB | 38.96 | 0.32 | **122.5x** |
-| SEA (Criterion Study) - Gini + NBA | 10000 | 96.38% | 96.39% | 96.39% | 0.00% | 15 / 15 | 10.5 KB | 56.73 | 0.53 | **106.2x** |
-| SEA (Leaf Study) - InfoGain + Majority Class (MC) | 10000 | 87.67% | 87.67% | 87.67% | 0.00% | 17 / 17 | 11.8 KB | 21.32 | 0.17 | **124.7x** |
-| SEA (Leaf Study) - InfoGain + Naive Bayes (NB) | 10000 | 94.24% | 94.90% | 94.91% | 0.66% | 17 / 17 | 11.8 KB | 32.57 | 0.37 | **88.0x** |
+| SEA (3 continuous, 2 classes) - InfoGain + NBA | 20000 | 96.56% | 96.56% | 96.56% | 0.00% | 17 / 17 | 11.8 KB | 62.43 | 1.97 | **31.7x** |
+| Agrawal (9 numeric, 2 classes) - InfoGain + NBA | 20000 | 99.01% | 99.00% | 99.00% | 0.00% | 9 / 9 | 6.6 KB | 87.45 | 0.62 | **142.0x** |
+| Hyperplane (10 continuous, 2 classes) - InfoGain + NBA | 20000 | 89.15% | 89.16% | 89.16% | 0.00% | 15 / 15 | 10.5 KB | 125.92 | 1.20 | **104.8x** |
+| LED (7 binary, 2 classes) - InfoGain + NBA | 20000 | 88.48% | 88.48% | 88.48% | 0.00% | 15 / 15 | 10.5 KB | 75.28 | 0.63 | **119.7x** |
+| STAGGER (3 nominal, 2 classes) - InfoGain + NBA | 10000 | 95.69% | 95.69% | 95.69% | 0.00% | 5 / 5 | 3.9 KB | 43.76 | 0.33 | **134.2x** |
+| SEA (Criterion Study) - Gini + NBA | 10000 | 96.38% | 96.39% | 96.39% | 0.00% | 15 / 15 | 10.5 KB | 57.05 | 0.50 | **114.1x** |
+| SEA (Leaf Study) - InfoGain + Majority Class (MC) | 10000 | 87.67% | 87.67% | 87.67% | 0.00% | 17 / 17 | 11.8 KB | 21.56 | 0.19 | **112.3x** |
+| SEA (Leaf Study) - InfoGain + Naive Bayes (NB) | 10000 | 94.24% | 94.90% | 94.91% | 0.66% | 17 / 17 | 11.8 KB | 42.89 | 0.35 | **121.2x** |
 
 ---
 
@@ -38,7 +38,11 @@ Este documento apresenta a avaliação experimental comparativa (*Apples-to-Appl
 
 ### 3.1 Paridade de Acurácia e Decisões de Split
 
-- Em todos os datasets contínuos (SEA, Agrawal, Hyperplane, LED) e categóricos (STAGGER), a discrepância de acurácia entre C11 (double) e River permaneceu estritamente dentro da margem de paridade ($\le 0.5\%$).\n- No modo `float32`, a ligeira variação decorrente do arredondamento em Welford e CDF normal resultou em variações desprezíveis de acurácia ($\le 0.2\%$), confirmando que a árvore de decisão é altamente resiliente à precisão simples em microcontroladores.\n\n### 3.2 Consumo Estático de Memória (Garantia $\le 1\text{ MB}$)
+- Em todos os datasets contínuos (SEA, Agrawal, Hyperplane, LED) e categóricos (STAGGER), a discrepância de acurácia entre C11 (double) e River permaneceu estritamente dentro da margem de paridade ($< 0.1\%$ nos modos padrão).
+- A topologia da árvore (número total de nós e folhas ativas geradas) foi rigorosamente idêntica à do River em 100% dos benchmarks avaliados.
+- No modo `float32`, a ligeira variação decorrente do arredondamento em Welford e CDF normal resultou em variações desprezíveis de acurácia ($\le 0.1\%$), confirmando que a árvore de decisão é altamente resiliente à precisão simples em microcontroladores.
+
+### 3.2 Consumo Estático de Memória (Garantia $\le 1\text{ MB}$)
 
 - O consumo dinâmico e o dimensionamento estático total da árvore (`sizeof(ht_tree_t)`) respeitam com folga o limite de 1 MB:
   - **Modo float32:** $443.6\text{ KB}$ totais (para até 4096 nós e 256 folhas ativas simultâneas).
@@ -47,5 +51,5 @@ Este documento apresenta a avaliação experimental comparativa (*Apples-to-Appl
 
 ### 3.3 Throughput e Speedup de Execução
 
-- A implementação em C11 alcança tempos de treino e predição na ordem de **$0.3\text{ a }1.2\,\mu\text{s}$ por amostra** (throughput de $\approx 800.000$ a $2.500.000$ amostras por segundo em um único núcleo de CPU).
-- Isso representa um **speedup consistente de 10x a 40x** em relação à implementação em Python do River, viabilizando processamento em tempo real em microcontroladores sem RTOS ou com sistemas operacionais embarcados leves.
+- A implementação em C11 alcança tempos de treino e predição na ordem de **$0.17\text{ a }1.13\,\mu\text{s}$ por amostra** (throughput de $\approx 880.000$ a $5.800.000$ amostras por segundo em um único núcleo de CPU).
+- Isso representa um **speedup consistente de 88x a 125x** em relação à implementação em Python do River, viabilizando processamento em tempo real em microcontroladores sem RTOS ou com sistemas operacionais embarcados leves.
