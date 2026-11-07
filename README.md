@@ -469,3 +469,9 @@ Embora todas as fases planejadas (Fases 0 a 4, incluindo Classificação, Adapta
 4. **Ensembles Online Embarcados (Streaming Random Forests / Online Bagging):**
    - Implementação de algoritmos de ensemble em streaming (*Online Bagging*, *Leveraging Bagging* ou *Streaming Random Patches*).
    - Particionamento do pool estático de nós e detectores ADWIN entre múltiplas árvores leves ($M$ árvores) dentro do mesmo buffer estático de $\le 1\text{ MB}$.
+
+5. **Validação Prática em ESP32 com Máquina de Estados Completa:**
+   - Testar a biblioteca embarcada diretamente em uma placa **ESP32** estruturada com estados de operação prontos:
+     - **Modo de Captura de Dados:** Aquisição e pré-processamento de leituras de sensores em tempo real.
+     - **Modo de Treinamento:** Aprendizado incremental *on-device* (`ht_tree_learn_one` / `ht_tree_learn_one_reg`) e persistência do modelo em Flash/NVS (`ht_tree_save`).
+     - **Modo de Inferência:** Predição em tempo real de ultrabaixa latência (`ht_tree_predict` / `ht_tree_predict_reg`) com possibilidade de carregar o modelo salvo (`ht_tree_load`).
