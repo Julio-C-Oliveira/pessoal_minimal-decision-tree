@@ -957,6 +957,144 @@ static void test_e2e_continuous_regression_stream_pipeline(void) {
     HT_ASSERT_EQ(ht_memory_bytes_used(&s_e2e_pool), 0);
 }
 
+static void test_e2e_regression_split_decision_pipeline(void) {
+    ht_memory_init(&s_e2e_pool);
+
+    /* Allocate root node (node 0) and active leaf stats (stats 0) */
+    uint16_t root_node_idx = ht_node_alloc(&s_e2e_pool);
+    HT_ASSERT_EQ(root_node_idx, 0);
+
+    uint16_t root_stats_idx = ht_stats_alloc(&s_e2e_pool);
+    HT_ASSERT_EQ(root_stats_idx, 0);
+
+    ht_node_t *root = ht_node_get(&s_e2e_pool, root_node_idx);
+    HT_ASSERT_NOT_NULL(root);
+    root->stats_idx = root_stats_idx;
+
+    ht_leaf_stats_t *stats = ht_stats_get(&s_e2e_pool, root_stats_idx);
+    HT_ASSERT_NOT_NULL(stats);
+
+    ht_feature_type_t feat_types[HT_MAX_FEATURES];
+    feat_types[0] = HT_FEAT_NUMERIC;      /* Feature 0: True informative feature */
+    feat_types[1] = HT_FEAT_NUMERIC;      /* Feature 1: Noise numeric */
+    feat_types[2] = HT_FEAT_NUMERIC;      /* Feature 2: Noise numeric */
+    feat_types[3] = HT_FEAT_CATEGORICAL;  /* Feature 3: Noise categorical */
+
+    ht_reg_numeric_init(&stats->observers[0].reg_num);
+    ht_reg_numeric_init(&stats->observers[1].reg_num);
+    ht_reg_numeric_init(&stats->observers[2].reg_num);
+    ht_reg_categorical_init(&stats->observers[3].reg_cat);
+
+    const uint32_t N_SAMPLES = 350U;
+    uint32_t lcg = 12345U;
+
+    for (uint32_t i = 0; i < N_SAMPLES; ++i) {
+        /* Feature 0: uniform in [0, 10] */
+        lcg = lcg * 1664525U + 1013904223U;
+        ht_float_t x0 = ((ht_float_t)(lcg & 0xFFFFU) / (ht_float_t)65536.0) * (ht_float_t)10.0;
+
+        /* Feature 1 & 2: random noise features in [0, 10] */
+        lcg = lcg * 1664525U + 1013904223U;
+        ht_float_t x1 = ((ht_float_t)(lcg & 0xFFFFU) / (ht_float_t)65536.0) * (ht_float_t)10.0;
+        lcg = lcg * 1664525U + 1013904223U;
+        ht_float_t x2 = ((ht_float_t)(lcg & 0xFFFFU) / (ht_float_t)65536.0) * (ht_float_t)10.0;
+
+        /* Feature 3: random categorical feature in {0, 1, 2, 3} */
+        lcg = lcg * 1664525U + 1013904223U;
+        int32_t x3 = (int32_t)(lcg % 4U);
+
+        /* Target y: sharp threshold split at x0 = 5.0 with small noise */
+        lcg = lcg * 1664525U + 1013904223U;
+        ht_float_t noise = ((ht_float_t)(lcg & 0xFFU) / (ht_float_t)256.0 - (ht_float_t)0.5) * (ht_float_t)2.0;
+        ht_float_t y = (x0 <= (ht_float_t)5.0) ? ((ht_float_t)5.0 + noise) : ((ht_float_t)50.0 + noise);
+        ht_float_t weight = (ht_float_t)1.0;
+
+        /* Ingest into leaf target variance statistics */
+        ht_var_update(&root->reg_stats, y, weight);
+
+        /* Ingest into observers */
+        ht_reg_numeric_update(&stats->observers[0].reg_num, x0, y, weight);
+        ht_reg_numeric_update(&stats->observers[1].reg_num, x1, y, weight);
+        ht_reg_numeric_update(&stats->observers[2].reg_num, x2, y, weight);
+        ht_reg_categorical_update(&stats->observers[3].reg_cat, x3, y, weight);
+    }
+
+    /* 1. Evaluate split candidates */
+    ht_split_candidate_t best, second_best;
+    ht_find_best_reg_split_candidates(stats, &root->reg_stats, feat_types, 4,
+                                      (ht_float_t)5.0, (ht_float_t)0.01, true,
+                                      &best, &second_best);
+
+    /* Assert Feature 0 identified as top split candidate */
+    HT_ASSERT_EQ(best.feature_idx, 0);
+    HT_ASSERT_EQ(best.is_categorical, 0);
+    HT_ASSERT(best.merit > (ht_float_t)200.0);
+    /* Threshold must be near the actual boundary 5.0 */
+    HT_ASSERT(best.split_val.threshold >= (ht_float_t)3.0 &&
+              best.split_val.threshold <= (ht_float_t)7.0);
+
+    /* 2. Compute Hoeffding bound for regression (R = 1.0) */
+    ht_float_t epsilon = ht_hoeffding_bound((ht_float_t)1.0, (ht_float_t)1e-7, (ht_float_t)N_SAMPLES);
+    HT_ASSERT(epsilon < (ht_float_t)0.20);
+
+    /* 3. Evaluate split decision */
+    bool should_split = ht_should_split_reg(&best, &second_best, epsilon, (ht_float_t)0.05);
+    HT_ASSERT(should_split);
+
+    /* 4. Perform simulated tree split (lifecycle & recycling) */
+    uint16_t left_child_idx = ht_node_alloc(&s_e2e_pool);
+    HT_ASSERT_NEQ(left_child_idx, HT_INVALID_IDX);
+    uint16_t right_child_idx = ht_node_alloc(&s_e2e_pool);
+    HT_ASSERT_NEQ(right_child_idx, HT_INVALID_IDX);
+
+    uint16_t left_stats_idx = ht_stats_alloc(&s_e2e_pool);
+    HT_ASSERT_NEQ(left_stats_idx, HT_INVALID_IDX);
+    uint16_t right_stats_idx = ht_stats_alloc(&s_e2e_pool);
+    HT_ASSERT_NEQ(right_stats_idx, HT_INVALID_IDX);
+
+    /* Recycle parent leaf stats block */
+    ht_stats_free(&s_e2e_pool, root_stats_idx);
+
+    /* Update parent node into split node */
+    root->flags &= ~HT_NODE_IS_LEAF;
+    root->feature_idx = best.feature_idx;
+    if (best.is_categorical) {
+        root->split_val.cat_val = best.split_val.cat_val;
+    } else {
+        root->split_val.threshold = best.split_val.threshold;
+    }
+    root->left_child = left_child_idx;
+    root->right_child = right_child_idx;
+    root->stats_idx = HT_INVALID_IDX;
+
+    /* Initialize child nodes */
+    ht_node_t *left_child = ht_node_get(&s_e2e_pool, left_child_idx);
+    HT_ASSERT_NOT_NULL(left_child);
+    left_child->stats_idx = left_stats_idx;
+    left_child->reg_stats = best.lhs_var;
+
+    ht_node_t *right_child = ht_node_get(&s_e2e_pool, right_child_idx);
+    HT_ASSERT_NOT_NULL(right_child);
+    right_child->stats_idx = right_stats_idx;
+    right_child->reg_stats = best.rhs_var;
+
+    /* Verify memory usage invariant */
+    HT_ASSERT_EQ(ht_node_count(&s_e2e_pool), 3);
+    HT_ASSERT_EQ(ht_stats_count(&s_e2e_pool), 2);
+    HT_ASSERT(ht_memory_bytes_used(&s_e2e_pool) <= (1024 * 1024));
+
+    /* Clean up all allocated structures */
+    ht_stats_free(&s_e2e_pool, left_stats_idx);
+    ht_node_free(&s_e2e_pool, left_child_idx);
+    ht_stats_free(&s_e2e_pool, right_stats_idx);
+    ht_node_free(&s_e2e_pool, right_child_idx);
+    ht_node_free(&s_e2e_pool, root_node_idx);
+
+    HT_ASSERT_EQ(ht_node_count(&s_e2e_pool), 0);
+    HT_ASSERT_EQ(ht_stats_count(&s_e2e_pool), 0);
+    HT_ASSERT_EQ(ht_memory_bytes_used(&s_e2e_pool), 0);
+}
+
 void test_e2e_flow_run(void) {
     HT_TEST_SUITE_BEGIN("Nivel 3: Fluxo Ponta a Ponta Acumulado (E2E)");
     HT_RUN_TEST(test_e2e_sample_vector_ingestion);
@@ -968,4 +1106,5 @@ void test_e2e_flow_run(void) {
     HT_RUN_TEST(test_e2e_drift_stream_pipeline);
     HT_RUN_TEST(test_e2e_hat_abrupt_drift_recovery);
     HT_RUN_TEST(test_e2e_continuous_regression_stream_pipeline);
+    HT_RUN_TEST(test_e2e_regression_split_decision_pipeline);
 }

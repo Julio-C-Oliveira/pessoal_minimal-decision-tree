@@ -25,8 +25,9 @@
  * @brief Supported split criteria identifiers.
  */
 typedef enum {
-    HT_CRIT_INFO_GAIN = 0,
-    HT_CRIT_GINI      = 1
+    HT_CRIT_INFO_GAIN          = 0,
+    HT_CRIT_GINI               = 1,
+    HT_CRIT_VARIANCE_REDUCTION = 2
 } ht_criterion_type_t;
 
 /**
@@ -227,5 +228,139 @@ bool ht_should_split(const ht_split_candidate_t *best,
                      const ht_split_candidate_t *second_best,
                      ht_float_t hoeffding_bound,
                      ht_float_t tau);
+
+/* ========================================================================= */
+/* --- Regression Variance Reduction Split Criterion API ------------------- */
+/* ========================================================================= */
+
+/**
+ * @brief Computes sample variance reduction (VR) with Bessel's correction (ddof=1).
+ *
+ * Enforces min_samples_split and min_branch_fraction filters:
+ * Returns -HT_INFINITY if:
+ * - pre_var, lhs_var, or rhs_var is NULL
+ * - lhs_var->count < min_samples_split or rhs_var->count < min_samples_split
+ * - pre_var->count <= 2.0 (insufficient degrees of freedom)
+ * - (lhs_var->count / pre_var->count) < min_branch_frac or
+ *   (rhs_var->count / pre_var->count) < min_branch_frac
+ *
+ * Formula:
+ * VR = Var(D_pre) - [ (n_L / n) * Var(D_L) + (n_R / n) * Var(D_R) ]
+ * where Var(D) is sample variance computed with ddof = 1 (ht_var_value).
+ *
+ * @param pre_var Target variance statistics prior to split.
+ * @param lhs_var Target variance statistics for left branch (x <= val or x == cat).
+ * @param rhs_var Target variance statistics for right branch (x > val or x != cat).
+ * @param min_samples_split Minimum accumulated sample weight required per child branch.
+ * @param min_branch_frac Minimum fraction of total weight required per child branch.
+ * @return Variance reduction merit (higher is better), or -HT_INFINITY if invalid.
+ */
+ht_float_t ht_compute_variance_reduction(const ht_var_stat_t *pre_var,
+                                         const ht_var_stat_t *lhs_var,
+                                         const ht_var_stat_t *rhs_var,
+                                         ht_float_t min_samples_split,
+                                         ht_float_t min_branch_frac);
+
+/**
+ * @brief Evaluates numeric regression observer (ordered quantized slots) for best split threshold.
+ *
+ * Evaluates candidate thresholds at midpoints between adjacent active slots:
+ * tau_k = (obs->slots[k].x_mean + obs->slots[k+1].x_mean) / 2.0.
+ * Left branch variance is accumulated cumulatively via ht_var_combine.
+ * Right branch variance is computed via Chan subtraction: D_R = D_pre - D_L.
+ *
+ * If no valid split is found or slots violate min_samples_split / min_branch_frac,
+ * out_best retains merit = -HT_INFINITY and feature_idx = HT_NO_FEATURE.
+ * Ties within the feature are broken by preferring earlier (lower) threshold.
+ *
+ * @param obs Regression numeric observer with sorted slots.
+ * @param pre_var Target variance statistics at the current leaf node.
+ * @param feature_idx Feature index in the tree schema.
+ * @param min_samples_split Minimum samples required per branch.
+ * @param min_branch_frac Minimum fraction of total weight required per branch.
+ * @param out_best Output candidate split descriptor.
+ */
+void ht_evaluate_reg_numeric_observer(const ht_reg_numeric_obs_t *obs,
+                                      const ht_var_stat_t *pre_var,
+                                      uint8_t feature_idx,
+                                      ht_float_t min_samples_split,
+                                      ht_float_t min_branch_frac,
+                                      ht_split_candidate_t *out_best);
+
+/**
+ * @brief Evaluates categorical regression observer for best one-vs-rest binary split.
+ *
+ * Evaluates each observed category value as a binary partition (x == cat vs x != cat).
+ * Left branch: D_L = obs->cat_stats[cat].
+ * Right branch: D_R = ht_var_subtract(pre_var, &D_L).
+ *
+ * If no valid split is found or all categories violate constraints,
+ * out_best retains merit = -HT_INFINITY and feature_idx = HT_NO_FEATURE.
+ * Ties within the feature are broken by preferring earlier category value.
+ *
+ * @param obs Regression categorical observer.
+ * @param pre_var Target variance statistics at the current leaf node.
+ * @param feature_idx Feature index in the tree schema.
+ * @param min_samples_split Minimum samples required per branch.
+ * @param min_branch_frac Minimum fraction of total weight required per branch.
+ * @param out_best Output candidate split descriptor.
+ */
+void ht_evaluate_reg_categorical_observer(const ht_reg_categorical_obs_t *obs,
+                                          const ht_var_stat_t *pre_var,
+                                          uint8_t feature_idx,
+                                          ht_float_t min_samples_split,
+                                          ht_float_t min_branch_frac,
+                                          ht_split_candidate_t *out_best);
+
+/**
+ * @brief Evaluates all regression observers in an active leaf and returns top 2 candidates.
+ *
+ * Matches River's regression leaf.best_split_suggestions():
+ * - If merit_preprune is true, null split candidate is added first (merit = -HT_INFINITY).
+ * - Each feature observer is evaluated based on feature_types.
+ * - Candidates are stably sorted by merit (on ties, higher feature index wins, matching Timsort).
+ * - Writes best candidate to out_best and second best to out_second_best.
+ *
+ * @param stats Pointer to active leaf statistics block.
+ * @param pre_var Target variance statistics at the node (node->reg_stats).
+ * @param feature_types Feature types array in tree schema.
+ * @param n_features Number of features in schema.
+ * @param min_samples_split Minimum samples per branch.
+ * @param min_branch_frac Minimum branch fraction.
+ * @param merit_preprune Whether to include null split as candidate.
+ * @param out_best Output for top candidate.
+ * @param out_second_best Output for second best candidate.
+ */
+void ht_find_best_reg_split_candidates(const ht_leaf_stats_t *stats,
+                                       const ht_var_stat_t *pre_var,
+                                       const ht_feature_type_t feature_types[HT_MAX_FEATURES],
+                                       uint8_t n_features,
+                                       ht_float_t min_samples_split,
+                                       ht_float_t min_branch_frac,
+                                       bool merit_preprune,
+                                       ht_split_candidate_t *out_best,
+                                       ht_split_candidate_t *out_second_best);
+
+/**
+ * @brief Decides whether to perform a regression split using the FIMT-DD / River ratio rule.
+ *
+ * Triggers a split if:
+ * 1. best candidate has positive merit (best->merit > 0.0) and valid feature (feature_idx != HT_NO_FEATURE).
+ * 2. And either:
+ *    - second_best is invalid (second_best == NULL, feature_idx == HT_NO_FEATURE, merit == -HT_INFINITY)
+ *    - OR second_best has non-positive merit (second_best->merit <= 0.0)
+ *    - OR (second_best->merit / best->merit) < (1.0 - hoeffding_bound)
+ *    - OR hoeffding_bound < tau (tie-breaker threshold)
+ *
+ * @param best Top candidate split.
+ * @param second_best Second best candidate split.
+ * @param hoeffding_bound Hoeffding bound epsilon (computed with R = 1.0).
+ * @param tau Tie-breaker threshold (e.g. 0.05).
+ * @return true if split condition is met, false otherwise.
+ */
+bool ht_should_split_reg(const ht_split_candidate_t *best,
+                         const ht_split_candidate_t *second_best,
+                         ht_float_t hoeffding_bound,
+                         ht_float_t tau);
 
 #endif /* HT_CRITERION_H */
