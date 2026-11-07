@@ -87,6 +87,8 @@ static void print_usage(const char *prog_name) {
     fprintf(stderr, "  --drift-window-threshold <N>      Min observations before switch (default: 300)\n");
     fprintf(stderr, "  --switch-significance <S>         Switch significance alpha (default: 0.05)\n");
     fprintf(stderr, "  --adwin-delta <D>                 ADWIN detector delta (default: 0.002)\n");
+    fprintf(stderr, "  --max-nodes <N>                   Maximum tree nodes allowed (default: %u)\n", (unsigned)HT_MAX_NODES);
+    fprintf(stderr, "  --max-leaves <N>                  Maximum active learning leaves allowed (default: %u)\n", (unsigned)HT_MAX_ACTIVE_LEAVES);
 }
 
 int main(int argc, char *argv[]) {
@@ -116,6 +118,8 @@ int main(int argc, char *argv[]) {
     uint16_t drift_window_threshold = 300;
     double switch_significance = 0.05;
     double adwin_delta = 0.002;
+    uint16_t max_nodes_val = 0;
+    uint16_t max_leaves_val = 0;
 
     for (int i = 2; i < argc; ++i) {
         if (strcmp(argv[i], "--task") == 0 && i + 1 < argc) {
@@ -175,6 +179,10 @@ int main(int argc, char *argv[]) {
             switch_significance = atof(argv[++i]);
         } else if (strcmp(argv[i], "--adwin-delta") == 0 && i + 1 < argc) {
             adwin_delta = atof(argv[++i]);
+        } else if (strcmp(argv[i], "--max-nodes") == 0 && i + 1 < argc) {
+            max_nodes_val = (uint16_t)atoi(argv[++i]);
+        } else if (strcmp(argv[i], "--max-leaves") == 0 && i + 1 < argc) {
+            max_leaves_val = (uint16_t)atoi(argv[++i]);
         } else {
             fprintf(stderr, "Unknown option: %s\n", argv[i]);
             print_usage(argv[0]);
@@ -301,6 +309,12 @@ int main(int argc, char *argv[]) {
     params.min_branch_fraction = (ht_float_t)0.01;
     params.max_share_to_split = (ht_float_t)0.99;
     params.merit_preprune = true;
+    if (max_nodes_val > 0) {
+        params.max_nodes = max_nodes_val;
+    }
+    if (max_leaves_val > 0) {
+        params.max_active_leaves = max_leaves_val;
+    }
 
     ht_status_t init_status;
     if (enable_hat) {
@@ -336,6 +350,10 @@ int main(int argc, char *argv[]) {
     }
     printf(" Precision Mode:  %s (model static size = %zu bytes, %.1f KB)\n",
            mode_str, model_struct_bytes, (double)model_struct_bytes / 1024.0);
+    printf(" Capacity Limits: MaxNodes=%u, MaxActiveLeaves=%u (compiled HT_MAX_NODES=%u, HT_MAX_ACTIVE_LEAVES=%u)\n",
+           (params.max_nodes > 0) ? params.max_nodes : (uint16_t)HT_MAX_NODES,
+           (params.max_active_leaves > 0) ? params.max_active_leaves : (uint16_t)HT_MAX_ACTIVE_LEAVES,
+           (unsigned)HT_MAX_NODES, (unsigned)HT_MAX_ACTIVE_LEAVES);
     if (task_type == HT_TASK_REGRESSION) {
         printf(" Hyperparameters: Leaf=%s, GracePeriod=%u, Delta=%.1e, Tau=%.3f, MinSplit=%.1f%s\n",
                (leaf_pred == HT_LEAF_ADAPTIVE) ? "Adaptive" : ((leaf_pred == HT_LEAF_MODEL) ? "Model" : "Mean"),
@@ -687,6 +705,11 @@ int main(int argc, char *argv[]) {
                 }
             }
 
+            fprintf(jfp, "  \"model_static_bytes\": %zu,\n", model_struct_bytes);
+            fprintf(jfp, "  \"compiled_max_nodes\": %u,\n", (unsigned)HT_MAX_NODES);
+            fprintf(jfp, "  \"compiled_max_active_leaves\": %u,\n", (unsigned)HT_MAX_ACTIVE_LEAVES);
+            fprintf(jfp, "  \"configured_max_nodes\": %u,\n", (unsigned)((params.max_nodes > 0) ? params.max_nodes : HT_MAX_NODES));
+            fprintf(jfp, "  \"configured_max_active_leaves\": %u,\n", (unsigned)((params.max_active_leaves > 0) ? params.max_active_leaves : HT_MAX_ACTIVE_LEAVES));
             fprintf(jfp, "  \"final_nodes\": %u,\n", final_nodes);
             fprintf(jfp, "  \"final_active_leaves\": %u,\n", tree_instance.n_active_leaves);
             fprintf(jfp, "  \"final_inactive_leaves\": %u,\n", tree_instance.n_inactive_leaves);

@@ -55,6 +55,13 @@ test: $(TEST_RUNNER)
 BENCH_SRC = ../benchmarks/bench_c_runner.c
 BENCH_RUNNER = $(BUILD_DIR)/bench_c_runner
 BENCH_RUNNER_DOUBLE = $(BUILD_DIR)/bench_c_runner_double
+BENCH_RUNNER_128 = $(BUILD_DIR)/bench_c_runner_128
+BENCH_RUNNER_64 = $(BUILD_DIR)/bench_c_runner_64
+BENCH_RUNNER_32 = $(BUILD_DIR)/bench_c_runner_32
+BENCH_RUNNER_16 = $(BUILD_DIR)/bench_c_runner_16
+BENCH_RUNNER_8 = $(BUILD_DIR)/bench_c_runner_8
+BENCH_RUNNER_4 = $(BUILD_DIR)/bench_c_runner_4
+BENCH_MEMORY_RUNNERS = $(BENCH_RUNNER) $(BENCH_RUNNER_128) $(BENCH_RUNNER_64) $(BENCH_RUNNER_32) $(BENCH_RUNNER_16) $(BENCH_RUNNER_8) $(BENCH_RUNNER_4)
 BENCH_MNIST_RUNNER = $(BUILD_DIR)/bench_c_runner_mnist
 BENCH_MNIST_DOUBLE = $(BUILD_DIR)/bench_c_runner_mnist_double
 PYTHON ?= ../.venv/bin/python
@@ -64,6 +71,24 @@ $(BENCH_RUNNER): directories $(SRCS) $(BENCH_SRC)
 
 $(BENCH_RUNNER_DOUBLE): directories $(SRCS) $(BENCH_SRC)
 	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -pedantic -Iinclude -DHT_USE_DOUBLE $(SRCS) $(BENCH_SRC) $(LDFLAGS) -o $@
+
+$(BENCH_RUNNER_128): directories $(SRCS) $(BENCH_SRC)
+	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -pedantic -Iinclude -DHT_MAX_ACTIVE_LEAVES=128 -DHT_MAX_NODES=2048 $(SRCS) $(BENCH_SRC) $(LDFLAGS) -o $@
+
+$(BENCH_RUNNER_64): directories $(SRCS) $(BENCH_SRC)
+	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -pedantic -Iinclude -DHT_MAX_ACTIVE_LEAVES=64 -DHT_MAX_NODES=1024 $(SRCS) $(BENCH_SRC) $(LDFLAGS) -o $@
+
+$(BENCH_RUNNER_32): directories $(SRCS) $(BENCH_SRC)
+	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -pedantic -Iinclude -DHT_MAX_ACTIVE_LEAVES=32 -DHT_MAX_NODES=512 $(SRCS) $(BENCH_SRC) $(LDFLAGS) -o $@
+
+$(BENCH_RUNNER_16): directories $(SRCS) $(BENCH_SRC)
+	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -pedantic -Iinclude -DHT_MAX_ACTIVE_LEAVES=16 -DHT_MAX_NODES=256 $(SRCS) $(BENCH_SRC) $(LDFLAGS) -o $@
+
+$(BENCH_RUNNER_8): directories $(SRCS) $(BENCH_SRC)
+	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -pedantic -Iinclude -DHT_MAX_ACTIVE_LEAVES=8 -DHT_MAX_NODES=128 $(SRCS) $(BENCH_SRC) $(LDFLAGS) -o $@
+
+$(BENCH_RUNNER_4): directories $(SRCS) $(BENCH_SRC)
+	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -pedantic -Iinclude -DHT_MAX_ACTIVE_LEAVES=4 -DHT_MAX_NODES=64 $(SRCS) $(BENCH_SRC) $(LDFLAGS) -o $@
 
 $(BENCH_MNIST_RUNNER): directories $(SRCS) $(BENCH_SRC)
 	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -pedantic -Iinclude -DHT_MAX_CLASSES=10 -DHT_MAX_ACTIVE_LEAVES=128 -DHT_MAX_NODES=2048 $(SRCS) $(BENCH_SRC) $(LDFLAGS) -o $@
@@ -107,6 +132,16 @@ bench-regression: $(BENCH_RUNNER) $(BENCH_RUNNER_DOUBLE)
 		$(PYTHON) ../benchmarks/compare_river.py --mode regression --bin-float $(BENCH_RUNNER) --bin-double $(BENCH_RUNNER_DOUBLE) --data-dir ../benchmarks/data --report-regression ../benchmarks/regression_benchmark_report.md; \
 	elif command -v python3 >/dev/null 2>&1; then \
 		python3 ../benchmarks/compare_river.py --mode regression --bin-float $(BENCH_RUNNER) --bin-double $(BENCH_RUNNER_DOUBLE) --data-dir ../benchmarks/data --report-regression ../benchmarks/regression_benchmark_report.md; \
+	else \
+		echo "Error: Python 3 with river not found!"; exit 1; \
+	fi
+
+bench-memory: $(BENCH_MEMORY_RUNNERS) $(BENCH_RUNNER_DOUBLE)
+	@echo "Executing Memory Scaling Benchmark across capacity limits (256, 128, 64, 32, 16, 8, 4 leaves)..."
+	@if [ -x "$(PYTHON)" ]; then \
+		$(PYTHON) ../benchmarks/compare_river.py --mode memory --bin-float $(BENCH_RUNNER) --bin-double $(BENCH_RUNNER_DOUBLE) --data-dir ../benchmarks/data --report-memory ../benchmarks/memory_benchmark_report.md; \
+	elif command -v python3 >/dev/null 2>&1; then \
+		python3 ../benchmarks/compare_river.py --mode memory --bin-float $(BENCH_RUNNER) --bin-double $(BENCH_RUNNER_DOUBLE) --data-dir ../benchmarks/data --report-memory ../benchmarks/memory_benchmark_report.md; \
 	else \
 		echo "Error: Python 3 with river not found!"; exit 1; \
 	fi
