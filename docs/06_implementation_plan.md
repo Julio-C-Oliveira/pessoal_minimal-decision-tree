@@ -20,7 +20,7 @@
 | **1.3** | **Fase 1:** Observadores de Atributos (Welford + Nominal) | `code/include/ht_observer.h`, `code/src/ht_observer.c`, `code/tests/test_observer.c`, `code/tests/test_e2e_flow.c` | **N1:** Welford ($n=0,1,2$, $s^2=0$, `NaN`), PDF/CDF normal, tabela categórica<br/>**N2:** observadores dentro de `ht_leaf_stats_t` do pool<br/>**N3:** ingestão de stream sintético `ht_value_t[]` no E2E | `[x]` | `9ae210a` |
 | **1.4** | **Fase 1:** Critérios de Impureza & Hoeffding Bound | `code/include/ht_criterion.h`, `code/src/ht_criterion.c`, `code/tests/test_criterion.c`, `code/tests/test_e2e_flow.c` | **N1:** Gini (1 divisão), InfoGain (base 2), `min_branch_fraction`, $\epsilon(R, \delta, n)$<br/>**N2:** busca do melhor `ht_split_candidate_t` entre observadores + desempate $\tau$<br/>**N3:** decisão completa de split sobre dados sintéticos no E2E | `[x]` | `c196934` |
 | **1.5** | **Fase 1:** Árvore VFDT Completa (MC/NB/NBA, Memória, Save/Load) | `code/include/ht_tree.h`, `code/src/ht_tree.c`, `code/tests/test_tree.c`, `code/tests/test_e2e_flow.c` | **N1:** roteamento iterativo (`NaN` $\to$ filho mais populoso), predição MC/NB/NBA, `Promise(l)`<br/>**N2:** split com reciclagem de `stats_idx` + desativação de folhas quando pool enche<br/>**N3:** treino *prequential* completo + `ht_save`/`ht_load` bit-a-bit | `[x]` | `e0b9739` |
-| **2.1** | **Fase 2:** Paridade Prequential e Benchmark vs River | `benchmarks/generate_streams.py`, `benchmarks/bench_c_runner.c`, `benchmarks/compare_river.py`, `benchmarks/benchmark_report.md` | Comparação *Apples-to-Apples* (SEA, Agrawal, Hyperplane, LED, STAGGER) em `double` e `float`: Acurácia, Splits, Nós, RAM ($\le 1\text{ MB}$) e Tempo ($\mu\text{s}$/amostra) | `[x]` | `678bc1c` |
+| **2.1** | **Fase 2:** Paridade Prequential e Benchmark Triplo vs River e Scikit-Learn | `benchmarks/generate_streams.py`, `benchmarks/bench_c_runner.c`, `benchmarks/compare_river.py`, `benchmarks/benchmark_report.md` | Comparação Tripla *Apples-to-Apples* (SEA, Agrawal, Hyperplane, LED, STAGGER) em `double` e `float`: Acurácia Holdout (70/30), Macro F1-Score, Acurácia Prequential, Topologia (Nós), RAM ($\le 1\text{ MB}$, heap 0.0 KB) e Speedup vs River (>110x a 397x) | `[x]` | `b151090` |
 | **2.2** | **Fase 2:** Benchmark Triplo MNIST (C11 vs River vs Scikit-Learn) com Profiling de RAM | `benchmarks/generate_mnist.py`, `benchmarks/compare_triple.py`, `benchmarks/bench_c_runner.c`, `benchmarks/triple_benchmark_report.md`, `code/Makefile`, `Makefile` | Avaliação tripla no MNIST (10 classes, 4 classes, binário): Holdout Acc, F1-Score Macro, Prequential Acc, Topologia (Nós), Profiling de RAM (Estrutura, Pico Heap Tracemalloc) e Throughput (Speedup >240x) | `[x]` | `45e20a5` |
 | **3.1** | **Fase 3:** Detector ADWIN com Histograma Exponencial Fixo | `code/include/ht_drift.h`, `code/src/ht_drift.c`, `code/tests/test_drift.c` | **N1:** inserção, compressão de buckets $2^k$ ($M=5$), corte $\epsilon_{\text{cut}}$<br/>**N2:** pool estático de detectores ADWIN + detecção de salto de média | `[ ]` | — |
 | **3.2** | **Fase 3:** Hoeffding Adaptive Tree (HAT) | `code/include/ht_tree.h`, `code/src/ht_tree.c`, `code/src/ht_drift.c`, `code/tests/test_drift.c`, `code/tests/test_e2e_flow.c` | **N1:** filtro unilateral de erro, `bound` de troca/poda, votação $1/\hat{e}^2$<br/>**N2:** substituição de subárvore com reciclagem iterativa de nós antigos<br/>**N3:** stream E2E com drift abrupto recuperando acurácia | `[ ]` | — |
@@ -322,10 +322,13 @@ flowchart LR
 
 ## 5. Baterias de Benchmarks e Validação Experimental (`benchmarks/`)
 
-### Entrega 2.1: Paridade Prequential vs River (`make bench`)
-- Validação em 5 geradores clássicos de stream (SEA, Agrawal, Hyperplane, LED, STAGGER) e estudos de ablação (Gini vs InfoGain, MC vs NB vs NBA).
-- Margem de tolerância: $\Delta \le 0.1\%$ em acurácia e topologia de nós idêntica.
-- Consumo estático: $\le 1\text{ MB}$ de RAM e zero chamadas a `malloc` em runtime.
+### Entrega 2.1: Paridade Prequential e Benchmark Triplo vs River e Scikit-Learn (`make bench`)
+- Avaliação tripla comparativa em 5 geradores clássicos de stream (SEA, Agrawal, Hyperplane, LED, STAGGER) e estudos de ablação (Gini vs InfoGain, MC vs NB vs NBA).
+- Partição determinística 70% treino e 30% teste holdout, avaliando Acurácia Holdout, Macro F1-Score e Acurácia Prequential.
+- Baseline de referência: `DecisionTreeClassifier` (Scikit-Learn CART Batch) vs `HoeffdingTreeClassifier` (River) vs C11 (`float` e `double`).
+- Margem de tolerância: $\Delta \le 0.1\%$ em acurácia holdout/prequential e paridade exata de nós entre C11 e River.
+- Consumo estático: $\le 1\text{ MB}$ de RAM e zero chamadas a `malloc` em runtime (**0.0 KB** de heap dinâmico).
+- Speedup comprovado de **$112\times$ a $397\times$** da solução em C11 sobre o River.
 
 ### Entrega 2.2: Benchmark Triplo no MNIST vs River e Scikit-Learn (`make bench-triple`)
 - Comparação abrangente em dados reais (*downsampled TinyML* $4 \times 4$ pooling $\to$ 16 atributos):
