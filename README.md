@@ -137,3 +137,29 @@ pessoal_minimal-decision-tree/
 ## Plano de Implementação e Roadmap
 
 O acompanhamento detalhado das fases, tarefas, especificações de módulos e checklist de progresso do projeto está centralizado em [`docs/06_implementation_plan.md`](file:///home/julio/Documentos/pessoal_minimal-decision-tree/docs/06_implementation_plan.md).
+
+---
+
+## Possíveis Trabalhos Futuros e Extensões
+
+Embora o plano de implementação original (Fases 0 a 3) esteja 100% concluído com total paridade algorítmica, zero heap dinâmico em runtime e conformidade estrita com o teto de 1 MB de RAM, o projeto pode ser expandido nas seguintes frentes:
+
+1. **Deploy e Cross-Compilation em Hardware Real (Bare-Metal / RTOS):**
+   - Targets de compilação cruzada para arquiteturas embarcadas reais (`arm-none-eabi-gcc` para ARM Cortex-M4F / Cortex-M7, RISC-V e ESP-IDF para ESP32).
+   - Validação direta em microcontroladores rodando FreeRTOS ou Zephyr OS, medindo ciclos de clock e consumo de energia por amostra.
+
+2. **Quantização e Aritmética de Ponto Fixo (Fixed-Point / INT8 / Q16.16):**
+   - Suporte a microcontroladores de baixíssimo custo desprovidos de FPU de ponto flutuante em hardware (ex: ARM Cortex-M0/M0+).
+   - Substituição configurável de `ht_float_t` por inteiros escalados com aproximação de ponto fixo (CORDIC / look-up tables) para logaritmos e funções exponenciais.
+
+3. **Bindings em Python (CFFI / ctypes / Cython):**
+   - Pacote Python com interface compatível com Scikit-Learn e River (`learn_one`, `predict_one`, `predict_proba_one`), permitindo usar a biblioteca C11 diretamente em pipelines de Machine Learning em streaming com velocidade nativa.
+
+4. **Regressão Incremental em Streaming (FIMT-DD / ORTO):**
+   - Expansão dos observadores para suporte a atributos alvo contínuos (*Fast Incremental Model Trees with Drift Detection*).
+   - Predição nas folhas usando modelos lineares / perceptrons com descida de gradiente estocástica (*SGD*).
+
+5. **Ensembles Online Embarcados (Streaming Random Forests / Online Bagging):**
+   - Implementação de algoritmos de ensemble em streaming (*Online Bagging*, *Leveraging Bagging* ou *Streaming Random Patches*).
+   - Particionamento do pool estático de nós e detectores ADWIN entre múltiplas árvores leves ($M$ árvores) dentro do mesmo buffer estático de $\le 1\text{ MB}$.
+
