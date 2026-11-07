@@ -1,0 +1,14 @@
+# Build artifacts
+build/
+*.o
+*.d
+*.a
+*.so
+
+# Python artifacts (benchmarks)
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.venv/
+venv/
