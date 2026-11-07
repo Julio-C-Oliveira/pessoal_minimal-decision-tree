@@ -18,7 +18,10 @@ Este repositório desenvolve uma **Hoeffding Tree (VFDT / HAT)** ultraleve em **
 ## 2. Regra de Commits Atômicos (Git)
 
 - **Um Conceito Lógico por Commit:** Nunca misture mudanças de naturezas distintas no mesmo commit (ex: não misture notas teóricas em `docs/`, adição de referências em `references/`, configuração de agentes em `.agents/` e implementação em `src/`).
-- **Estado Sempre Verde:** Todo commit que toque em `code/include/`, `code/src/` ou `code/tests/` deve compilar sem warnings e passar em todos os testes unitários (tanto em `float` quanto em `double`).
+- **Estado Sempre Verde e Gate Obrigatório de Testes:**
+  - O commit só será realizado **após** a implementação compilar sem warnings (`-Wall -Wextra -Werror -pedantic`) e passar em todos os testes unitários e de integração (tanto em `float` quanto em `double`).
+  - Caso algum teste falhe ou ocorra erro/warning de compilação, é **expressamente proibido commitar**. O agente deve obrigatoriamente diagnosticar o problema, consertar os erros no código ou nos testes e executar a validação novamente.
+  - O commit só poderá ser realizado quando 100% dos testes passarem com sucesso.
 - **Mensagens Padronizadas (Conventional Commits):**
   - `docs:` criação/atualização de documentação em `docs/` ou `README.md`
   - `feat(<escopo>):` nova funcionalidade em C (`memory`, `observer`, `criterion`, `tree`, `drift` em `code/`)

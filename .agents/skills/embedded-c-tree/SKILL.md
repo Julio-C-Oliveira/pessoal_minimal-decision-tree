@@ -90,7 +90,7 @@ Sempre que implementar uma nova parte, escreva testes cobrindo obrigatoriamente:
 
 ---
 
-## 3. Validação Obrigatória e Commits Atômicos
+## 3. Validação Obrigatória, Loop de Correção e Commits Atômicos
 
 Após implementar qualquer parte e seus testes de Nível 1, 2 e 3, execute sempre os dois modos de compilação:
 
@@ -99,6 +99,10 @@ make clean && make test
 make clean && make test CFLAGS_EXTRA="-DHT_USE_DOUBLE"
 ```
 
-- Nenhum warning é permitido (`-Wall -Wextra -Werror -pedantic`).
-- Todos os testes (função, integração e fluxo total) devem passar tanto em `float` (32-bit) quanto em `double` (64-bit).
-- Faça commits atômicos mantendo a árvore sempre verde (`feat(<escopo>): ...` e `test(<escopo>): ...`).
+- **Zero Warnings:** Nenhum warning é permitido (`-Wall -Wextra -Werror -pedantic`).
+- **Paridade de Precisão:** Todos os testes (função, integração e fluxo total) devem passar tanto em `float` (32-bit) quanto em `double` (64-bit).
+- **Gate de Commit e Loop de Correção:**
+  - O commit **só pode ser realizado após** a implementação passar em todos os testes em ambos os modos.
+  - Se algum teste falhar ou houver warnings/erros de compilação, é **terminantemente proibido commitar**.
+  - O agente deve diagnosticar a causa raiz, aplicar as correções necessárias no código ou nos testes e rodar a suíte de testes novamente em loop (`corrigir -> compilar -> testar`).
+  - Somente após a validação completa ser aprovada com 100% de sucesso o commit atômico será realizado (`feat(<escopo>): ...` e `test(<escopo>): ...`).
