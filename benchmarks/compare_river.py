@@ -402,8 +402,6 @@ def evaluate_c_model(
     drift_window_threshold: int = 300,
     switch_significance: float = 0.05,
     adwin_delta: float = 0.002,
-    max_nodes: Optional[int] = None,
-    max_leaves: Optional[int] = None,
 ) -> Dict[str, Any]:
     t0 = time.perf_counter()
     cmd = [
@@ -418,10 +416,6 @@ def evaluate_c_model(
         "--test-csv", test_csv_path,
         "--json", json_path,
     ]
-    if max_nodes is not None and max_nodes > 0:
-        cmd.extend(["--max-nodes", str(max_nodes)])
-    if max_leaves is not None and max_leaves > 0:
-        cmd.extend(["--max-leaves", str(max_leaves)])
     if is_hat:
         cmd.append("--hat")
         cmd.extend(["--bootstrap-sampling", "1" if bootstrap_sampling else "0"])
@@ -1134,8 +1128,6 @@ def evaluate_c_regression_model(
     drift_window_threshold: int = 300,
     switch_significance: float = 0.05,
     adwin_delta: float = 0.002,
-    max_nodes: Optional[int] = None,
-    max_leaves: Optional[int] = None,
 ) -> Dict[str, Any]:
     t0 = time.perf_counter()
     cmd = [
@@ -1151,10 +1143,6 @@ def evaluate_c_regression_model(
         "--test-csv", test_csv_path,
         "--json", json_path,
     ]
-    if max_nodes is not None and max_nodes > 0:
-        cmd.extend(["--max-nodes", str(max_nodes)])
-    if max_leaves is not None and max_leaves > 0:
-        cmd.extend(["--max-leaves", str(max_leaves)])
     if is_hat:
         cmd.append("--hat")
         cmd.extend(["--bootstrap-sampling", "1" if bootstrap_sampling else "0"])
@@ -1551,7 +1539,6 @@ def run_memory_benchmark_suite(
                 c_res = evaluate_c_model(
                     c_bin, train_csv, test_csv, y_test,
                     criterion=crit, leaf_pred=leaf,
-                    max_nodes=nodes, max_leaves=leaves,
                     checkpoint_interval=1000, json_path=json_out
                 )
                 sk_res = evaluate_sklearn_model(
@@ -1569,7 +1556,6 @@ def run_memory_benchmark_suite(
                 c_res = evaluate_c_regression_model(
                     c_bin, train_csv, test_csv, y_test,
                     leaf_pred=leaf,
-                    max_nodes=nodes, max_leaves=leaves,
                     checkpoint_interval=1000, json_path=json_out
                 )
                 sk_res = evaluate_sklearn_regression_model(

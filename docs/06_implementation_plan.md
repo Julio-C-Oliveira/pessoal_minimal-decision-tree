@@ -30,7 +30,7 @@
 | **4.3** | **Fase 4:** Critério de Redução de Variância (VR) & Split por Razão | `code/include/ht_criterion.h`, `code/src/ht_criterion.c`, `code/tests/test_criterion.c`, `code/tests/test_e2e_flow.c` | **N1:** `ht_compute_variance_reduction` (`ddof=1`), filtro `min_samples_split`, `ht_should_split_reg` ($m_2/m_1 < 1-\epsilon$)<br/>**N2:** seleção do melhor candidato numérico/categórico de regressão<br/>**N3:** decisão completa de split de regressão no E2E | `[x]` | `e2c7624` |
 | **4.4** | **Fase 4:** Árvore de Regressão VFDT-R (Mean/Model SGD/Adaptive) e HAT-R (ADWIN + Z-Test) | `code/include/ht_tree.h`, `code/src/ht_tree.c`, `code/include/ht_drift.h`, `code/src/ht_drift.c`, `code/tests/test_tree.c`, `code/tests/test_drift.c`, `code/tests/test_e2e_flow.c` | **N1:** predição `HT_LEAF_MEAN`, `HT_LEAF_MODEL` (SGD com clip), `HT_LEAF_ADAPTIVE` ($\text{fmse}$ $\alpha=0.95$) e Teste Z bilateral ($p \le \alpha$)<br/>**N2:** herança de pesos SGD/$\text{fmse}$ no split, desativação por profundidade e Switch/Prune de subárvore em regressão<br/>**N3:** treino *prequential* E2E (estacionário + drift abrupto) e `ht_tree_save`/`ht_tree_load` | `[x]` | `7a9d2a5` |
 | **4.5** | **Fase 4:** Benchmark Triplo de Regressão e Drift (C11 vs River HTR/HATR vs Scikit-Learn) | `benchmarks/generate_streams.py`, `benchmarks/bench_c_runner.c`, `benchmarks/compare_river.py`, `benchmarks/regression_benchmark_report.md`, `Makefile`, `code/Makefile` | Avaliação tripla em fluxos de regressão estacionários e com drift (Friedman, Friedman Drift, Planes2D, Piecewise Linear) em `float` e `double`: MAE, RMSE, $R^2$, Nós, RAM ($\le 1\text{ MB}$, heap 0.0 KB) e Speedup vs River | `[x]` | `7f7e760` |
-| **4.6** | **Fase 4:** Limitadores de Capacidade e Benchmark de Escalonamento de RAM (256 a 4 Folhas) | `code/include/ht_tree.h`, `code/src/ht_tree.c`, `benchmarks/bench_c_runner.c`, `benchmarks/compare_river.py`, `benchmarks/memory_benchmark_report.md`, `Makefile`, `code/Makefile` | Imposição de limites configuráveis dinâmicos (`max_nodes`, `max_active_leaves`) e compilação dedicada (256 a 4 folhas / 4096 a 64 nós). Avaliação em 5 fluxos provando retenção de acurácia com 8.4 KB de RAM e zero heap em runtime. | `[x]` | `76575c3` |
+| **4.6** | **Fase 4:** Dimensionamento por Macros e Benchmark de Escalonamento de RAM (256 a 4 Folhas) | `code/Makefile`, `Makefile`, `benchmarks/compare_river.py`, `benchmarks/memory_benchmark_report.md` | Avaliação rigorosa da árvore C11 dimensionada via macros de compilação (`HT_MAX_ACTIVE_LEAVES` e `HT_MAX_NODES`), variando de 256 a 4 folhas (4.096 a 64 nós). Avaliação em 5 fluxos provando retenção de acurácia com apenas 8,4 KB de RAM e zero heap em runtime. | `[x]` | `76575c3` |
 
 ---
 
@@ -633,14 +633,11 @@ flowchart LR
   - Speedups comprovados de **$150\times$ a mais de $278\times$** da nossa árvore em C11 sobre o River em Python.
 - Relatório consolidado gerado automaticamente em [`benchmarks/regression_benchmark_report.md`](file:///home/julio/Documentos/pessoal_minimal-decision-tree/benchmarks/regression_benchmark_report.md).
 
-### Entrega 4.6: Limitadores de Capacidade e Benchmark de Escalonamento de Memória RAM (`make bench-memory`)
-- Imposição de limites configuráveis dinâmicos em `ht_config_params_t`:
-  - `uint16_t max_nodes`: teto máximo de nós totais da árvore ($0 = \text{ilimitado até macro } HT\_MAX\_NODES$).
-  - `uint16_t max_active_leaves`: teto máximo de folhas com observadores estatísticos ativos ($0 = \text{ilimitado até macro } HT\_MAX\_ACTIVE\_LEAVES$).
-- Integração e bloqueio estrito em `code/src/ht_tree.c`:
-  - `ht_tree_attempt_split` (classificação) e `ht_tree_attempt_split_reg` (regressão) verificam se a alocação de 2 novos nós viola `max_nodes`.
-  - Alocação de novos blocos pesados de observadores estatísticos (`ht_leaf_stats_t`) respeita rigorosamente `max_active_leaves`, ativando imediatamente o algoritmo de Desativação por Promessa $\text{Promise}(l)$ do VFDT.
-  - Alocação de árvores alternadas no HAT (`ht_tree_learn_one_subtree` e `ht_tree_learn_one_reg_subtree`) também respeita os limitadores dinâmicos.
+### Entrega 4.6: Dimensionamento por Macros e Benchmark de Escalonamento de Memória RAM (`make bench-memory`)
+- Dimensionamento estático nativo via macros de compilação em `code/include/ht_config.h`:
+  - `HT_MAX_NODES`: teto estrutural de nós pré-alocados no `node_pool`.
+  - `HT_MAX_ACTIVE_LEAVES`: teto de folhas ativas com observadores estatísticos no `stats_pool`.
+  - Quando a capacidade física do pool se esgota, o alocador `ht_memory` atinge `free_stats_top == 0` ou `free_nodes_top < 2`, acionando a desativação por promessa $\text{Promise}(l)$ do VFDT e bloqueando novos splits naturalmente sem sobrecarga em runtime.
 - Targets dedicados de compilação em `code/Makefile` e `Makefile`:
   - `bench_c_runner_128` (128 folhas / 2.048 nós $\to$ 262,4 KB RAM estática)
   - `bench_c_runner_64` (64 folhas / 1.024 nós $\to$ 131,3 KB RAM estática)

@@ -393,14 +393,6 @@ static ht_status_t ht_tree_attempt_split_reg(ht_tree_t *tree, uint16_t leaf_idx,
         ht_float_t parent_fmse_mean = stats->fmse_mean;
         ht_float_t parent_fmse_model = stats->fmse_model;
 
-        /* Check if allocating two new child nodes would exceed max_nodes limit */
-        uint16_t node_limit = (tree->params.max_nodes > 0 && tree->params.max_nodes < HT_MAX_NODES)
-                               ? tree->params.max_nodes
-                               : HT_MAX_NODES;
-        if (tree->memory.nodes_allocated + 2 > node_limit || tree->memory.free_nodes_top < 2) {
-            return HT_ERR_OUT_OF_NODES;
-        }
-
         /* Immediate recycling of mother leaf's statistics block */
         uint16_t old_stats = node->stats_idx;
         node->stats_idx = HT_INVALID_IDX;
@@ -450,15 +442,8 @@ static ht_status_t ht_tree_attempt_split_reg(ht_tree_t *tree, uint16_t leaf_idx,
         right->right_child = HT_INVALID_IDX;
         right->stats_idx = HT_INVALID_IDX;
 
-        uint16_t leaf_limit = (tree->params.max_active_leaves > 0 && tree->params.max_active_leaves < HT_MAX_ACTIVE_LEAVES)
-                               ? tree->params.max_active_leaves
-                               : HT_MAX_ACTIVE_LEAVES;
-
         /* Allocate stats for left child */
-        uint16_t l_stats = HT_INVALID_IDX;
-        if (tree->n_active_leaves < leaf_limit) {
-            l_stats = ht_stats_alloc(&tree->memory);
-        }
+        uint16_t l_stats = ht_stats_alloc(&tree->memory);
         if (l_stats == HT_INVALID_IDX) {
             if (ht_tree_deactivate_least_promising_leaf(tree) == HT_OK) {
                 l_stats = ht_stats_alloc(&tree->memory);
@@ -478,10 +463,7 @@ static ht_status_t ht_tree_attempt_split_reg(ht_tree_t *tree, uint16_t leaf_idx,
         }
 
         /* Allocate stats for right child */
-        uint16_t r_stats = HT_INVALID_IDX;
-        if (tree->n_active_leaves < leaf_limit) {
-            r_stats = ht_stats_alloc(&tree->memory);
-        }
+        uint16_t r_stats = ht_stats_alloc(&tree->memory);
         if (r_stats == HT_INVALID_IDX) {
             if (ht_tree_deactivate_least_promising_leaf_except(tree, left_idx) == HT_OK) {
                 r_stats = ht_stats_alloc(&tree->memory);
@@ -592,11 +574,8 @@ static ht_status_t ht_tree_attempt_split(ht_tree_t *tree, uint16_t leaf_idx, uin
             return HT_OK;
         }
 
-        /* Need 2 free nodes in the pool and respect max_nodes limit */
-        uint16_t node_limit = (tree->params.max_nodes > 0 && tree->params.max_nodes < HT_MAX_NODES)
-                               ? tree->params.max_nodes
-                               : HT_MAX_NODES;
-        if (tree->memory.nodes_allocated + 2 > node_limit || tree->memory.free_nodes_top < 2) {
+        /* Need 2 free nodes in the pool */
+        if (tree->memory.free_nodes_top < 2) {
             return HT_ERR_OUT_OF_NODES;
         }
 
@@ -658,15 +637,8 @@ static ht_status_t ht_tree_attempt_split(ht_tree_t *tree, uint16_t leaf_idx, uin
         right->right_child = HT_INVALID_IDX;
         right->stats_idx = HT_INVALID_IDX;
 
-        uint16_t leaf_limit = (tree->params.max_active_leaves > 0 && tree->params.max_active_leaves < HT_MAX_ACTIVE_LEAVES)
-                               ? tree->params.max_active_leaves
-                               : HT_MAX_ACTIVE_LEAVES;
-
         /* Allocate stats for left child */
-        uint16_t l_stats = HT_INVALID_IDX;
-        if (tree->n_active_leaves < leaf_limit) {
-            l_stats = ht_stats_alloc(&tree->memory);
-        }
+        uint16_t l_stats = ht_stats_alloc(&tree->memory);
         if (l_stats == HT_INVALID_IDX) {
             if (ht_tree_deactivate_least_promising_leaf(tree) == HT_OK) {
                 l_stats = ht_stats_alloc(&tree->memory);
@@ -681,10 +653,7 @@ static ht_status_t ht_tree_attempt_split(ht_tree_t *tree, uint16_t leaf_idx, uin
         }
 
         /* Allocate stats for right child (protecting left child from being immediately deactivated) */
-        uint16_t r_stats = HT_INVALID_IDX;
-        if (tree->n_active_leaves < leaf_limit) {
-            r_stats = ht_stats_alloc(&tree->memory);
-        }
+        uint16_t r_stats = ht_stats_alloc(&tree->memory);
         if (r_stats == HT_INVALID_IDX) {
             if (ht_tree_deactivate_least_promising_leaf_except(tree, left_idx) == HT_OK) {
                 r_stats = ht_stats_alloc(&tree->memory);
@@ -1301,20 +1270,9 @@ static ht_status_t ht_tree_learn_one_subtree(ht_tree_t *tree,
                     nd->alt_tree_idx = HT_INVALID_IDX;
                 }
 
-                uint16_t node_limit = (tree->params.max_nodes > 0 && tree->params.max_nodes < HT_MAX_NODES)
-                                       ? tree->params.max_nodes
-                                       : HT_MAX_NODES;
-                uint16_t alt_leaf = (tree->memory.nodes_allocated + 1 <= node_limit)
-                                     ? ht_node_alloc(&tree->memory)
-                                     : HT_INVALID_IDX;
+                uint16_t alt_leaf = ht_node_alloc(&tree->memory);
                 if (alt_leaf != HT_INVALID_IDX) {
-                    uint16_t leaf_limit = (tree->params.max_active_leaves > 0 && tree->params.max_active_leaves < HT_MAX_ACTIVE_LEAVES)
-                                           ? tree->params.max_active_leaves
-                                           : HT_MAX_ACTIVE_LEAVES;
-                    uint16_t alt_stats = HT_INVALID_IDX;
-                    if (tree->n_active_leaves < leaf_limit) {
-                        alt_stats = ht_stats_alloc(&tree->memory);
-                    }
+                    uint16_t alt_stats = ht_stats_alloc(&tree->memory);
                     if (alt_stats == HT_INVALID_IDX) {
                         if (ht_tree_deactivate_least_promising_leaf(tree) == HT_OK) {
                             alt_stats = ht_stats_alloc(&tree->memory);
@@ -1637,20 +1595,9 @@ static ht_status_t ht_tree_learn_one_reg_subtree(ht_tree_t *tree,
                     nd->alt_tree_idx = HT_INVALID_IDX;
                 }
 
-                uint16_t node_limit = (tree->params.max_nodes > 0 && tree->params.max_nodes < HT_MAX_NODES)
-                                       ? tree->params.max_nodes
-                                       : HT_MAX_NODES;
-                uint16_t alt_leaf = (tree->memory.nodes_allocated + 1 <= node_limit)
-                                     ? ht_node_alloc(&tree->memory)
-                                     : HT_INVALID_IDX;
+                uint16_t alt_leaf = ht_node_alloc(&tree->memory);
                 if (alt_leaf != HT_INVALID_IDX) {
-                    uint16_t leaf_limit = (tree->params.max_active_leaves > 0 && tree->params.max_active_leaves < HT_MAX_ACTIVE_LEAVES)
-                                           ? tree->params.max_active_leaves
-                                           : HT_MAX_ACTIVE_LEAVES;
-                    uint16_t alt_stats = HT_INVALID_IDX;
-                    if (tree->n_active_leaves < leaf_limit) {
-                        alt_stats = ht_stats_alloc(&tree->memory);
-                    }
+                    uint16_t alt_stats = ht_stats_alloc(&tree->memory);
                     if (alt_stats == HT_INVALID_IDX) {
                         if (ht_tree_deactivate_least_promising_leaf(tree) == HT_OK) {
                             alt_stats = ht_stats_alloc(&tree->memory);
