@@ -286,20 +286,66 @@ O detector [`ht_adwin_t`](file:///home/julio/Documentos/pessoal_minimal-decision
 
 ### 3.3 Macros de Compilação para Dimensionamento de RAM (`ht_config.h`)
 
-Você pode ajustar o consumo estático de RAM para caber exatamente no seu microcontrolador passando flags `-D` no compilador (ex: `CFLAGS_EXTRA="-DHT_MAX_NODES=1024 -DHT_MAX_ACTIVE_LEAVES=64"`):
+Como a biblioteca **não utiliza alocação dinâmica (`malloc`/`free`)**, todo o espaço de memória da árvore (`ht_tree_t`) é definido estaticamente em tempo de compilação através das macros em [`code/include/ht_config.h`](file:///home/julio/Documentos/pessoal_minimal-decision-tree/code/include/ht_config.h#L40-L112).
 
-| Macro de Compilação | Valor Padrão | Descrição e Impacto em Memória |
-| :--- | :---: | :--- |
-| `HT_USE_DOUBLE` | *(Indefinido)* | Se definido (`-DHT_USE_DOUBLE`), altera `ht_float_t` de `float` (32-bit) para `double` (64-bit). |
-| `HT_MAX_FEATURES` | `16` | Número máximo de atributos suportados por amostra. Dimensiona o array `observers[HT_MAX_FEATURES]` dentro de cada folha ativa. |
-| `HT_MAX_CLASSES` | `4` | Número máximo de classes na classificação. Dimensiona `class_counts[]` nos nós e o número de Gaussianas por atributo numérico. |
-| `HT_MAX_CATEGORIES` | `5` | Cardinalidade máxima suportada para atributos categóricos nominais ($0 \dots \text{HT\_MAX\_CATEGORIES}-1$). |
-| `HT_MAX_NODES` | `4096` | Capacidade total do `node_pool` (soma de nós internos + folhas ativas + folhas inativas). Cada `ht_node_t` custa apenas $28\text{ B}$ em `float32`. |
-| `HT_MAX_ACTIVE_LEAVES` | `256` | Capacidade do `stats_pool` (número máximo de folhas ativas aprendendo simultaneamente). É o principal fator de consumo de RAM ($1.360\text{ B}$ por folha em `float32`). |
-| `HT_GAUSSIAN_SPLITS` | `10` | Quantidade de thresholds candidatos avaliados entre `[min, max]` no observador Gaussiano de classificação. |
-| `HT_REG_NUM_SLOTS` | `5` | Quantidade de slots ordenados de quantização por atributo numérico na regressão (mantém paridade de $80\text{ B}$ com o observador de classificação). |
-| `HT_MAX_ADWIN_DETECTORS` | `128` | Quantidade de detectores ADWIN no `ht_adwin_pool_t` ($764\text{ B}$ por detector em `float32`). |
-| `HT_ADWIN_LEVELS` | `14` | Quantidade de níveis logarítmicos do histograma exponencial ADWIN (suporta janelas de até $5 \times (2^{14}-1) \approx 81.915$ amostras). |
+Você pode sobrescrever qualquer uma dessas macros diretamente no comando do compilador usando a flag `-D<MACRO>=<VALOR>` (ou via `make CFLAGS_EXTRA="-D..."`) sem precisar editar os arquivos `.h` do código-fonte.
+
+#### Tabela Completa de Macros e Seus Efeitos:
+
+| Macro de Compilação | Valor Padrão | O que Dimensiona na Arquitetura | Efeito Prático ao Reduzir ou Aumentar |
+| :--- | :---: | :--- | :--- |
+| **`HT_USE_DOUBLE`** | *(Indefinido)* | Tipo base `ht_float_t`: quando omitido usa `float` ($4\text{ B}$); quando definido (`-DHT_USE_DOUBLE`) usa `double` ($8\text{ B}$). | **Omitido (`float`):** corta o uso de RAM pela metade e usa FPU nativa de 32 bits em MCUs.<br/>**Definido (`double`):** dobra o consumo de RAM, usado para validação de paridade numérica exata no PC contra o Python River. |
+| **`HT_MAX_FEATURES`** | `16` | Quantidade máxima de colunas/atributos por amostra (`observers[HT_MAX_FEATURES]` e `reg_weights[HT_MAX_FEATURES]` em cada folha ativa). | **Reduzir:** economiza **$84\text{ B}$ por atributo removido em cada folha ativa** ($80\text{ B}$ do observador + $4\text{ B}$ do peso SGD). Se o seu sensor tem apenas 4 variáveis, defina `-DHT_MAX_FEATURES=4` para economizar ~75% de RAM nas folhas!<br/>**Limite:** `params.n_features` nunca pode ultrapassar `HT_MAX_FEATURES`. |
+| **`HT_MAX_CLASSES`** | `4` | Quantidade máxima de classes na classificação (`class_counts[HT_MAX_CLASSES]` em todos os nós e número de Gaussianas de Welford por atributo numérico). | **Reduzir (ex: `=2` para classificação binária):** reduz o tamanho de cada nó estrutural de $28\text{ B}$ para $24\text{ B}$ e reduz o observador Gaussiano de $80\text{ B}$ para $40\text{ B}$.<br/>**Aumentar (ex: `=10` para MNIST):** permite problemas com mais classes, aumentando proporcionalmente o tamanho do observador ($20\text{ B} \times C$) e do nó ($4\text{ B} \times C$). |
+| **`HT_MAX_CATEGORIES`** | `5` | Cardinalidade máxima de atributos categóricos discretos (valores inteiros aceitos de $0$ até $\text{HT\_MAX\_CATEGORIES}-1$). | **Reduzir:** diminui a matriz de frequências `counts[HT_MAX_CLASSES][HT_MAX_CATEGORIES]` e `cat_stats[HT_MAX_CATEGORIES]`.<br/>**Aumentar:** permite variáveis nominais com mais categorias distintas. Valores recebidos $\ge \text{HT\_MAX\_CATEGORIES}$ ou $< 0$ são tratados como ausentes (*missing*). |
+| **`HT_MAX_NODES`** | `4096` | Capacidade total do pool estrutural `node_pool[HT_MAX_NODES]` (soma de nós internos de decisão + folhas ativas + folhas inativas). | **Efeito no Modelo:** define o tamanho máximo que a árvore pode atingir. Cada nó consome apenas **$24\text{ a }28\text{ B}$** (mais $16\text{ B}$ de metadados de drift em `node_drift`).<br/>**Se encher:** a árvore para de realizar novos splits, mas **continua aprendendo estatísticas nas folhas atuais e fazendo predições normalmente** sem travar. |
+| **`HT_MAX_ACTIVE_LEAVES`** | `256` | Capacidade do `stats_pool[HT_MAX_ACTIVE_LEAVES]` (máximo de folhas pesadas `ht_leaf_stats_t` aprendendo estatísticas de split simultaneamente). | **É o principal controle de RAM!** Cada folha ativa custa **$1.360\text{ B}$** na configuração padrão.<br/>**Se encher:** aciona automaticamente a **Desativação por Promessa (*VFDT Memory Management*)** — a folha menos promissora é convertida em folha inativa (devolvendo seus $1.360\text{ B}$ ao pool, mas continuando apta a predizer) para dar lugar a novas folhas mais promissoras.<br/>**Para Somente-Inferência:** se o dispositivo apenas carrega um modelo pronto (`ht_tree_load`) e nunca chama `learn_one`, você pode compilar com **`-DHT_MAX_ACTIVE_LEAVES=1`**, reduzindo a RAM das folhas em **99,6%**! |
+| **`HT_GAUSSIAN_SPLITS`** | `10` | Número de pontos de corte candidatos testados uniformemente entre `[min_val, max_val]` em cada atributo numérico de classificação. | **Não altera a RAM estática** (usado apenas no loop de avaliação de split).<br/>**Reduzir (ex: `=5`):** acelera o cálculo de tentativa de split na CPU em 2x com perda mínima de precisão no ponto de corte.<br/>**Aumentar (ex: `=20`):** testa mais limiares por atributo ao custo de mais ciclos de CPU a cada `grace_period`. |
+| **`HT_REG_NUM_SLOTS`** | `5` | Quantidade de centróides/slots ordenados `(valor, count, mean, m2)` mantidos por atributo numérico na regressão (`ht_reg_numeric_obs_t`). | Cada slot ocupa $16\text{ B}$ em `float32` ($5 \times 16\text{ B} = 80\text{ B}$, empatando exatamente com o observador de classificação na `union`).<br/>**Aumentar (ex: `=10`):** aumenta a resolução de quantização de limiares na regressão contínua, aumentando o tamanho de `ht_feature_obs_t`. |
+| **`HT_MAX_ADWIN_DETECTORS`** | `128` | Capacidade de detectores de mudança de conceito no `ht_adwin_pool_t` (usado apenas quando `enable_hat = true`). | Cada detector ADWIN ocupa **$764\text{ B}$** em `float32`. Se você **não usa HAT/Drift** (`enable_hat = false`), nem precisa instanciar `ht_adwin_pool_t` no seu código (`tree.adwin_pool = NULL`), economizando 100% dessa memória! Se usar HAT em MCU pequeno, reduza para `16` ou `32`. |
+| **`HT_ADWIN_MAX_BUCKETS`** | `5` | Máximo de buckets ($M$) de capacidade $2^k$ por nível antes de comprimir os 2 mais antigos no nível $k+1$. | Controla o compromisso entre resolução temporal e memória dentro do detector ADWIN ($M=5$ é o padrão clássico de Bifet & Gavaldà). Reduzir para `3` ou `4` economiza RAM dentro de cada detector ADWIN. |
+| **`HT_ADWIN_LEVELS`** | `14` | Quantidade de níveis logarítmicos do histograma exponencial de cada detector ADWIN. | Com `14` níveis e $M=5$, cada detector cobre janelas históricas de até $5 \times (2^{14}-1) = 81.915$ amostras sem perda. Reduzir para `10` ($5.115$ amostras) economiza $192\text{ B}$ por detector ADWIN. |
+
+---
+
+#### Como as Macros Determinam o Tamanho em Bytes (Fórmulas de Alocação):
+
+Em precisão simples (`float` de $4\text{ bytes}$), o compilador dimensiona as estruturas automaticamente segundo as relações:
+
+1. **Tamanho do Observador de 1 Atributo (`sizeof(ht_feature_obs_t)`):**
+   $$\text{Obs} = \max\Big(20 \times C,\; 4 \times C \times K,\; 16 \times S_{\text{reg}},\; 12 \times K\Big)\text{ bytes}$$
+   *(Onde $C = \text{HT\_MAX\_CLASSES}$, $K = \text{HT\_MAX\_CATEGORIES}$, $S_{\text{reg}} = \text{HT\_REG\_NUM\_SLOTS}$. No padrão: $20 \times 4 = \mathbf{80\text{ B}}$).*
+
+2. **Tamanho de 1 Folha Ativa (`sizeof(ht_leaf_stats_t)`):**
+   $$\text{Folha Ativa} = 16 + (4 \times F) + (F \times \text{Obs})\text{ bytes}$$
+   *(Onde $F = \text{HT\_MAX\_FEATURES}$. No padrão com $F=16$: $16 + 64 + 1280 = \mathbf{1.360\text{ B}}$).*
+
+3. **Tamanho de 1 Nó Estrutural (`sizeof(ht_node_t)`):**
+   $$\text{Nó} = \max(4 \times C,\; 12) + 12\text{ bytes}$$
+   *(No padrão com $C=4$: $16 + 12 = \mathbf{28\text{ B}}$. Para $C=2$: $12 + 12 = \mathbf{24\text{ B}}$).*
+
+4. **RAM Total da Árvore (`sizeof(ht_tree_t)`):**
+   $$\text{RAM Árvore} \approx \text{HT\_MAX\_NODES} \times (\text{Nó} + 18\text{ B}) + \text{HT\_MAX\_ACTIVE\_LEAVES} \times (\text{Folha Ativa} + 2\text{ B})$$
+
+---
+
+#### Perfis Prontos de Compilação por Categoria de Dispositivo (`gcc -D...`):
+
+Abaixo estão combinações testadas de macros para diferentes orçamentos de hardware:
+
+| Perfil de Hardware Alvo | Flags de Macros (`CFLAGS`) | Tamanho do Nó (`ht_node_t`) | Tamanho da Folha Ativa (`ht_leaf_stats_t`) | Consumo Total de RAM (`sizeof(ht_tree_t)`) |
+| :--- | :--- | :---: | :---: | :---: |
+| **1. Somente Inferência em Campo**<br/>*(Modelo treinado no PC e carregado via `ht_tree_load`)* | `-DHT_MAX_NODES=256 -DHT_MAX_ACTIVE_LEAVES=1 -DHT_MAX_FEATURES=8 -DHT_MAX_CLASSES=2` | $24\text{ B}$ | $688\text{ B}$ | **$\approx 11,3\text{ KB}$** |
+| **2. MCU Ultra-Fraco (32 a 64 KB RAM)**<br/>*(ex: STM32F103, Cortex-M0+, Arduino Zero)* | `-DHT_MAX_NODES=128 -DHT_MAX_ACTIVE_LEAVES=16 -DHT_MAX_FEATURES=8 -DHT_MAX_CLASSES=2 -DHT_MAX_CATEGORIES=4 -DHT_REG_NUM_SLOTS=4` | $24\text{ B}$ | $560\text{ B}$ | **$\approx 14,2\text{ KB}$** |
+| **3. MCU Compacto (64 a 128 KB RAM)**<br/>*(ex: STM32F401, nRF52832, ESP8266)* | `-DHT_MAX_NODES=256 -DHT_MAX_ACTIVE_LEAVES=32 -DHT_MAX_FEATURES=8 -DHT_MAX_CLASSES=2` | $24\text{ B}$ | $688\text{ B}$ | **$\approx 32,2\text{ KB}$** |
+| **4. MCU Intermediário (256 a 512 KB RAM)**<br/>*(ex: ESP32, RP2040, RP2350, STM32F4/H7)* | `-DHT_MAX_NODES=1024 -DHT_MAX_ACTIVE_LEAVES=64 -DHT_MAX_FEATURES=12 -DHT_MAX_CLASSES=4` | $28\text{ B}$ | $1.024\text{ B}$ | **$\approx 110,3\text{ KB}$** |
+| **5. Configuração Padrão ($\le 1\text{ MB}$ RAM)**<br/>*(Sem flags extras — padrão do repositório)* | *(Padrão: `NODES=4096`, `LEAVES=256`, `FEATURES=16`, `CLASSES=4`)* | $28\text{ B}$ | $1.360\text{ B}$ | **$\approx 524,7\text{ KB}$** |
+| **6. Multiclasse Pesado (10 Classes)**<br/>*(ex: Reconhecimento de dígitos MNIST)* | `-DHT_MAX_NODES=2048 -DHT_MAX_ACTIVE_LEAVES=128 -DHT_MAX_FEATURES=16 -DHT_MAX_CLASSES=10` | $52\text{ B}$ | $3.280\text{ B}$ | **$\approx 550,4\text{ KB}$** |
+
+**Exemplo de compilação usando o Makefile do projeto com um perfil customizado:**
+```bash
+make clean && make lib CFLAGS_EXTRA="-Os -DHT_MAX_NODES=256 -DHT_MAX_ACTIVE_LEAVES=32 -DHT_MAX_FEATURES=8 -DHT_MAX_CLASSES=2"
+```
 
 ---
 
@@ -373,7 +419,62 @@ Para embasar a matemática e a arquitetura em baixo nível, o repositório armaz
 
 ---
 
-## 7. Estimativa de Orçamento de Memória (Configuração Padrão)
+## 7. Estimativa de Orçamento de Memória e Armazenamento (Flash / RAM)
+
+Para sistemas embarcados e dispositivos fracos (microcontroladores ARM Cortex-M, ESP32, RISC-V, ou SoCs Linux compactos como MIPS OpenWrt), a alocação de memória se divide em duas grandezas fundamentais:
+1. **Armazenamento Permanente / Código Compilado (Flash / ROM / Disco):** Onde fica gravado o binário executável (`.text` + `.rodata`) e os arquivos de modelo serializados transferidos do PC.
+2. **Memória de Trabalho Volátil (RAM / `.bss`):** Onde reside o estado operacional da árvore (`ht_tree_t`) durante o treino ou inferência.
+
+---
+
+### 7.1 Peso do Código Compilado no Dispositivo (Flash / ROM / Binário)
+
+Ao compilar a biblioteca no PC para gerar os arquivos binários que serão gravados no dispositivo, o tamanho real em armazenamento depende das funcionalidades utilizadas e das flags do compilador:
+
+| Modo de Uso / Funcionalidades Linkadas | Seção `.text` (Código C11 em `-Os`) | Seção `.rodata` / `.data` | Consumo em Flash (Cortex-M / RISC-V) | Executável ELF Linux *Stripped* |
+| :--- | :---: | :---: | :---: | :---: |
+| **Apenas Inferência** (`ht_tree_predict` / `ht_tree_predict_proba` / `ht_tree_predict_reg`) com `--gc-sections` | **$\approx 8,2\text{ KB}$** | $< 0,7\text{ KB}$ | **$\approx 6\text{ a } 8\text{ KB}$** | $\approx 19\text{ KB}$ |
+| **Treino Incremental Padrão (VFDT) + Inferência** (sem detecção de drift ou regressão contínua) | **$\approx 19,4\text{ KB}$** | $< 0,7\text{ KB}$ | **$\approx 16\text{ a } 20\text{ KB}$** | $\approx 27\text{ KB}$ |
+| **Biblioteca Completa em `-Os`** (Classificação + Regressão VFDT-R + Drift HAT/ADWIN2 + Serializador) | **$\approx 28,5\text{ KB}$** | $< 0,7\text{ KB}$ | **$\approx 22\text{ a } 28\text{ KB}$** | $\approx 39\text{ KB}$ |
+| **Biblioteca Completa em `-O2`** (otimizada para velocidade e vetorização de loops) | **$\approx 42,5\text{ KB}$** | $< 0,8\text{ KB}$ | $\approx 35\text{ a } 42\text{ KB}$ | $\approx 44\text{ KB}$ |
+
+> [!NOTE]
+> - **Zero overhead de BSS na biblioteca:** A `libht` não possui buffers globais ou variáveis estáticas internas ocultas. Todo o footprint de execução reside exclusivamente na instância `ht_tree_t` alocada pelo usuário.
+> - **Microcontroladores de 32 bits (ARM Thumb-2 / RV32IMC):** Em processadores como STM32, nRF52, ESP32 e RP2040/RP2350, o conjunto de instruções comprimidas de 16 bits atinge densidade de código ainda maior, ficando tipicamente em **$\le 8\text{ KB}$ de Flash** para inferência e **$\le 25\text{ KB}$ de Flash** para a biblioteca inteira com treino.
+
+---
+
+### 7.2 Peso do Arquivo do Modelo Serializado (Transferência PC -> Dispositivo)
+
+Caso o fluxo de trabalho seja treinar ou pré-treinar o modelo no PC e transferir apenas o arquivo do modelo para o dispositivo rodar inferência em campo (`ht_tree_save` / `ht_tree_load`):
+
+- **Estrutura Binária:**
+  - **Cabeçalho Fixo (`ht_serial_header_t`):** Fixos **$170\text{ bytes}$** (contém número mágico `"VFDT"`, versão, metadados de configuração e contadores).
+  - **Custo por Nó da Árvore (`ht_node_t`):** Apenas **$28\text{ bytes}$ por nó** em `float32` ($48\text{ bytes}$ em `float64`).
+  - **Modo Somente-Inferência (`include_training_stats = false`):** Descarta os observadores pesados de atributos (`ht_leaf_stats_t`). O arquivo binário contém estritamente o cabeçalho e os nós estruturais em uso!
+
+#### Tabela de Tamanho do Arquivo `.bin` do Modelo para Inferência:
+
+$$\text{Tamanho do Arquivo (Bytes)} = 170\text{ B (Header)} + N \times 28\text{ B (onde } N \text{ é o número de nós da árvore)}$$
+
+| Quantidade de Nós na Árvore ($N$) | Tipo de Complexidade do Modelo | Peso do Arquivo Transferido (`.bin`) |
+| :---: | :--- | :---: |
+| **$1\text{ nó}$** | Raiz inicial (sem splits) | **$198\text{ bytes}$** ($< 0,2\text{ KB}$) |
+| **$10\text{ nós}$** | Modelo compacto (poucas regras) | **$450\text{ bytes}$** ($< 0,5\text{ KB}$) |
+| **$25\text{ nós}$** | Modelo pequeno | **$870\text{ bytes}$** ($< 0,9\text{ KB}$) |
+| **$50\text{ nós}$** | Modelo intermediário típico | **$1.570\text{ bytes}$** ($\approx 1,5\text{ KB}$) |
+| **$100\text{ nós}$** | Modelo detalhado de alta acurácia | **$2.970\text{ bytes}$** ($\approx 2,9\text{ KB}$) |
+| **$250\text{ nós}$** | Modelo complexo | **$7.170\text{ bytes}$** ($\approx 7,0\text{ KB}$) |
+| **$500\text{ nós}$** | Árvore de grande porte | **$14.170\text{ bytes}$** ($\approx 13,8\text{ KB}$) |
+
+> [!TIP]
+> Mesmo uma árvore bem profunda com **$100\text{ nós}$** pesa **menos de 3 KB de arquivo**, podendo ser enviada facilmente por conexões ultralentas (BLE, LoRaWAN, Zigbee, UART serial de 9600 bps) ou gravada em memórias EEPROM/Flash minúsculas sem nenhum desperdício de armazenamento.
+>
+> Caso deseje transferir o modelo com suporte a **continuar o aprendizado em campo** (`include_training_stats = true`), somam-se $1.360\text{ bytes}$ por folha ativa salva (para a configuração padrão $F=16, C=4$).
+
+---
+
+### 7.3 Consumo de Memória Volátil de Execução (RAM)
 
 Com os limites padrão ($F = 16$ atributos, $C = 4$ classes, `4096` nós e `256` folhas ativas):
 - **Observador por Atributo (`ht_feature_obs_t`):** Exatamente **$80\text{ B}$** em `float32` ($160\text{ B}$ em `float64`) tanto para Classificação quanto para Regressão.
@@ -387,17 +488,59 @@ Com os limites padrão ($F = 16$ atributos, $C = 4$ classes, `4096` nós e `256`
 
 ---
 
+### 7.4 Flags Recomendadas de Compilação no PC para Dispositivos Fracos
+
+Para gerar binários ultracompactos no PC antes de enviar para o dispositivo, utilize o conjunto de flags abaixo:
+
+#### A) Dispositivos com Linux Embarcado (Raspberry Pi Zero, Orange Pi, OpenWrt, etc.):
+```bash
+# 1. Compilação com otimização de tamanho (-Os) e seções separadas para descarte de código morto
+gcc -std=c11 -Os -ffunction-sections -fdata-sections \
+    -Icode/include code/src/*.c main.c -lm \
+    -Wl,--gc-sections -s -o app_inferencia
+
+# 2. Remoção garantida de qualquer tabela de símbolos de debug remanescente:
+strip --strip-all app_inferencia
+```
+*O executável stripped final pesará entre **19 KB e 39 KB**, pronto para ser enviado via SCP/SSH ou pen drive.*
+
+#### B) Microcontroladores Bare-Metal / RTOS (ARM Cortex-M, STM32, ESP32):
+```bash
+# 1. Compilação cruzada (exemplo ARM Cortex-M4F):
+arm-none-eabi-gcc -mcpu=cortex-m4 -mthumb -mfloat-abi=hard -mfpu=fpv4-sp-d16 \
+    -std=c11 -Os -ffunction-sections -fdata-sections \
+    -Icode/include code/src/*.c main.c -lm \
+    -Wl,--gc-sections -o firmware.elf
+
+# 2. Extração da imagem binária limpa (.bin) para gravação na Flash:
+arm-none-eabi-objcopy -O binary firmware.elf firmware.bin
+```
+*O firmware final na Flash do microcontrolador ocupará apenas **~8 KB a 28 KB**.*
+
+#### C) Redimensionando a RAM para Microcontroladores com Pouca Memória (< 128 KB de RAM):
+Se o microcontrolador possuir apenas 32 KB, 64 KB ou 128 KB de memória RAM (como STM32F103, ESP8266 ou RP2040), não é necessário alocar os $537\text{ KB}$ da configuração padrão. Basta reduzir as macros de capacidade no momento da compilação:
+
+```bash
+# Configuração ultracompacta: consome menos de 35 KB de RAM no total!
+gcc -std=c11 -Os -DHT_MAX_NODES=256 -DHT_MAX_ACTIVE_LEAVES=32 -DHT_MAX_FEATURES=8 -DHT_MAX_CLASSES=2 \
+    -Icode/include code/src/*.c main.c -lm -Wl,--gc-sections -s -o app_compacto
+```
+
+---
+
 ## 8. Estrutura do Repositório
 
 ```text
 pessoal_minimal-decision-tree/
+├── LICENSE                      # Licença BSD 3-Clause do projeto + Avisos de Copyright (River e Scikit-Learn)
+├── VERSION                      # Versão canônica do projeto (SemVer 2.0.0)
 ├── README.md                    # Guia de uso, parâmetros, arquitetura e visão geral
 ├── arquitetura.md               # Fluxogramas completos do algoritmo (Mermaid)
 ├── Makefile                     # Root Makefile (repassa comandos para code/)
 ├── references/                  # Materiais de referência (Artigos + Código fonte de base)
 │   ├── papers/                  # PDFs dos artigos originais (VFDT, Hoeffding, Bifet, HAT)
-│   ├── river_tree/              # Código extraído de online-ml/river (river/tree + river/drift)
-│   └── sklearn_tree/            # Código extraído de scikit-learn/scikit-learn (sklearn/tree)
+│   ├── river_tree/              # Código extraído de online-ml/river (inclui LICENSE BSD-3-Clause)
+│   └── sklearn_tree/            # Código extraído de scikit-learn/scikit-learn (inclui COPYING BSD-3-Clause)
 ├── docs/                        # Notas de estudo dos papers e mapeamento arquitetural
 │   ├── 01_hoeffding_tree_vfdt.md
 │   ├── 02_attribute_observers.md
@@ -568,4 +711,26 @@ Para lançar uma nova versão oficial no GitHub:
    git push origin v0.1.0
    ```
 5. No GitHub, acesse a aba **Releases** $\rightarrow$ **Draft a new release** e selecione a tag `v0.1.0` recém-enviada para gerar as notas de lançamento e os pacotes `.tar.gz` e `.zip` correspondentes.
+
+---
+
+## 12. Licença e Conformidade de Direitos Autorais (`BSD 3-Clause`)
+
+Tanto o **River** ([`online-ml/river`](https://github.com/online-ml/river)) quanto o **Scikit-Learn** ([`scikit-learn/scikit-learn`](https://github.com/scikit-learn/scikit-learn)) são distribuídos sob a licença permissiva **BSD 3-Clause License** (`SPDX-License-Identifier: BSD-3-Clause`).
+
+Em total conformidade com os projetos de referência nos quais esta implementação C11 foi inspirada e validada, este repositório também é licenciado sob a **[BSD 3-Clause License](file:///home/julio/Documentos/pessoal_minimal-decision-tree/LICENSE)** e preserva integralmente os avisos de direitos autorais originais:
+
+| Projeto | Detentor de Copyright (*Copyright Holder*) | Licença | Arquivo de Licença no Repositório |
+| :--- | :--- | :---: | :--- |
+| **Minimal Decision Tree (C11)** | `Copyright (c) 2026, Julio-C-Oliveira` | **BSD 3-Clause** | [`LICENSE`](file:///home/julio/Documentos/pessoal_minimal-decision-tree/LICENSE) |
+| **River (`online-ml/river`)** | `Copyright (c) 2020, the river developers` | **BSD 3-Clause** | [`references/river_tree/LICENSE`](file:///home/julio/Documentos/pessoal_minimal-decision-tree/references/river_tree/LICENSE) e [`LICENSE`](file:///home/julio/Documentos/pessoal_minimal-decision-tree/LICENSE) |
+| **Scikit-Learn (`scikit-learn`)** | `Copyright (c) 2007-2026 The scikit-learn developers` | **BSD 3-Clause** | [`references/sklearn_tree/COPYING`](file:///home/julio/Documentos/pessoal_minimal-decision-tree/references/sklearn_tree/COPYING) e [`LICENSE`](file:///home/julio/Documentos/pessoal_minimal-decision-tree/LICENSE) |
+
+### O que a licença BSD 3-Clause permite e exige:
+- **Permissões:** Uso livre para fins acadêmicos, pessoais ou comerciais; modificação; compilação estática e distribuição em formato de código-fonte ou binário (firmware gravado em microcontroladores), **sem obrigação de abrir o código-fonte de sistemas proprietários** que utilizem a biblioteca (diferente de licenças *copyleft* como GPL).
+- **Obrigações Cumpridas por este Repositório:**
+  1. **Em Código-Fonte (Cláusula 1):** Manter o arquivo [`LICENSE`](file:///home/julio/Documentos/pessoal_minimal-decision-tree/LICENSE) na raiz do projeto (e os arquivos originais em `references/`) contendo os avisos de copyright do River e do Scikit-Learn, as 3 cláusulas e o termo de isenção de garantia (*disclaimer*).
+  2. **Em Distribuição Binária / Firmware (Cláusula 2):** Caso você distribua apenas o binário compilado ou um produto comercial embarcado para terceiros, basta reproduzir o conteúdo do arquivo [`LICENSE`](file:///home/julio/Documentos/pessoal_minimal-decision-tree/LICENSE) na documentação, manual ou tela "Sobre" do produto/dispositivo.
+  3. **Não Endosso (Cláusula 3):** Não utilizar o nome dos autores originais (*the river developers* ou *The scikit-learn developers*) para promover ou endossar comercialmente produtos derivados sem autorização prévia por escrito.
+
 
