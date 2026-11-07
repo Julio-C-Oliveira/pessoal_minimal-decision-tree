@@ -127,11 +127,11 @@ pessoal_minimal-decision-tree/
 ## Roadmap e Tarefas (TO-DO)
 
 ### Fase 0: Estudo Teórico e Mapeamento (`docs/`)
-- [ ] **Estudar sobre Hoeffding Tree (`references/papers/`):**
-  - [ ] *Mining High-Speed Data Streams* (Pedro Domingos & Geoff Hulten, 2000) — Derivação do limite de Hoeffding, algoritmo base, `grace_period` ($n_{\min}$) e *tie-breaking* ($\tau$).
-  - [ ] *Very Fast Decision Tree Learner* (Hulten, Spencer & Domingos, 2001) — Desativação/reativação de folhas menos promissoras ($p_l \cdot e_l$), descarte de atributos ruins e controle de memória.
-  - [ ] *Adaptive Strategies for Learning Classifiers from Data Streams* (Albert Bifet, 2009) — Tratamento de atributos numéricos (aproximação Gaussiana vs quantis/EBST) e categóricos, além de *Naive Bayes Adaptive* (NBA) nas folhas.
-  - [ ] *Learning from Time-Changing Data Streams with Adaptive Hoeffding Trees* (Albert Bifet & Ricard Gavaldà, 2009) — Detecção de *Concept Drift* com ADWIN em cada nó e treinamento de subárvores alternativas.
+- [x] **Estudar sobre Hoeffding Tree (`references/papers/`):**
+  - [x] *Mining High-Speed Data Streams* (Pedro Domingos & Geoff Hulten, 2000) — Derivação do limite de Hoeffding, algoritmo base, `grace_period` ($n_{\min}$) e *tie-breaking* ($\tau$).
+  - [x] *Very Fast Decision Tree Learner* (Hulten, Spencer & Domingos, 2001) — Desativação/reativação de folhas menos promissoras ($p_l \cdot e_l$), descarte de atributos ruins e controle de memória.
+  - [x] *Adaptive Strategies for Learning Classifiers from Data Streams* (Albert Bifet, 2009) — Tratamento de atributos numéricos (aproximação Gaussiana vs quantis/EBST) e categóricos, além de *Naive Bayes Adaptive* (NBA) nas folhas.
+  - [x] *Learning from Time-Changing Data Streams with Adaptive Hoeffding Trees* (Albert Bifet & Ricard Gavaldà, 2009) — Detecção de *Concept Drift* com ADWIN em cada nó e treinamento de subárvores alternativas.
 - [ ] **Estudar a implementação do River (`references/river_tree/`):**
   - [ ] [`hoeffding_tree_classifier.py`](file:///home/julio/Documentos/pessoal_minimal-decision-tree/references/river_tree/hoeffding_tree_classifier.py) (Fluxo de `learn_one`, `predict_proba_one`, tentativa de split e gestão de memória).
   - [ ] [`nodes/branch.py`](file:///home/julio/Documentos/pessoal_minimal-decision-tree/references/river_tree/nodes/branch.py) e [`nodes/htc_nodes.py`](file:///home/julio/Documentos/pessoal_minimal-decision-tree/references/river_tree/nodes/htc_nodes.py) (Diferença entre folhas MC, NB e NBA).
