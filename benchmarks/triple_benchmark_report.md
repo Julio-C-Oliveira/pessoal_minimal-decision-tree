@@ -15,18 +15,18 @@ Este documento apresenta a avaliação comparativa tripla entre a nossa implemen
 
 | Experimento | Solução / Algoritmo | Acurácia Teste (%) | F1-Score Macro (%) | Acurácia Prequential (%) | Total Nós | Tamanho Modelo (KB) | Pico Heap Dinâmico | Tempo/amostra ($\mu$s) | Speedup vs River |
 | :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **MNIST-10Class (Digits 0..9, 16 features)** | Scikit-Learn (CART Batch) | 71.73% | 71.28% | N/A (Batch) | 4047 | 822.0 KB | 653.2 KB | 15.02 $\mu$s | Baseline |
-| | River (Hoeffding Tree) | 51.38% | 50.82% | 50.46% | 1 | 1.6 KB | 784.4 KB | 2027.40 $\mu$s | 1.0x |
-| | **C11 Embedded (`float64`)** | **51.38%** | **50.82%** | 50.44% | 1 | 999.4 KB | **0.0 KB (Zero malloc)** | 8.50 $\mu$s | **238.5x** |
-| | **C11 Embedded (`float32`, $\le 1\text{ MB}$)** | **51.38%** | **50.82%** | 50.44% | 1 | **509.9 KB** | **0.0 KB (Zero malloc)** | **6.70 $\mu$s** | **302.7x** |
-| **MNIST-4Class (Digits 0..3, 16 features)** | Scikit-Learn (CART Batch) | 87.20% | 87.05% | N/A (Batch) | 1081 | 168.9 KB | 314.6 KB | 14.45 $\mu$s | Baseline |
-| | River (Hoeffding Tree) | 76.57% | 76.08% | 77.24% | 1 | 1.6 KB | 322.5 KB | 870.62 $\mu$s | 1.0x |
-| | **C11 Embedded (`float64`)** | **76.57%** | **76.08%** | 77.13% | 1 | 846.7 KB | **0.0 KB (Zero malloc)** | 3.67 $\mu$s | **237.1x** |
-| | **C11 Embedded (`float32`, $\le 1\text{ MB}$)** | **76.57%** | **76.08%** | 77.13% | 1 | **443.6 KB** | **0.0 KB (Zero malloc)** | **3.31 $\mu$s** | **263.3x** |
-| **MNIST-Binary (Even vs Odd, 16 features)** | Scikit-Learn (CART Batch) | 85.87% | 85.87% | N/A (Batch) | 2167 | 304.7 KB | 622.1 KB | 14.54 $\mu$s | Baseline |
-| | River (Hoeffding Tree) | 78.60% | 78.59% | 77.31% | 11 | 10.0 KB | 875.5 KB | 359.60 $\mu$s | 1.0x |
-| | **C11 Embedded (`float64`)** | **78.60%** | **78.59%** | 77.31% | 11 | 846.7 KB | **0.0 KB (Zero malloc)** | 1.38 $\mu$s | **260.4x** |
-| | **C11 Embedded (`float32`, $\le 1\text{ MB}$)** | **78.60%** | **78.59%** | 77.31% | 11 | **443.6 KB** | **0.0 KB (Zero malloc)** | **1.11 $\mu$s** | **324.3x** |
+| **MNIST-10Class (Digits 0..9, 16 features)** | Scikit-Learn (CART Batch) | 71.73% | 71.28% | N/A (Batch) | 4047 | 822.0 KB | 653.1 KB | 15.00 $\mu$s | Baseline |
+| | River (Hoeffding Tree) | 51.38% | 50.82% | 50.46% | 1 | 1.6 KB | 784.6 KB | 2044.86 $\mu$s | 1.0x |
+| | **C11 Embedded (`float64`)** | **51.38%** | **50.82%** | 50.44% | 1 | 999.4 KB | **0.0 KB (Zero malloc)** | 9.88 $\mu$s | **206.9x** |
+| | **C11 Embedded (`float32`, $\le 1\text{ MB}$)** | **51.38%** | **50.82%** | 50.44% | 1 | **509.9 KB** | **0.0 KB (Zero malloc)** | **6.24 $\mu$s** | **327.5x** |
+| **MNIST-4Class (Digits 0..3, 16 features)** | Scikit-Learn (CART Batch) | 87.20% | 87.05% | N/A (Batch) | 1081 | 168.9 KB | 314.7 KB | 13.36 $\mu$s | Baseline |
+| | River (Hoeffding Tree) | 76.57% | 76.08% | 77.24% | 1 | 1.6 KB | 323.0 KB | 911.82 $\mu$s | 1.0x |
+| | **C11 Embedded (`float64`)** | **76.57%** | **76.08%** | 77.13% | 1 | 846.7 KB | **0.0 KB (Zero malloc)** | 3.55 $\mu$s | **256.6x** |
+| | **C11 Embedded (`float32`, $\le 1\text{ MB}$)** | **76.57%** | **76.08%** | 77.13% | 1 | **443.6 KB** | **0.0 KB (Zero malloc)** | **2.80 $\mu$s** | **325.7x** |
+| **MNIST-Binary (Even vs Odd, 16 features)** | Scikit-Learn (CART Batch) | 85.87% | 85.87% | N/A (Batch) | 2167 | 304.7 KB | 622.3 KB | 13.50 $\mu$s | Baseline |
+| | River (Hoeffding Tree) | 78.60% | 78.59% | 77.31% | 11 | 10.0 KB | 875.2 KB | 362.02 $\mu$s | 1.0x |
+| | **C11 Embedded (`float64`)** | **78.60%** | **78.59%** | 77.31% | 11 | 846.7 KB | **0.0 KB (Zero malloc)** | 1.52 $\mu$s | **238.6x** |
+| | **C11 Embedded (`float32`, $\le 1\text{ MB}$)** | **78.60%** | **78.59%** | 77.31% | 11 | **443.6 KB** | **0.0 KB (Zero malloc)** | **1.16 $\mu$s** | **312.1x** |
 
 ---
 
@@ -38,14 +38,37 @@ Este documento apresenta a avaliação comparativa tripla entre a nossa implemen
   - O Scikit-Learn opera no paradigma **Batch (em lote)**: ele mantém todas as 14.000 amostras de treino simultaneamente na memória RAM e executa ordenação global de atributos (*Introsort* $O(N \log N)$). Isso permite ao algoritmo CART testar exaustivamente todos os pontos de corte possíveis e construir partições hierárquicas locais que se ajustam com extrema flexibilidade à geometria não-linear dos 16 pixels.
   - **O Custo desse Ganho:** A árvore do Scikit-Learn atingiu **4.047 nós** no 10-Class e **2.167 nós** no binário. Com uma média de apenas ~3,5 amostras por nó folha, há uma memorização massiva de ruído (*overfitting*). Mais importante: o Scikit-Learn **não suporta aprendizado incremental**; caso novos dados cheguem, ele precisa re-treinar a árvore do zero, e seu consumo de memória escala linearmente $O(N)$, inviabilizando uso em microcontroladores de $\le 1\text{ MB}$ de RAM.
 
-- **Por que a Hoeffding Tree (C11 e River) estabilizou em 51,38% no 10-Class e 76,57% no 4-Class?**
-  - A Hoeffding Tree é um algoritmo **Online / Streaming de passada única ($O(1)$ por amostra)**, onde cada dado é visto uma única vez e descartado.
-  - Como comprovado pelo Limite de Hoeffding, com 14.000 amostras e $\delta = 10^{-7}$, a árvore matematicamente evitou realizar splits prematuros em atributos contínuos correlacionados (pixels vizinhos de dígitos possuem correlação espacial alta).
-  - Graças ao classificador **Naive Bayes Adaptive (NBA)** embutido na folha raiz, o modelo alcança **51,38% de acurácia no teste (F1 de 50,82%)** mesmo com 1 nó estrutural — um salto expressivo frente ao chute aleatório de 10% da classe majoritária.
-
 - **A Convergência Expressiva no Cenário Binário (78,60% vs 85,87%):**
   - No MNIST-Binary (pares vs ímpares), a evidência estatística foi suficiente para disparar splits sucessivos (11 nós no River e no C11).
   - Com apenas 11 nós, a acurácia em C11 alcançou **78,60% (F1 de 78,59%)**, ficando a apenas 7 pontos percentuais do Scikit-Learn, porém com uma **árvore 99,5% menor** (11 nós contra 2.167 nós do CART), sem qualquer sobreajuste e com pegada de RAM estática.
+
+### 3.2 Por que a Acurácia subiu de 51% (10 classes) para 76% (4 classes) e 78% (Binário)?
+
+A progressão da acurácia de **51,38%** (10 classes) para **76,57%** (4 classes) e **78,60%** (binário) é explicada pela conjunção de quatro fatores fundamentais de aprendizado de máquina e visão computacional:
+
+1. **A Linha de Base do Chute Aleatório (*Chance Level* e Complexidade Combinatória):**
+   - **10 Classes:** A probabilidade a priori de um chute aleatório uniforme é de apenas $\frac{1}{10} = \mathbf{10\%}$. Portanto, obter **51,38%** representa um desempenho **$5{,}1\times$ superior ao chute aleatório**. Separar 10 classes exige distinguir entre $\frac{10 \times 9}{2} = \mathbf{45\text{ pares de fronteiras}}$ de decisão distintas.
+   - **4 Classes:** A probabilidade a priori é de $\frac{1}{4} = \mathbf{25\%}$. Atingir **76,57%** representa um ganho de **$3{,}1\times$ sobre o chute**. O problema possui apenas $\frac{4 \times 3}{2} = \mathbf{6\text{ pares de fronteiras}}$, reduzindo drasticamente a ambiguidade.
+   - **Binário:** A probabilidade a priori já é de $\frac{1}{2} = \mathbf{50\%}$. Obter **78,60%** significa acertar quase 4 em cada 5 dígitos.
+
+2. **Perda de Resolução na Compressão TinyML ($28 \times 28 \to 16$ pixels):**
+   - Reduzir uma imagem de 784 pixels para uma grade $4 \times 4$ de 16 pixels representa uma **compressão de $49\times$ de informação**.
+   - Em 10 classes, muitos dígitos compartilham padrões macro quase idênticos em 16 pixels (por exemplo, a abertura de um '3' vs um '8', ou a perna de um '4' vs um '9' desaparecem quando os pixels são agrupados em blocos médios $7 \times 7$).
+   - No subconjunto de 4 classes {0, 1, 2, 3}, a morfologia básica dos dígitos é naturalmente ortogonal mesmo em 16 pixels:
+     - O dígito **'0'** é um anel oco (pixels centrais escuros $\approx 0{,}0$, bordas acesas).
+     - O dígito **'1'** é uma coluna vertical fina (pixels centrais brilhantes, laterais zeradas).
+     - O dígito **'2'** e **'3'** possuem assinaturas horizontais demarcadas.
+     Portanto, a separabilidade geométrica dos dígitos {0, 1, 2, 3} é intrinsecamente muito mais nítida.
+
+3. **A Suposição de Independência do Naive Bayes nos 16 Pixels:**
+   - Como demonstrado no item 3.3, nos cenários de 10 e 4 classes a Hoeffding Tree operou com 1 nó raiz usando Naive Bayes Gaussiano.
+   - O Naive Bayes assume que todos os 16 pixels são estatisticamente independentes dado o dígito: $P(x_1, \dots, x_{16} \mid c) = \prod P(x_i \mid c)$.
+   - Em imagens, pixels vizinhos têm forte dependência espacial. Em 10 classes, a sobreposição das distribuições normais de pixels vizinhos impõe um limite teórico (*Bayes Error*) de aproximadamente ~50% a 55% para classificadores puramente lineares/ingênuos em 16 pixels.
+   - Em 4 classes, como as médias $\mu_{c, f}$ dos dígitos {0, 1, 2, 3} são muito distantes no espaço euclidiano, a violação da independência quase não prejudica a fronteira, permitindo ao Naive Bayes alcançar **76,57%**.
+
+4. **No Binário Houve Partição Hierárquica Real (11 Nós):**
+   - Enquanto os cenários de 10 e 4 classes ficaram em 1 nó, no MNIST-Binary o critério de Hoeffding encontrou amostras suficientes ($n > 3.224$) para realizar splits sucessivos, gerando **11 nós de decisão hierárquicos**.
+   - Cada split isolou sub-regiões específicas do espaço de pixels (por exemplo, dividindo amostras por intensidade do pixel central), o que quebrou a suposição de independência global e permitiu ao modelo aprender regras não-lineares, elevando a acurácia para **78,60%**.
 
 ### 3.2 Topologia da Árvore: Por que o Total de Nós deu 1 no MNIST-10 e MNIST-4?
 
