@@ -19,7 +19,12 @@ TEST_SRCS = $(wildcard $(TEST_DIR)/*.c)
 TEST_OBJS = $(patsubst $(TEST_DIR)/%.c, $(BUILD_TESTS)/%.o, $(TEST_SRCS))
 TEST_RUNNER = $(BUILD_DIR)/test_runner
 
-.PHONY: all lib test clean bench bench-triple bench-drift bench-regression directories
+VERSION ?= $(shell cat ../VERSION 2>/dev/null || cat VERSION 2>/dev/null || echo "0.1.0")
+
+.PHONY: all lib test clean bench bench-triple bench-drift bench-regression directories version
+
+version:
+	@echo "Minimal Decision Tree (libht) version $(VERSION)"
 
 all: lib test
 

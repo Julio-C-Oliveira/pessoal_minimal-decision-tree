@@ -2139,3 +2139,7 @@ ht_status_t ht_tree_load(ht_tree_t *tree,
 
     return HT_OK;
 }
+
+const char *ht_version(void) {
+    return HT_VERSION_STRING;
+}

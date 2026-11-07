@@ -7,6 +7,7 @@
  */
 
 #include "test_harness.h"
+#include <string.h>
 
 /* Define global test counters */
 int g_tests_run = 0;
@@ -40,6 +41,16 @@ static void test_config_constants(void) {
     HT_ASSERT_EQ(HT_ERR_OUT_OF_STATS, -3);
     HT_ASSERT_EQ(HT_ERR_IO, -4);
     HT_ASSERT_EQ(HT_ERR_CORRUPT_IMAGE, -5);
+
+    /* Versioning assertions (SemVer) */
+    HT_ASSERT_EQ(HT_VERSION_MAJOR, 0U);
+    HT_ASSERT_EQ(HT_VERSION_MINOR, 1U);
+    HT_ASSERT_EQ(HT_VERSION_PATCH, 0U);
+    HT_ASSERT(HT_VERSION_CHECK(0, 1, 0));
+    HT_ASSERT(!HT_VERSION_CHECK(0, 1, 1));
+    HT_ASSERT(!HT_VERSION_CHECK(1, 0, 0));
+    HT_ASSERT_EQ(strcmp(HT_VERSION_STRING, "0.1.0"), 0);
+    HT_ASSERT_EQ(strcmp(ht_version(), "0.1.0"), 0);
 }
 
 static void test_config_types_and_sizes(void) {

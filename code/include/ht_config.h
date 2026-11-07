@@ -13,6 +13,30 @@
 #include <math.h>
 #include <float.h>
 
+/* ========================================================================== */
+/* Versioning (Semantic Versioning 2.0.0: MAJOR.MINOR.PATCH)                  */
+/* ========================================================================== */
+#define HT_VERSION_MAJOR    0U
+#define HT_VERSION_MINOR    1U
+#define HT_VERSION_PATCH    0U
+#define HT_VERSION_STRING   "0.1.0"
+
+/**
+ * @brief Compile-time macro to check against a minimum library version.
+ * Evaluates to true if current version is >= (maj.min.patch).
+ * Example: #if HT_VERSION_CHECK(0, 1, 0)
+ */
+#define HT_VERSION_CHECK(maj, min, patch) \
+    ((HT_VERSION_MAJOR > (maj)) || \
+     (HT_VERSION_MAJOR == (maj) && HT_VERSION_MINOR > (min)) || \
+     (HT_VERSION_MAJOR == (maj) && HT_VERSION_MINOR == (min) && HT_VERSION_PATCH >= (patch)))
+
+/**
+ * @brief Returns the version string of the Hoeffding Tree library.
+ * Zero dynamic memory allocation (returns pointer to static string literal in Flash).
+ */
+const char *ht_version(void);
+
 #ifdef HT_USE_DOUBLE
 typedef double ht_float_t;
 #define HT_SQRT(x)      sqrt(x)
