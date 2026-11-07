@@ -24,7 +24,7 @@
 | **2.2** | **Fase 2:** Benchmark Triplo MNIST (C11 vs River vs Scikit-Learn) com Profiling de RAM | `benchmarks/generate_mnist.py`, `benchmarks/compare_triple.py`, `benchmarks/bench_c_runner.c`, `benchmarks/triple_benchmark_report.md`, `code/Makefile`, `Makefile` | Avaliação tripla no MNIST (10 classes, 4 classes, binário): Holdout Acc, F1-Score Macro, Prequential Acc, Topologia (Nós), Profiling de RAM (Estrutura, Pico Heap Tracemalloc) e Throughput (Speedup >240x) | `[x]` | `45e20a5` |
 | **3.1** | **Fase 3:** Detector ADWIN com Histograma Exponencial Fixo | `code/include/ht_drift.h`, `code/src/ht_drift.c`, `code/tests/test_drift.c`, `code/tests/test_e2e_flow.c` | **N1:** inserção, compressão de buckets $2^k$ ($M=5$), corte $\epsilon_{\text{cut}}$<br/>**N2:** pool estático de detectores ADWIN + detecção de salto de média | `[x]` | `41ab845` |
 | **3.2** | **Fase 3:** Hoeffding Adaptive Tree (HAT) | `code/include/ht_tree.h`, `code/src/ht_tree.c`, `code/src/ht_drift.c`, `code/tests/test_drift.c`, `code/tests/test_e2e_flow.c` | **N1:** filtro unilateral de erro, `bound` de troca/poda, votação $1/\hat{e}^2$<br/>**N2:** substituição de subárvore com reciclagem iterativa de nós antigos<br/>**N3:** stream E2E com drift abrupto recuperando acurácia | `[x]` | `6f36ac7` |
-| **3.3** | **Fase 3:** Benchmark de Concept Drift vs River HAT | `benchmarks/compare_river.py`, `benchmarks/bench_c_runner.c` | Paridade contra `HoeffdingAdaptiveTreeClassifier` em streams com drift abrupto e gradual | `[ ]` | — |
+| **3.3** | **Fase 3:** Benchmark de Concept Drift vs River HAT | `benchmarks/compare_river.py`, `benchmarks/bench_c_runner.c`, `benchmarks/generate_streams.py`, `benchmarks/drift_benchmark_report.md` | Paridade contra `HoeffdingAdaptiveTreeClassifier` em 5 fluxos sintéticos com drift abrupto e gradual (SEA, Agrawal, Hyperplane), switches automáticos de ramos, RAM $\le 1\text{ MB}$, zero heap dinâmico e speedup $>270\times$ a $400\times$ | `[x]` | `b405458` |
 
 ---
 
@@ -447,3 +447,21 @@ flowchart LR
   - Pico de heap dinâmico em runtime via `tracemalloc` (C11: **0.0 KB**, Scikit-Learn: 314–653 KB, River: 215–659 KB)
 - Throughput e latência por amostra: Speedups de **$240\times$ a $350\times$** da solução C11 em relação ao River.
 - Relatório consolidado gerado automaticamente em [`benchmarks/triple_benchmark_report.md`](file:///home/julio/Documentos/pessoal_minimal-decision-tree/benchmarks/triple_benchmark_report.md).
+
+### Entrega 3.3: Benchmark de Concept Drift e Paridade HAT vs River (`make bench-drift`)
+- Avaliação abrangente em 5 geradores de fluxo com concept drift sintético:
+  1. **SEA Abrupt Concept Drift** (inversão da função $f_1 \to f_4$ no ponto médio, 20.000 amostras)
+  2. **SEA Gradual Concept Drift** (transição estocástica gradual $f_1 \to f_4$ com largura de janela de 2000 amostras, 20.000 amostras)
+  3. **Agrawal Abrupt Concept Drift** (mudança de função de classificação $f_1 \to f_3$ no ponto médio, 20.000 amostras)
+  4. **Agrawal Gradual Concept Drift** (transição gradual entre funções de empréstimo com largura de 2000 amostras, 20.000 amostras)
+  5. **Hyperplane Continuous Concept Drift** (rotação contínua de hiperplano com magnitude de drift constante, 20.000 amostras)
+- Comprovada a capacidade de adaptação em tempo real:
+  - No fluxo SEA com drift abrupto, o modelo VFDT estático degradou para 90.50% de acurácia de teste pós-drift.
+  - O C11 HAT monitorou continuamente o erro via ADWIN2, instanciou subárvore alternativa, efetuou o *Switch* e recuperou a acurácia para **95.27%** (`float32`) e **95.30%** (`double`), com ganho de adaptação de até **+4.77%** sobre a árvore estática e paridade contra River HAT (96.25%).
+- Consumo estático e zero heap:
+  - C11 HAT alocou exatamente **0.0 KB** de heap dinâmico em runtime (`malloc`/`free` estritamente proibidos).
+  - Consumo total de RAM em `float32`: **587.4 KB** (443.6 KB árvore + 97.8 KB pool de 256 detectores ADWIN + padding), operando confortavelmente dentro do orçamento de $\le 1\text{ MB}$.
+- Throughput e latência:
+  - C11 HAT processa cada amostra (inferência com predição ponderada $1/\hat{e}^2$ + atualização de ADWIN2 em cada nó do caminho + treino online) em apenas **1.03 a 1.92 $\mu$s/amostra**.
+  - Speedups massivos de **$275\times$ a mais de $403\times$** sobre o `HoeffdingAdaptiveTreeClassifier` do River em Python.
+- Relatório consolidado gerado automaticamente em [`benchmarks/drift_benchmark_report.md`](file:///home/julio/Documentos/pessoal_minimal-decision-tree/benchmarks/drift_benchmark_report.md).
