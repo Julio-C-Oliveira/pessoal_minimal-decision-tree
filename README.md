@@ -160,9 +160,9 @@ pessoal_minimal-decision-tree/
 - [x] Implementar `ht_observer` + `code/tests/test_observer.c`:
   - [x] Observador numérico Gaussiano incremental (Welford) + avaliação de $k$ thresholds candidatos usando PDF/CDF normal.
   - [x] Observador categórico nominal com busca do melhor split binário ($x_i == c$ vs $x_i \neq c$).
-- [ ] Implementar `ht_criterion` + `code/tests/test_criterion.c`:
-  - [ ] Vtable (`ht_criterion_vtable_t`) + implementações de *Gini Impurity* e *Information Gain (Entropia)*.
-  - [ ] Cálculo do *Hoeffding Bound* ($\epsilon$) e verificação de split ($\Delta G > \epsilon$ ou $\epsilon < \tau$) integrado aos observadores.
+- [x] Implementar `ht_criterion` + `code/tests/test_criterion.c`:
+  - [x] Vtable (`ht_criterion_vtable_t`) + implementações de *Gini Impurity* e *Information Gain (Entropia)*.
+  - [x] Cálculo do *Hoeffding Bound* ($\epsilon$) e verificação de split ($\Delta G > \epsilon$ ou $\epsilon < \tau$) integrado aos observadores.
 - [ ] Implementar `ht_tree` (VFDT) + `code/tests/test_tree.c` + `code/tests/test_e2e_flow.c`:
   - [ ] Roteamento de amostras da raiz até a folha (incluindo fallback para filho mais populoso em caso de `NaN`).
   - [ ] Predição nas folhas via *Majority Class* (MC), *Naive Bayes* (NB) e *Naive Bayes Adaptive* (NBA).
