@@ -56,7 +56,141 @@ stateDiagram-v2
 
 ---
 
-## 2. Fluxograma Completo de Inferência (`predict`, `predict_proba` e `predict_reg`)
+## 2. Como Funcionam os Nós de Split e os Nós Folha
+
+Na arquitetura C11 da biblioteca, tanto os **Nós de Split** (nós de decisão internos) quanto os **Nós Folha** (nós terminais) utilizam exatamente a mesma estrutura base leve [`ht_node_t`](file:///home/julio/Documentos/pessoal_minimal-decision-tree/code/include/ht_memory.h#L75-L89) ($28\text{ B}$ em `float32`) armazenada no `node_pool`. O que diferencia o papel do nó na árvore são seus bits de `flags` e a presença (ou ausência) do bloco pesado de aprendizado [`ht_leaf_stats_t`](file:///home/julio/Documentos/pessoal_minimal-decision-tree/code/include/ht_memory.h#L134-L147) ($1.360\text{ B}$ em `float32`) apontado por `stats_idx`.
+
+```mermaid
+flowchart LR
+    subgraph SPLIT_NODE["1. No de Split (Interno) — Custo: 28 B"]
+        direction TB
+        SN_HEAD["ht_node_t (node_pool[idx])\nflags: HT_NODE_IN_USE (HT_NODE_IS_LEAF = 0)"]
+        SN_RULE["Condicao de Teste:\n- feature_idx = f\n- split_val: threshold (float) OU cat_val (int32)"]
+        SN_CH["Roteamento Binario:\n- left_child (Ramo Verdadeiro)\n- right_child (Ramo Falso)"]
+        SN_W["Pesos Acumulados:\nclass_counts[C] UNION reg_stats\n(Usado p/ resolver NaN pelo caminho mais comum)"]
+        SN_ST["stats_idx = 0xFFFF (Sem bloco pesado!)"]
+        SN_HEAD --> SN_RULE --> SN_CH --> SN_W --> SN_ST
+    end
+
+    subgraph INACTIVE_LEAF["2. No Folha Inativa — Custo: 28 B"]
+        direction TB
+        IL_HEAD["ht_node_t (node_pool[idx])\nflags: HT_NODE_IN_USE | HT_NODE_IS_LEAF"]
+        IL_CH["Filhos:\nleft_child = 0xFFFF, right_child = 0xFFFF"]
+        IL_W["Predicao e Contagem Leve:\nclass_counts[C] (Majority Class)\nUNION reg_stats (Target Mean)"]
+        IL_ST["stats_idx = 0xFFFF (Desativada p/ economizar RAM)"]
+        IL_HEAD --> IL_CH --> IL_W --> IL_ST
+    end
+
+    subgraph ACTIVE_LEAF["3. No Folha Ativa — Custo: 28 B + 1.360 B"]
+        direction TB
+        AL_HEAD["ht_node_t (node_pool[idx])\nflags: HT_NODE_IN_USE | HT_NODE_IS_LEAF"]
+        AL_W["Acumuladores Base:\nclass_counts[C] UNION reg_stats"]
+        AL_ST["stats_idx = k (Aponta para stats_pool[k])"]
+        AL_HEAVY["ht_leaf_stats_t (stats_pool[k] — 1.360 B):\n- Observadores dos F atributos (observers[F])\n- Pesos Lineares SGD (reg_weights[F], reg_intercept)\n- Seletores Adaptativos (NBA mc/nb_correct OU fmse_mean/model)\n- Timestamp de split (last_split_attempt_at)"]
+        AL_HEAD --> AL_W --> AL_ST --> AL_HEAVY
+    end
+```
+
+---
+
+### 2.1 Funcionamento dos Nós de Split (Nós de Decisão Internos)
+
+Um **Nó de Split** é um nó que já acumulou amostras suficientes no passado, passou no teste estatístico do *Hoeffding Bound* e dividiu o espaço de decisão em dois ramos filhos.
+
+#### A) Estrutura e Campos Ativos no Nó de Split:
+- **Identificação (`flags`):** O bit `HT_NODE_IS_LEAF` vale `0`. O índice `stats_idx` vale `HT_INVALID_IDX` (`0xFFFF`), pois um nó de split **nunca retém observadores de atributos**.
+- **Atributo Testado (`feature_idx`):** Guarda o índice da coluna $f \in [0, \text{HT\_MAX\_FEATURES}-1]$ que será inspecionada em cada amostra `x[f]`.
+- **Regra de Decisão Binária (`split_val` e `HT_NODE_SPLIT_CAT`):**
+  1. **Split Numérico Contínuo (`(flags & HT_NODE_SPLIT_CAT) == 0`):**
+     - Compara o valor ponto flutuante do atributo com o limiar `node->split_val.threshold`:
+     - Se **`x[f].num <= threshold`** $\longrightarrow$ segue para **`left_child`** (ramo esquerdo, branch `0`).
+     - Se **`x[f].num > threshold`** $\longrightarrow$ segue para **`right_child`** (ramo direito, branch `1`).
+  2. **Split Categórico Nominal (`(flags & HT_NODE_SPLIT_CAT) != 0`):**
+     - Realiza um teste de igualdade *One-vs-Rest* contra a categoria `node->split_val.cat_val`:
+     - Se **`x[f].cat == cat_val`** $\longrightarrow$ segue para **`left_child`** (ramo esquerdo, branch `0`).
+     - Se **`x[f].cat != cat_val`** $\longrightarrow$ segue para **`right_child`** (ramo direito, branch `1`).
+
+#### B) Tratamento de Valores Ausentes (`NaN` ou Categoria `< 0`) no Nó de Split:
+Mesmo depois de se tornar um nó interno, ele continua atualizando `class_counts[y]` (na classificação) ou `reg_stats.count` (na regressão) toda vez que uma amostra passa por ele durante o treinamento.
+- Quando uma amostra chega com `x[f]` ausente (`HT_ISNAN(x[f].num)` ou `x[f].cat < 0`), o nó de split não pode avaliar a desigualdade do `split_val`.
+- Em vez de abortar, ele chama [`ht_most_common_child(tree, node)`](file:///home/julio/Documentos/pessoal_minimal-decision-tree/code/src/ht_tree.c#L168-L195), que consulta a soma de pesos de `left_child` e `right_child` em $O(1)$ e roteia a amostra pelo **filho mais populoso** (*most common path*).
+
+#### C) Papel do Nó de Split na Adaptação a *Concept Drift* (HAT / HAT-R):
+Quando `enable_hat = true`, cada nó de split atua como uma sentinela da subárvore abaixo dele através de `tree->node_drift[node_idx]`:
+1. **Monitoramento com ADWIN2:** A cada amostra que passa pelo nó de split, o erro prequential da subárvore alimenta o detector ADWIN daquele nó (`adwin_idx`).
+2. **Cultivo de Subárvore Alternativa (`alt_tree_idx`):** Se o ADWIN detectar que o erro da subárvore subiu (passando pelo filtro unilateral de erro), o nó de split aloca uma nova folha em `alt_tree_idx` e passa a treiná-la em paralelo (em *background*) com todas as amostras que cruzam este nó.
+3. **Troca (`SWITCH`) ou Poda (`PRUNE`):** Quando tanto o nó de split atual quanto sua subárvore alternativa acumulam pelo menos `drift_window_threshold` ($300$) amostras, um teste de hipótese (Hoeffding na classificação; Teste Z de Welch na regressão) verifica se a alternativa já supera significativamente o ramo antigo. Se vencer (`SWITCH`), o nó de split antigo e todos os seus descendentes são reciclados iterativamente (`ht_tree_free_subtree`) e a alternativa assume seu lugar na árvore principal.
+
+---
+
+### 2.2 Funcionamento dos Nós Folha (Folhas Ativas e Folhas Inativas)
+
+Um **Nó Folha** é identificado pelo bit `(node->flags & HT_NODE_IS_LEAF) != 0` e não possui filhos (`left_child == right_child == 0xFFFF`). Ele acumula duas funções essenciais: **emitir a predição final** quando uma amostra chega ao fim do roteamento e **aprender incrementalmente** com os dados para descobrir novos splits.
+
+#### A) Diferença entre Folha Ativa e Folha Inativa:
+
+| Característica | Folha Ativa (`stats_idx != 0xFFFF`) | Folha Inativa (`stats_idx == 0xFFFF`) |
+| :--- | :--- | :--- |
+| **Consumo de Memória (`float32`)** | **$1.388\text{ B}$** ($28\text{ B}$ no `node_pool` + $1.360\text{ B}$ no `stats_pool`) | **Apenas $28\text{ B}$** (somente `ht_node_t` no `node_pool`) |
+| **Observadores de Atributos (`observers[F]`)** | **Ativos:** atualiza as distribuições de todos os $F$ atributos a cada amostra. | **Desativados:** não mantém observadores de atributos. |
+| **Tentativa de Split (`grace_period`)** | **Sim:** avalia candidatos de split e o *Hoeffding Bound* a cada `grace_period` amostras. | **Não:** permanece como folha terminal (a menos que seja reativada). |
+| **Aprendizado do Alvo no `learn_one`** | Atualiza `class_counts` / `reg_stats`, observadores, pesos SGD e contadores NBA/fMSE. | Atualiza **apenas** `class_counts[y]` (classificação) ou `reg_stats` (regressão). |
+| **Capacidade de Predição (`predict`)** | Suporta todas as estratégias: **MC, NB, NBA** (classificação) e **MEAN, MODEL (SGD), ADAPTIVE** (regressão). | Prediz usando **MC (*Majority Class*)** na classificação ou **MEAN (*Média*)** na regressão. |
+| **Quando Surge?** | Estado inicial da raiz e de todo filho recém-criado em um split (enquanto houver vaga no `stats_pool`). | Quando atinge `max_depth`, quando o `stats_pool` enche (desativação por menor *Promise*), ou ao carregar um modelo em modo somente-inferência (`ht_tree_load`). |
+
+---
+
+#### B) Como os Observadores da Folha Ativa Aprendem com Cada Atributo (`observers[f]`):
+Sempre que `learn_one` chega a uma folha ativa, ela percorre os atributos válidos $f = 0 \dots n_{\text{features}}-1$ e atualiza o observador correspondente em `stats->observers[f]` ($80\text{ B}$ por atributo):
+
+1. **Classificação — Atributo Numérico (`ht_gaussian_obs_t num[HT_MAX_CLASSES]`):**
+   - Mantém $C$ estimadores Gaussianos independentes (um para cada classe $c$).
+   - Quando chega $(x_f, y)$, atualiza apenas a Gaussiana da classe verdadeira $y$ usando o **Algoritmo Incremental de Welford Ponderado**: atualiza `count`, a média móvel `mean`, a soma centrada de quadrados `m2` (de onde sai a variância $\sigma^2 = m_2 / (n - 1)$) e os limites `[min_val, max_val]`.
+   - Na hora de tentar um split, divide o intervalo `[min_val, max_val]` em `HT_GAUSSIAN_SPLITS` ($10$) pontos de corte candidatos e usa a **CDF Normal ($\Phi$)** para estimar instantaneamente quantas amostras de cada classe cairiam à esquerda ($\le t$) e à direita ($> t$).
+2. **Classificação — Atributo Categórico (`ht_categorical_obs_t cat`):**
+   - Soma o peso da amostra diretamente na célula `counts[y][x_f.cat] += weight`.
+   - Na hora do split, avalia partições binárias *One-vs-Rest* (`x_f == k` vs. `x_f != k`) somando as colunas da matriz.
+3. **Regressão Contínua — Atributo Numérico (`ht_reg_numeric_obs_t reg_num`):**
+   - Como o alvo $y \in \mathbb{R}$ é contínuo, não existem classes discretas para separar Gaussianas. O observador mantém **`HT_REG_NUM_SLOTS` ($5$) slots ordenados** por `x_mean`, onde cada slot guarda as estatísticas de variância do alvo `y_stats = (count, mean, m2)`.
+   - Quando os 5 slots estão ocupados e chega um novo valor $x_f$, o observador funde os dois slots adjacentes mais próximos usando a **Fórmula Paralela de Chan** (`ht_var_combine`), mantendo um resumo fiel da relação entre $x_f$ e a variância de $y$ em apenas $80\text{ B}$!
+4. **Regressão Contínua — Atributo Categórico (`ht_reg_categorical_obs_t reg_cat`):**
+   - Atualiza `ht_var_update(&cat_stats[x_f.cat], y, weight)` para a categoria observada e testa splits *One-vs-Rest* usando subtração analítica de variância (`ht_var_subtract`).
+
+---
+
+#### C) Como a Folha Calcula suas Predições (Modos de Inferência na Folha):
+
+- **Na Classificação (`ht_tree_predict_proba`):**
+  1. **MC (*Majority Class*):** Calcula a proporção direta dos contadores do nó: $P(y = c) = \frac{\text{class\_counts}[c]}{\sum_k \text{class\_counts}[k]}$. É ultrarrápido ($O(C)$) e funciona tanto em folhas ativas quanto inativas.
+  2. **NB (*Naive Bayes*):** Usa o Teorema de Bayes combinando os observadores de todos os atributos da folha em escala logarítmica:
+     $$\ell_c = \ln P(y = c) + \sum_{f=0}^{F-1} \ln P(x_f \mid y = c)$$
+     Em seguida, converte os log-likelihoods $\ell_c$ em probabilidades normalizadas usando o truque numérico **Log-Sum-Exp (LSE)** ($\max_c \ell_c$), prevenindo *underflow* de ponto flutuante.
+  3. **NBA (*Naive Bayes Adaptive* — Padrão):** No início da vida de uma folha (poucas amostras), *Majority Class* costuma ser mais estável; conforme a folha acumula dados, *Naive Bayes* passa a ser mais preciso. O modo **NBA** monitora no treino (antes de atualizar a folha) se MC e NB acertariam a amostra atual, somando o peso em `mc_correct_weight` e `nb_correct_weight`. Na predição, a folha escolhe automaticamente **NB** se `nb_correct_weight >= mc_correct_weight`, ou **MC** caso contrário!
+
+- **Na Regressão Contínua (`ht_tree_predict_reg`):**
+  1. **MEAN (*Média do Alvo*):** Retorna diretamente a média acumulada na folha (`node->reg_stats.mean`).
+  2. **MODEL (*Regressão Linear Online via SGD*):** Cada folha ativa treina um hiperplano linear local via *Stochastic Gradient Descent* com regularização $L_2$ e *clipping* de segurança:
+     $$\hat{y} = w_0 + \sum_{f=0}^{F-1} w_f \cdot x_f$$
+  3. **ADAPTIVE (*Seletor por Faded MSE* — Padrão):** Mantém a média móvel exponencial do erro quadrático (`fmse_mean` e `fmse_model`, com fator de esquecimento $\alpha = 0.95$) das duas abordagens. Na inferência, a folha prediz automaticamente com **MEAN** se `fmse_mean < fmse_model`, ou com **MODEL (SGD)** caso contrário!
+
+---
+
+#### D) A Metamorfose *In-Place*: Como uma Folha Ativa se Transforma em um Nó de Split
+
+Quando uma folha ativa completa um ciclo de `grace_period` amostras e o melhor candidato $(f^*, v^*)$ vence o segundo colocado pelo **Limite de Hoeffding** ($\Delta G > \epsilon$ ou $\epsilon < \tau$):
+
+1. **Reciclagem Imediata do Bloco Pesado:** O índice `stats_idx` da folha mãe é **imediatamente devolvido ao `stats_pool`** (`ht_stats_free`), liberando seus $1.360\text{ B}$ antes mesmo de alocar as estatísticas dos filhos (em regressão, os pesos lineares `reg_weights[]` são salvos temporariamente na stack para herança).
+2. **Criação dos Dois Nós Filhos (`left_idx` e `right_idx`):**
+   - Dois novos blocos `ht_node_t` são alocados no `node_pool` e marcados com `HT_NODE_IS_LEAF`.
+   - Suas estatísticas iniciais (`class_counts` ou `reg_stats`) são preenchidas com as distribuições pós-split esquerda (`lhs`) e direita (`rhs`) estimadas pelo observador vencedor.
+   - Cada filho solicita um bloco `ht_leaf_stats_t` ao `stats_pool` (se o pool estiver cheio, a árvore desativa automaticamente a folha ativa menos promissora para ceder a vaga ao novo filho).
+3. **Mutação *In-Place* da Antiga Folha:**
+   - O próprio nó `node_pool[leaf_idx]` apaga o bit `HT_NODE_IS_LEAF`, grava `feature_idx = f*`, `split_val = v*`, `left_child = left_idx`, `right_child = right_idx` e `stats_idx = 0xFFFF`.
+   - Como a transformação ocorre **no mesmo índice `leaf_idx`**, o nó pai que apontava para `leaf_idx` não precisa ser atualizado!
+
+---
+
+## 3. Fluxograma Completo de Inferência (`predict`, `predict_proba` e `predict_reg`)
 
 O caminho de inferência ([`ht_tree_predict`](file:///home/julio/Documentos/pessoal_minimal-decision-tree/code/src/ht_tree.c#L1198-L1216), [`ht_tree_predict_proba`](file:///home/julio/Documentos/pessoal_minimal-decision-tree/code/src/ht_tree.c#L1102-L1196) e [`ht_tree_predict_reg`](file:///home/julio/Documentos/pessoal_minimal-decision-tree/code/src/ht_tree.c#L1491-L1550)) é **100% iterativo** (zero recursão na stack) e trata valores ausentes (`NaN` ou categoria `< 0`) roteando para o filho mais populoso em tempo real.
 
@@ -136,7 +270,7 @@ flowchart TD
 
 ---
 
-## 3. Fluxograma Completo de Treinamento Incremental (`learn_one` e `learn_one_reg`)
+## 4. Fluxograma Completo de Treinamento Incremental (`learn_one` e `learn_one_reg`)
 
 Cada amostra `(x, y, weight)` é processada uma única vez em complexidade $O(\text{profundidade} \times F)$. O diagrama abaixo detalha o ciclo completo de aprendizado incremental ([`ht_tree_learn_one`](file:///home/julio/Documentos/pessoal_minimal-decision-tree/code/src/ht_tree.c#L1463-L1489) e [`ht_tree_learn_one_reg`](file:///home/julio/Documentos/pessoal_minimal-decision-tree/code/src/ht_tree.c#L1800-L1821)), incluindo adaptação a *Concept Drift* (HAT/HAT-R) e atualização nas folhas.
 
@@ -159,7 +293,7 @@ flowchart TD
     LOOP_NODE -- "Nao (No Interno)" --> UPD_INTERNAL["Atualiza estatistica do no interno:\n- Classificacao: class_counts[y] += weight\n- Regressao: ht_var_update(&reg_stats, y, weight)"]
     UPD_INTERNAL --> INTERNAL_HAT{"HAT Ativo neste no?"}
     
-    INTERNAL_HAT -- "Sim" --> ADWIN_STEP["Executa Bloco de Monitoramento ADWIN e Subarvore Alternativa\n(Ver Secao 5 para detalhes de Drift / Switch / Prune)\nSe alt_tree_idx != 0xFFFF: treina alt_tree_idx recursivamente"]
+    INTERNAL_HAT -- "Sim" --> ADWIN_STEP["Executa Bloco de Monitoramento ADWIN e Subarvore Alternativa\n(Ver Secao 6 para detalhes de Drift / Switch / Prune)\nSe alt_tree_idx != 0xFFFF: treina alt_tree_idx recursivamente"]
     INTERNAL_HAT -- "Nao" --> ROUTE_NEXT["Avalia condicao de split do no interno\n(ou ht_most_common_child se x[f] for NaN/ausente)\ncurr = next_idx; depth++"]
     ADWIN_STEP --> ROUTE_NEXT
     ROUTE_NEXT --> LOOP_NODE
@@ -186,13 +320,13 @@ flowchart TD
 
     CHECK_DEPTH -- "Nao" --> CHECK_GRACE{"5. Atingiu grace_period?\n(weight_seen - last_split_attempt_at >= grace_period)"}
     CHECK_GRACE -- "Nao" --> END_LEARN
-    CHECK_GRACE -- "Sim" --> ATTEMPT_SPLIT["Atualiza last_split_attempt_at = weight_seen\nChama Avaliacao de Split e Hoeffding Bound (Secao 4)"]
+    CHECK_GRACE -- "Sim" --> ATTEMPT_SPLIT["Atualiza last_split_attempt_at = weight_seen\nChama Avaliacao de Split e Hoeffding Bound (Secao 5)"]
     ATTEMPT_SPLIT --> END_LEARN
 ```
 
 ---
 
-## 4. Fluxograma de Avaliação de Split, Hoeffding Bound e Gerenciamento de Memória
+## 5. Fluxograma de Avaliação de Split, Hoeffding Bound e Gerenciamento de Memória
 
 Quando uma folha ativa acumula `grace_period` unidades de peso desde a última tentativa, ela avalia todos os observadores de atributos para decidir se deve dividir-se em dois novos filhos ([`ht_tree_attempt_split`](file:///home/julio/Documentos/pessoal_minimal-decision-tree/code/src/ht_tree.c#L517-L698) e [`ht_tree_attempt_split_reg`](file:///home/julio/Documentos/pessoal_minimal-decision-tree/code/src/ht_tree.c#L349-L515)).
 
@@ -243,7 +377,7 @@ flowchart TD
 
 ---
 
-## 5. Fluxograma de Detecção de Concept Drift (ADWIN2) e Adaptação (HAT / HAT-R)
+## 6. Fluxograma de Detecção de Concept Drift (ADWIN2) e Adaptação (HAT / HAT-R)
 
 Quando `enable_hat = true`, cada nó interno e folha mantém um detector **ADWIN2** baseado em histograma exponencial estático ([`ht_drift.h`](file:///home/julio/Documentos/pessoal_minimal-decision-tree/code/include/ht_drift.h)) e pode cultivar uma **subárvore alternativa** (`alt_tree_idx`) em background até que ela prove ser estatisticamente superior ao ramo principal.
 
@@ -287,7 +421,7 @@ flowchart TD
 
 ---
 
-## 6. Fluxograma de Serialização e Deploy (`ht_tree_save` e `ht_tree_load`)
+## 7. Fluxograma de Serialização e Deploy (`ht_tree_save` e `ht_tree_load`)
 
 Como toda a topologia usa índices inteiros `uint16_t` em vez de ponteiros de memória, a árvore pode ser gravada diretamente em Flash, EEPROM ou arquivo binário e recarregada em qualquer endereço de memória.
 
@@ -317,7 +451,7 @@ flowchart LR
 
 ---
 
-## 7. Mapa de Módulos e Arquivos do Código-Fonte (`code/`)
+## 8. Mapa de Módulos e Arquivos do Código-Fonte (`code/`)
 
 | Módulo | Header Público | Implementação | Responsabilidade Principal |
 | :--- | :--- | :--- | :--- |
