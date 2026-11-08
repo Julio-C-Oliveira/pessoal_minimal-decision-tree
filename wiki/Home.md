@@ -17,6 +17,8 @@ Bem-vindo à Wiki oficial do **Minimal Decision Tree**, uma implementação ultr
 ### 2. Internals, Arquitetura e Engenharia
 - **[Arquitetura e Fluxogramas](Arquitetura-e-Fluxogramas.md)**
   Por que Hoeffding Tree no lugar do CART, decisões de design em baixo nível, alocador determinístico *Slab/Pool* livre de ponteiros (`uint16_t`) e fluxogramas Mermaid completos (roteamento iterativo, ciclo *Test-Then-Train*, avaliação do *Hoeffding Bound*, reciclagem de memória e substituição de subárvores no `HAT`/`HAT-R`).
+- **[Origem: River, Scikit-Learn e Originalidade](Origem-River-Scikit-Learn-e-Originalidade.md)**
+  Genealogia técnica e matriz comparativa tripla: o que foi extraído da teoria de streaming do River (`online-ml/river`), o que veio do design de dados e otimização numérica do Scikit-Learn (`sklearn.tree`), e as inovações originais da biblioteca (zero `malloc`, separação topologia/estado, reciclagem imediata e serialização 16-bit).
 - **[Versionamento, Releases e Roadmap](Versionamento-Releases-e-Roadmap.md)**
   Arquitetura de versionamento SemVer 2.0.0 em C11 (`VERSION`, `HT_VERSION_*`, `ht_version()`), checklist para publicação de tags e releases no GitHub, e lista de trabalhos futuros e extensões do projeto.
 

@@ -9,4 +9,5 @@
 
 #### Internals e Engenharia
 * **[Arquitetura e Fluxogramas](Arquitetura-e-Fluxogramas)**
+* **[Origem: River, Sklearn e Originalidade](Origem-River-Scikit-Learn-e-Originalidade)**
 * **[Versionamento, Releases e Roadmap](Versionamento-Releases-e-Roadmap)**
