@@ -21,7 +21,7 @@ TEST_RUNNER = $(BUILD_DIR)/test_runner
 
 VERSION ?= $(shell cat ../VERSION 2>/dev/null || cat VERSION 2>/dev/null || echo "0.1.0")
 
-.PHONY: all lib test clean bench bench-triple bench-drift bench-regression directories version
+.PHONY: all lib test clean bench bench-triple bench-drift bench-regression bench-memory bench-main directories version
 
 version:
 	@echo "Minimal Decision Tree (libht) version $(VERSION)"
@@ -96,6 +96,23 @@ $(BENCH_MNIST_RUNNER): directories $(SRCS) $(BENCH_SRC)
 $(BENCH_MNIST_DOUBLE): directories $(SRCS) $(BENCH_SRC)
 	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -pedantic -Iinclude -DHT_USE_DOUBLE -DHT_MAX_CLASSES=10 -DHT_MAX_ACTIVE_LEAVES=128 -DHT_MAX_NODES=2048 $(SRCS) $(BENCH_SRC) $(LDFLAGS) -o $@
 
+BENCH_MAIN_RUNNER = $(BUILD_DIR)/bench_c_runner_main
+BENCH_MAIN_DOUBLE = $(BUILD_DIR)/bench_c_runner_main_double
+BENCH_RUNNER_8_MAIN = $(BUILD_DIR)/bench_c_runner_8_main
+BENCH_RUNNER_4_MAIN = $(BUILD_DIR)/bench_c_runner_4_main
+
+$(BENCH_MAIN_RUNNER): directories $(SRCS) $(BENCH_SRC)
+	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -pedantic -Iinclude -DHT_MAX_FEATURES=64 -DHT_MAX_CLASSES=8 -DHT_MAX_ACTIVE_LEAVES=40 -DHT_MAX_NODES=1024 $(SRCS) $(BENCH_SRC) $(LDFLAGS) -o $@
+
+$(BENCH_MAIN_DOUBLE): directories $(SRCS) $(BENCH_SRC)
+	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -pedantic -Iinclude -DHT_USE_DOUBLE -DHT_MAX_FEATURES=64 -DHT_MAX_CLASSES=8 -DHT_MAX_ACTIVE_LEAVES=40 -DHT_MAX_NODES=1024 $(SRCS) $(BENCH_SRC) $(LDFLAGS) -o $@
+
+$(BENCH_RUNNER_8_MAIN): directories $(SRCS) $(BENCH_SRC)
+	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -pedantic -Iinclude -DHT_MAX_FEATURES=64 -DHT_MAX_CLASSES=8 -DHT_MAX_ACTIVE_LEAVES=8 -DHT_MAX_NODES=128 $(SRCS) $(BENCH_SRC) $(LDFLAGS) -o $@
+
+$(BENCH_RUNNER_4_MAIN): directories $(SRCS) $(BENCH_SRC)
+	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -pedantic -Iinclude -DHT_MAX_FEATURES=64 -DHT_MAX_CLASSES=8 -DHT_MAX_ACTIVE_LEAVES=4 -DHT_MAX_NODES=64 $(SRCS) $(BENCH_SRC) $(LDFLAGS) -o $@
+
 bench: $(BENCH_RUNNER) $(BENCH_RUNNER_DOUBLE)
 	@echo "Executing Hoeffding Tree Parity & Memory Benchmark vs River..."
 	@if [ -x "$(PYTHON)" ]; then \
@@ -142,6 +159,32 @@ bench-memory: $(BENCH_MEMORY_RUNNERS) $(BENCH_RUNNER_DOUBLE)
 		$(PYTHON) ../benchmarks/compare_river.py --mode memory --bin-float $(BENCH_RUNNER) --bin-double $(BENCH_RUNNER_DOUBLE) --data-dir ../benchmarks/data --report-memory ../benchmarks/memory_benchmark_report.md; \
 	elif command -v python3 >/dev/null 2>&1; then \
 		python3 ../benchmarks/compare_river.py --mode memory --bin-float $(BENCH_RUNNER) --bin-double $(BENCH_RUNNER_DOUBLE) --data-dir ../benchmarks/data --report-memory ../benchmarks/memory_benchmark_report.md; \
+	else \
+		echo "Error: Python 3 with river not found!"; exit 1; \
+	fi
+
+bench-main: $(BENCH_RUNNER) $(BENCH_RUNNER_8) $(BENCH_RUNNER_4) $(BENCH_MAIN_RUNNER) $(BENCH_RUNNER_8_MAIN) $(BENCH_RUNNER_4_MAIN)
+	@echo "Executing Main Performance Benchmark Suite (8 Datasets, Multi-Tier C11)..."
+	@if [ -x "$(PYTHON)" ]; then \
+		$(PYTHON) ../benchmarks/main_benchmark/main_benchmark.py \
+			--bin-tier256 $(BENCH_RUNNER) \
+			--bin-tier8 $(BENCH_RUNNER_8) \
+			--bin-tier4 $(BENCH_RUNNER_4) \
+			--bin-main-tier256 $(BENCH_MAIN_RUNNER) \
+			--bin-main-tier8 $(BENCH_RUNNER_8_MAIN) \
+			--bin-main-tier4 $(BENCH_RUNNER_4_MAIN) \
+			--data-dir ../benchmarks/main_benchmark/data \
+			--report ../benchmarks/main_benchmark/main_benchmark_report.md; \
+	elif command -v python3 >/dev/null 2>&1; then \
+		python3 ../benchmarks/main_benchmark/main_benchmark.py \
+			--bin-tier256 $(BENCH_RUNNER) \
+			--bin-tier8 $(BENCH_RUNNER_8) \
+			--bin-tier4 $(BENCH_RUNNER_4) \
+			--bin-main-tier256 $(BENCH_MAIN_RUNNER) \
+			--bin-main-tier8 $(BENCH_RUNNER_8_MAIN) \
+			--bin-main-tier4 $(BENCH_RUNNER_4_MAIN) \
+			--data-dir ../benchmarks/main_benchmark/data \
+			--report ../benchmarks/main_benchmark/main_benchmark_report.md; \
 	else \
 		echo "Error: Python 3 with river not found!"; exit 1; \
 	fi

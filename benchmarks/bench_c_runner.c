@@ -12,7 +12,7 @@
  * Strictly adheres to C11 (-std=c11 -Wall -Wextra -Werror -pedantic) and zero malloc in runtime.
  */
 
-#define _POSIX_C_SOURCE 199309L
+#define _POSIX_C_SOURCE 200809L
 
 #include "ht_tree.h"
 #include <stdio.h>
@@ -21,6 +21,7 @@
 #include <stdbool.h>
 #include <time.h>
 #include <math.h>
+#include <sys/resource.h>
 
 #define MAX_LINE_LEN 2048
 #define MAX_CHECKPOINTS 1024
@@ -87,6 +88,28 @@ static void print_usage(const char *prog_name) {
     fprintf(stderr, "  --drift-window-threshold <N>      Min observations before switch (default: 300)\n");
     fprintf(stderr, "  --switch-significance <S>         Switch significance alpha (default: 0.05)\n");
     fprintf(stderr, "  --adwin-delta <D>                 ADWIN detector delta (default: 0.002)\n");
+}
+
+static long get_peak_rss_kb(void) {
+    FILE *f = fopen("/proc/self/status", "r");
+    if (f) {
+        char line[256];
+        while (fgets(line, sizeof(line), f)) {
+            if (strncmp(line, "VmHWM:", 6) == 0) {
+                long val = 0;
+                if (sscanf(line + 6, "%ld", &val) == 1) {
+                    fclose(f);
+                    return val;
+                }
+            }
+        }
+        fclose(f);
+    }
+    struct rusage ru;
+    if (getrusage(RUSAGE_SELF, &ru) == 0) {
+        return ru.ru_maxrss;
+    }
+    return 0;
 }
 
 int main(int argc, char *argv[]) {
@@ -504,6 +527,10 @@ int main(int argc, char *argv[]) {
 
     fclose(fp);
 
+    long train_rss_kb = get_peak_rss_kb();
+    long test_rss_kb = train_rss_kb;
+    long total_peak_rss_kb = train_rss_kb;
+
     /* Optional Holdout Test Evaluation (pure inference, no learning) */
     if (test_csv_path) {
         FILE *tfp = fopen(test_csv_path, "r");
@@ -571,6 +598,8 @@ int main(int argc, char *argv[]) {
             }
         }
         fclose(tfp);
+        test_rss_kb = get_peak_rss_kb();
+        total_peak_rss_kb = test_rss_kb;
     }
 
     /* Final statistics */
@@ -695,6 +724,9 @@ int main(int argc, char *argv[]) {
             fprintf(jfp, "  \"final_bytes_used\": %zu,\n", final_bytes);
             fprintf(jfp, "  \"total_time_us\": %.2f,\n", total_elapsed_us);
             fprintf(jfp, "  \"avg_time_per_sample_us\": %.3f,\n", final_avg_us);
+            fprintf(jfp, "  \"train_rss_kb\": %ld,\n", train_rss_kb);
+            fprintf(jfp, "  \"test_rss_kb\": %ld,\n", test_rss_kb);
+            fprintf(jfp, "  \"peak_rss_kb\": %ld,\n", total_peak_rss_kb);
             fprintf(jfp, "  \"checkpoints\": [\n");
 
             for (size_t c = 0; c < num_checkpoints; ++c) {
