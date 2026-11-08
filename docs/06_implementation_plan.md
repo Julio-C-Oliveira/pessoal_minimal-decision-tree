@@ -653,7 +653,7 @@ flowchart LR
 - Relatório consolidado gerado automaticamente em [`benchmarks/memory_benchmark_report.md`](file:///home/julio/Documentos/pessoal_minimal-decision-tree/benchmarks/memory_benchmark_report.md).
 
 ### Entrega 4.7: Main Benchmark Suite — Avaliação Realista de RAM e Multi-Tier C11 (`make bench-main`)
-- Suite principal de benchmark na raiz em `main_benchmark/` (com link simbólico `main benchmark/`) avaliando **8 datasets emblemáticos**:
+- Suite principal de benchmark na raiz em `main_benchmark/` avaliando **8 datasets emblemáticos**:
   - **Classificação (4):** SEA (Sintético), Electricity/Elec2 (Real), Forest Covertype (Real), Airlines Delay (Real).
   - **Regressão Contínua (4):** Friedman #1 (Sintético), Bikes (Real), Appliances Energy (Real), NYC Taxi (Real).
 - Metodologia de Avaliação Realista de Memória RAM:
