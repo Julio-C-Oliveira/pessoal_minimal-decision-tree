@@ -651,3 +651,21 @@ flowchart LR
   - **Determinismo e Zero Malloc:** Exatamente **0.0 KB** de heap dinâmico em todos os 7 perfis avaliados.
   - **Speedup vs River:** De **$196\times$ a mais de $466\times$** mais rápido que o River.
 - Relatório consolidado gerado automaticamente em [`benchmarks/memory_benchmark_report.md`](file:///home/julio/Documentos/pessoal_minimal-decision-tree/benchmarks/memory_benchmark_report.md).
+
+### Entrega 4.7: Main Benchmark Suite — Avaliação Realista de RAM e Multi-Tier C11 (`make bench-main`)
+- Suite principal de benchmark em `benchmarks/main_benchmark/` (com link simbólico `benchmarks/main benchmark/`) avaliando **8 datasets emblemáticos**:
+  - **Classificação (4):** SEA (Sintético), Electricity/Elec2 (Real), Forest Covertype (Real), Airlines Delay (Real).
+  - **Regressão Contínua (4):** Friedman #1 (Sintético), Bikes (Real), Appliances Energy (Real), NYC Taxi (Real).
+- Metodologia de Avaliação Realista de Memória RAM:
+  - **Scikit-Learn (CART Batch):** Ingestão completa do lote $N$ de treino de uma só vez na RAM (`model.fit`), capturando a pegada real de memória do paradigma batch ($129\text{ a }136\text{ MB}$ de Peak RSS).
+  - **River (Streaming):** Ingestão incremental $1$-a-$1$ com gerador Python linha a linha, medindo $129\text{ a }175\text{ MB}$ de Peak RSS (interpretador + estruturas Python) e intra-treino de até $13.9\text{ MB}$.
+  - **C11 (`libht`):** Ingestão streaming nativa de $1$ amostra por vez via buffer estático de $2\text{ KB}$, **0.0 KB de malloc em runtime**, atingindo Peak RSS de apenas **$2.7\text{ a }3.4\text{ MB}$** no SO.
+- Multi-Tier C11 por Macros de Compilação:
+  - **Tier 256 (256L / 4096N):** Capacidade máxima ($524.7\text{ KB}$ em `float32`, estritamente $\le 1\text{ MB}$).
+  - **Tier 8 (8L / 128N):** $16.6\text{ KB}$ a $90.3\text{ KB}$ de RAM total do modelo.
+  - **Tier 4 (4L / 64N):** $8.4\text{ KB}$ a $45.3\text{ KB}$ de RAM total do modelo.
+- Resultados Consolidados:
+  - Consistência de Acurácia: No SEA e Airlines, o Tier 8 atinge rigorosamente a mesma acurácia que o Tier 256 e River (SEA: 98.10%, Airlines: 76.96%).
+  - Superioridade em Streaming: No dataset Electricity, o C11 (64.34%) e River (64.34%) superam expressivamente o Scikit-Learn Batch (53.24%), comprovando a superioridade do modelo adaptativo a streams.
+  - Latência e Throughput: O C11 atinge **$0.32\text{ a }2.13\,\mu\text{s}$ por amostra**, garantindo speedups de **$200\times$ a mais de $3.000\times$** frente ao River em Python.
+- Relatório consolidado gerado automaticamente em [`benchmarks/main_benchmark/main_benchmark_report.md`](file:///home/julio/Documentos/pessoal_minimal-decision-tree/benchmarks/main_benchmark/main_benchmark_report.md).
