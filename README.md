@@ -78,7 +78,13 @@ int main(void) {
 
 ---
 
-## 3. Resumo de Consumo de Memória (RAM & Flash)
+## 3. Consumo de Memória e Desempenho Comparativo
+
+A biblioteca foi avaliada empiricamente contra duas referências consolidadas da literatura: o **[`online-ml/river`](https://github.com/online-ml/river)** (padrão de referência para aprendizado em streaming contínuo em Python/Cython) e o **[`scikit-learn`](https://scikit-learn.org)** (baseline em lote / *batch* CART).
+
+Esta seção reúne o consumo de memória (RAM e Flash) e os resultados de desempenho, na seguinte ordem: **3.1** footprint estático por perfil de hardware, **3.2** resumo do *Main Benchmark* (8 datasets), **3.3** e **3.4** benchmarks sintéticos de classificação e regressão, e **3.5** avaliação no MNIST.
+
+### 3.1 Resumo de Consumo de Memória (RAM & Flash)
 
 O footprint de RAM de `ht_tree_t` é dimensionado estaticamente em tempo de compilação via flags `-D` (veja todos os detalhes em **[Referência de Parâmetros e Macros](wiki/Referencia-de-Parametros-e-Macros.md)** e **[Orçamento de Memória e Cross-Compilation](wiki/Orcamento-de-Memoria-e-Cross-Compilation.md)**):
 
@@ -92,19 +98,65 @@ O footprint de RAM de `ht_tree_t` é dimensionado estaticamente em tempo de comp
 
 ---
 
-## 4. Desempenho e Benchmarks Comparativos
+### 3.2 Main Benchmark: Resumo dos Resultados em 8 Datasets
 
-A biblioteca foi avaliada empiricamente contra duas referências consolidadas da literatura: o **[`online-ml/river`](https://github.com/online-ml/river)** (padrão de referência para aprendizado em streaming contínuo em Python/Cython) e o **[`scikit-learn`](https://scikit-learn.org)** (baseline em lote / *batch* CART).
+Suíte principal de desempenho ([`main_benchmark/`](main_benchmark/), relatório completo com análise crítica por dataset em [`main_benchmark_report.md`](main_benchmark/main_benchmark_report.md)), com **4 datasets de classificação** (SEA, Electricity, Forest Covertype, Airlines) e **4 de regressão** (Friedman #1, Bikes, Appliances Energy, NYC Taxi). Reproduza com `make bench-main`.
 
-Para ilustrar o comportamento em hardware embarcado, os testes destacam dois limites operacionais:
-- **Tier 256 (Padrão do Repositório / $\le 524{,}7\text{ KB}$ RAM):** 256 folhas ativas e 4.096 nós estruturais, para MCUs de médio/alto porte ($\le 1\text{ MB}$ de SRAM, como ESP32, RP2040/RP2350, STM32F4/F7/H7).
-- **Tier 8 (Perfil Ultra-Restrito / $\approx 16{,}6\text{ KB}$ RAM):** 8 folhas ativas e 128 nós estruturais, para microcontroladores ultrarrestritos (16 a 32 KB de SRAM, como ARM Cortex-M0+, SAMD21, MSP430, AVR estendido).
+**Protocolo:** as três soluções treinam sobre o mesmo volume $N$ de amostras. O **Scikit-Learn** recebe todo o lote de treino de uma só vez (`fit()` batch) e o **River** e o **C11** consomem o fluxo **1 amostra por vez**. A memória é medida como o **Peak RSS real do processo** no SO (treino + teste), além da RAM intra-treino (modelo + heap). O C11 é avaliado em três tiers de capacidade estática:
+
+| Tier | Capacidade | RAM do modelo (`float32`) |
+| :--- | :---: | :---: |
+| **Tier 256** | 256 folhas / 4.096 nós | $\approx 473\text{–}525\text{ KB}$ |
+| **Tier 8** | 8 folhas / 128 nós | $\approx 16{,}6\text{–}90{,}3\text{ KB}$ |
+| **Tier 4** | 4 folhas / 64 nós | $\approx 8{,}4\text{–}45{,}3\text{ KB}$ |
+
+*(Os valores de 473 KB, 90,3 KB e 45,3 KB correspondem ao Forest Covertype e ao Appliances Energy, compilados com 64 atributos / 8 classes; os demais datasets usam o perfil padrão de 16 atributos / 4 classes.)*
+
+#### Acurácia Holdout (Classificação) e MAE Holdout com $R^2$ (Regressão)
+
+| Dataset | Métrica | Scikit-Learn (Batch) | River (Streaming) | C11 Tier 256 | C11 Tier 8 | C11 Tier 4 |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: |
+| **SEA** | Acurácia | **99,20%** | 98,10% | 98,10% | 98,10% | 97,03% |
+| **Electricity** | Acurácia | 53,24% | **64,34%** | **64,34%** | **64,34%** | **64,34%** |
+| **Forest Covertype** | Acurácia | **87,08%** | 52,65% | 52,65% | 52,65% | 52,65% |
+| **Airlines** | Acurácia | 67,04% | **76,96%** | **76,96%** | **76,96%** | **76,96%** |
+| **Friedman #1** | MAE ($R^2$) | 1,7002 (0,813) | **1,6722** (0,819) | 1,8094 (0,786) | 2,2983 (0,665) | 2,4320 (0,623) |
+| **Bikes** | MAE ($R^2$) | **14,92** (0,897) | 61,21 (−0,611) | 57,34 (−0,477) | 51,40 (−0,042) | 54,03 (−0,033) |
+| **Appliances Energy** | MAE ($R^2$) | 34,09 (0,675) | **27,46** (0,784) | 28,00 (0,775) | 32,61 (0,688) | 39,16 (0,564) |
+| **NYC Taxi** | MAE ($R^2$) | 335,24 (0,146) | 368,98 (0,084) | **335,47** (0,215) | 353,13 (0,142) | 355,38 (0,126) |
+
+#### Consumo de Memória e Velocidade (faixa observada nos 8 datasets)
+
+| Métrica | Scikit-Learn (Batch) | River (Streaming) | C11 Tier 256 | C11 Tier 8 | C11 Tier 4 |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| **RAM Intra-Treino (Modelo + Heap)** | 1.024 – 8.468 KB | 314 – 13.963 KB | 473 – 525 KB | 16,6 – 90,3 KB | 8,4 – 45,3 KB |
+| **Peak RSS Total do Processo (SO)** | 129,5 – 137,0 MB | 129,7 – 175,9 MB | 3,2 – 3,3 MB | 2,8 – 2,9 MB | 2,7 – 2,8 MB |
+| **Heap Dinâmico em Runtime** | Alocação dinâmica | Alocação dinâmica | **0,0 KB** | **0,0 KB** | **0,0 KB** |
+| **Tempo por Amostra** | 3 – 39 µs | 145 – 3.663 µs | 0,55 – 13,45 µs | 0,40 – 14,03 µs | 0,31 – 13,46 µs |
+| **Speedup vs River** | — | 1,0x | 206x – 1.078x | 261x – 1.708x | 272x – 2.476x |
+
+> [!TIP]
+> **Principais conclusões do Main Benchmark:**
+> - **Streaming vence sob *concept drift* temporal:** em **Electricity** e **Airlines**, River e C11 superam o CART batch em $+11{,}1$ e $+9{,}9$ pontos percentuais (o CART sobreajusta ao passado, com 13.547 e 6.363 nós contra 11 a 21 nós do C11), e até o **Tier 4 (8,4 KB)** mantém a mesma acurácia do Tier 256.
+> - **Tier 8 como ponto de equilíbrio:** reproduz a acurácia do Tier 256 em todos os 4 datasets de classificação com $\approx 31\times$ menos RAM de modelo (16,6 KB vs 524,7 KB) e, no **Appliances Energy**, supera o Scikit-Learn em erro com $\approx 78\times$ menos RAM intra-treino (90,3 KB vs 7.107 KB).
+> - **Footprint real do processo:** o C11 ocupa **2,7 a 3,3 MB de Peak RSS** contra **$\approx 130$ a $176\text{ MB}$** de Scikit-Learn e River (redução de $\approx 39\times$ a $65\times$), com **0,0 KB de heap** em runtime e speedup de **$206\times$ a $2.476\times$** sobre o River. O tempo por amostra sobe para $\approx 13\text{–}14\,\mu\text{s}$ apenas no Forest Covertype (54 atributos × 7 classes).
+> - **Regressão em RAM reduzida degrada de forma gradual:** no Friedman #1, o $R^2$ cai de 0,786 (Tier 256) para 0,665 (Tier 8) e 0,623 (Tier 4), um *trade-off* explícito entre memória e capacidade de aproximar superfícies não lineares.
+
+> [!WARNING]
+> **Onde o modelo de streaming perde (resultados desfavoráveis, reportados sem filtro):**
+> - **Forest Covertype (7 classes, 54 atributos):** River e C11 estagnam em **52,65%** com **1 único nó** (nenhum split dentro das amostras disponíveis com $\delta$ e $\tau$ padrão), contra **87,08%** do CART batch. É necessário ajustar hiperparâmetros (ex.: $\tau$ maior) para este perfil.
+> - **Bikes (atributos em escalas brutas distintas):** o CART batch atinge $R^2 = 0{,}897$, enquanto River ($-0{,}611$) e C11 ($-0{,}477$ no Tier 256) ficam abaixo do preditor constante, indicando instabilidade das folhas lineares SGD sem normalização prévia dos atributos.
+> - **SEA:** o CART batch mantém vantagem marginal de $+1{,}1$ ponto percentual (99,20% vs 98,10%).
+> - **RAM intra-treino do Tier 256:** o modelo estático do Tier 256 (473–525 KB) não é menor que o do River em árvores pequenas (River: 314–787 KB em 5 dos 8 datasets). A vantagem do C11 está no Peak RSS do processo, no heap nulo, na velocidade e nos Tiers 8 e 4.
 
 ---
 
-### 4.1 Desempenho em Classificação em Streaming: Tier 256 vs Tier 8
+### 3.3 Desempenho em Classificação em Streaming: Tier 256 vs Tier 8
 
 Em fluxos com atributos contínuos e categóricos (SEA, Agrawal, Hyperplane e LED), a árvore C11 alcança **paridade estatística exata** com o River e demonstra que o mecanismo de **Desativação por Promessa** (*Promise Deactivation*) preserva integralmente a acurácia no **Tier 8** consumindo **$31\times$ menos RAM**:
+
+- **Tier 256 (Padrão do Repositório / $\le 524{,}7\text{ KB}$ RAM):** 256 folhas ativas e 4.096 nós estruturais, para MCUs de médio/alto porte ($\le 1\text{ MB}$ de SRAM, como ESP32, RP2040/RP2350, STM32F4/F7/H7).
+- **Tier 8 (Perfil Ultra-Restrito / $\approx 16{,}6\text{ KB}$ RAM):** 8 folhas ativas e 128 nós estruturais, para microcontroladores ultrarrestritos (16 a 32 KB de SRAM, como ARM Cortex-M0+, SAMD21, MSP430, AVR estendido).
 
 | Fluxo / Dataset | Algoritmo / Perfil de Memória | Acurácia Teste (%) | F1-Score Macro (%) | Acurácia Prequential (%) | Total Nós | Folhas Ativas | RAM Estática Modelo | Pico Heap Dinâmico | Tempo/amostra (µs) | Speedup vs River |
 | :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
@@ -132,7 +184,7 @@ Em fluxos com atributos contínuos e categóricos (SEA, Agrawal, Hyperplane e LE
 
 ---
 
-### 4.2 Desempenho em Regressão Contínua e Concept Drift: Tier 256 vs Tier 8
+### 3.4 Desempenho em Regressão Contínua e Concept Drift: Tier 256 vs Tier 8
 
 Avaliando tarefas de regressão numérica (Friedman #1 e Planes2D) e fluxos sujeitos a *concept drift* abrupto (HAT-R com detectores ADWIN2 e teste Z bilateral de variância):
 
@@ -157,7 +209,7 @@ Avaliando tarefas de regressão numérica (Friedman #1 e Planes2D) e fluxos suje
 
 ---
 
-### 4.3 Avaliação no MNIST: Por que Árvores de Streaming Não São Recomendadas para Dados Não-Tabulares?
+### 3.5 Avaliação no MNIST: Por que Árvores de Streaming Não São Recomendadas para Dados Não-Tabulares?
 
 Para mapear os limites teóricos e práticos do paradigma VFDT em problemas de visão computacional, o modelo foi submetido ao benchmark triplo no **MNIST** (com *average pooling* espacial $4 \times 4$, reduzindo a imagem de $28 \times 28$ para 16 atributos contínuos normalizados):
 
@@ -187,31 +239,31 @@ Para mapear os limites teóricos e práticos do paradigma VFDT em problemas de v
 
 ---
 
-## 5. Limitações e Pontos Fracos do Modelo
+## 4. Limitações e Pontos Fracos do Modelo
 
 Embora a implementação ofereça latência sub-microssegundo e opere com determinismo estrito de memória em microcontroladores ($\le 1\text{ MB}$ de RAM com 0,0 KB de heap dinâmico), o modelo e a arquitetura impõem compromissos (*trade-offs*) importantes que devem ser avaliados no dimensionamento da solução:
 
-### 5.1 Limitações Algorítmicas do Paradigma de Streaming (VFDT / Hoeffding Bound)
+### 4.1 Limitações Algorítmicas do Paradigma de Streaming (VFDT / Hoeffding Bound)
 - **Atraso Amostral no Crescimento da Árvore (*Sample Inefficiency*):** O critério estatístico do Limite de Hoeffding $\epsilon = \sqrt{\frac{R^2 \ln(1/\delta)}{2n}}$ é rigoroso e conservador. Em datasets pequenos ($< 1.000$ amostras) ou regimes de dados esparsos, o modelo demora centenas de amostras para realizar os primeiros splits, enquanto um algoritmo em lote (CART) já construiria uma árvore profunda imediatamente.
 - **Dificuldade em Atributos Fortemente Concorrentes (*Tie-Breaking* $\tau$):** Quando dois atributos apresentam ganhos de impureza idênticos ($\Delta \bar{G} \approx 0$), o split só ocorre quando $\epsilon < \tau$, o que pode exigir dezenas de milhares de amostras para desempatar, retardando o aprendizado local.
 - **Divisões Estritamente Ortogonais (Eixo-Alinhadas):** As decisões de split particionam o espaço exclusivamente por limiares paralelos aos eixos ($X_f \le \theta$). Para fronteiras diagonais ou funções com rotação linear contínua (ex: $X_1 + X_2 > c$), a árvore necessita de dezenas de nós em padrão de escada para aproximar o que um modelo linear simples resolveria com uma única equação.
 - **Hipótese de Gaussianidade Unimodal para Variáveis Contínuas:** Os observadores numéricos de Welford aproximam cada atributo por $\mathcal{N}(\mu, \sigma^2)$ condicionado à classe. Em distribuições multimodais, fortemente enviesadas ou com caudas pesadas, as sugestões de pontos de corte e as probabilidades do Naive Bayes podem sofrer imprecisão.
 - **Ausência de Poda Retrospectiva (*Post-Pruning*) no VFDT Estático:** Na versão estática (VFDT), decisões de split tomadas no início do fluxo são irrevogáveis (não há *cost-complexity pruning* como no CART). Apenas a variante adaptativa (HAT / HAT-R) possui capacidade de substituição de ramos obsoletos ao detectar drift.
 
-### 5.2 Limitações de Firmware e Dimensionamento Estático em C11
+### 4.2 Limitações de Firmware e Dimensionamento Estático em C11
 - **Rigidez em Tempo de Compilação (Zero Dimensionamento Dinâmico em Runtime):** A capacidade máxima de nós (`HT_MAX_NODES`), folhas ativas (`HT_MAX_ACTIVE_LEAVES`), atributos (`HT_MAX_FEATURES`), classes (`HT_MAX_CLASSES`) e categorias nominais (`HT_MAX_CATEGORIES`) é fixada na compilação via macros. Alterar dimensões do problema exige recompilar o firmware.
 - **Degradação de Aprendizado sob Esgotamento do Pool de Folhas:** Em perfis com extrema restrição de RAM (como o Tier 8, limitado a 8 folhas ativas), quando a capacidade é atingida o algoritmo desativa as folhas menos promissoras. Embora preserve as folhas ativas com NBA, folhas inativas não geram novos ramos até que sejam reativadas.
 - **Processamento Single-Core Sequencial:** O núcleo C11 é 100% sequencial, livre de chamadas de threads (`pthread`), primitivas de sincronização (`mutex`) ou alocação dinâmica. Aplicações multi-core embarcadas (ex: RP2040 dual-core ou ESP32) devem isolar instâncias independentes por núcleo.
 - **Sem Pipelines Internos de Pré-Processamento:** O modelo espera que os dados de entrada já estejam normalizados, discretizados (para atributos categóricos) e validados pelo firmware. Não há rotinas embutidas de *One-Hot Encoding*, redução de dimensionalidade (PCA) ou imputação avançada.
 
-### 5.3 Inadequação para Dados Não-Tabulares e Alta Cardinalidade
+### 4.3 Inadequação para Dados Não-Tabulares e Alta Cardinalidade
 - **Incompatibilidade Prática com Imagens, Áudio e Texto (Dados Não-Tabulares):** Conforme demonstrado no benchmark do MNIST, árvores ortogonais não capturam dependências espaciais 2D, e o Naive Bayes das folhas quebra gravemente com pixels vizinhos fortemente correlacionados.
 - **Limite Fixo para Variáveis Categóricas:** A macro `HT_MAX_CATEGORIES` (padrão 8) impede o tratamento direto de variáveis categóricas de alta cardinalidade (ex: CEPs, IDs de dispositivos, hashes).
 
-### 5.4 Precisão de Ponto Flutuante em Fluxos Ultra-Longos
+### 4.4 Precisão de Ponto Flutuante em Fluxos Ultra-Longos
 - **Sensibilidade de Cancelamento em `float32`:** Embora suficiente para microcontroladores com FPU simples, somatórios acumulados de Welford ao longo de centenas de milhões de amostras em `float32` podem acumular erro de arredondamento em casos de variância ínfima somada a médias elevadas ($\sigma^2 \ll \mu^2$).
 
-### 5.5 Matriz de Decisão: Quando Usar vs Quando Evitar
+### 4.5 Matriz de Decisão: Quando Usar vs Quando Evitar
 
 | Cenário / Requisito | Usar Hoeffding Tree C11? | Abordagem Alternativa Recomendada |
 | :--- | :---: | :--- |
@@ -225,7 +277,7 @@ Embora a implementação ofereça latência sub-microssegundo e opere com determ
 
 ---
 
-## 6. Documentação Completa (Wiki, Estudos e Benchmarks)
+## 5. Documentação Completa (Wiki, Estudos e Benchmarks)
 
 Toda a documentação detalhada do projeto está organizada na pasta **[`wiki/`](wiki/Home.md)** (sincronizada com a aba **Wiki** do GitHub), além dos estudos teóricos em `docs/` e relatórios em `benchmarks/`:
 
@@ -247,7 +299,7 @@ Toda a documentação detalhada do projeto está organizada na pasta **[`wiki/`]
 
 ---
 
-## 7. Estrutura do Repositório
+## 6. Estrutura do Repositório
 
 ```text
 pessoal_minimal-decision-tree/
@@ -265,6 +317,6 @@ pessoal_minimal-decision-tree/
 
 ---
 
-## 8. Licença (`BSD 3-Clause`)
+## 7. Licença (`BSD 3-Clause`)
 
 Distribuído sob a licença permissiva **[BSD 3-Clause License](LICENSE)** (`SPDX-License-Identifier: BSD-3-Clause`), permitindo uso livre acadêmico, pessoal ou comercial (em código-fonte ou firmware binário) e preservando integralmente os avisos de direitos autorais dos projetos de referência **River** ([`references/river_tree/LICENSE`](references/river_tree/LICENSE)) e **Scikit-Learn** ([`references/sklearn_tree/COPYING`](references/sklearn_tree/COPYING)).
