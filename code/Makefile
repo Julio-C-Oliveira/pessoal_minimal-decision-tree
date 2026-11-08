@@ -166,25 +166,25 @@ bench-memory: $(BENCH_MEMORY_RUNNERS) $(BENCH_RUNNER_DOUBLE)
 bench-main: $(BENCH_RUNNER) $(BENCH_RUNNER_8) $(BENCH_RUNNER_4) $(BENCH_MAIN_RUNNER) $(BENCH_RUNNER_8_MAIN) $(BENCH_RUNNER_4_MAIN)
 	@echo "Executing Main Performance Benchmark Suite (8 Datasets, Multi-Tier C11)..."
 	@if [ -x "$(PYTHON)" ]; then \
-		$(PYTHON) ../benchmarks/main_benchmark/main_benchmark.py \
+		$(PYTHON) ../main_benchmark/main_benchmark.py \
 			--bin-tier256 $(BENCH_RUNNER) \
 			--bin-tier8 $(BENCH_RUNNER_8) \
 			--bin-tier4 $(BENCH_RUNNER_4) \
 			--bin-main-tier256 $(BENCH_MAIN_RUNNER) \
 			--bin-main-tier8 $(BENCH_RUNNER_8_MAIN) \
 			--bin-main-tier4 $(BENCH_RUNNER_4_MAIN) \
-			--data-dir ../benchmarks/main_benchmark/data \
-			--report ../benchmarks/main_benchmark/main_benchmark_report.md; \
+			--data-dir ../main_benchmark/data \
+			--report ../main_benchmark/main_benchmark_report.md; \
 	elif command -v python3 >/dev/null 2>&1; then \
-		python3 ../benchmarks/main_benchmark/main_benchmark.py \
+		python3 ../main_benchmark/main_benchmark.py \
 			--bin-tier256 $(BENCH_RUNNER) \
 			--bin-tier8 $(BENCH_RUNNER_8) \
 			--bin-tier4 $(BENCH_RUNNER_4) \
 			--bin-main-tier256 $(BENCH_MAIN_RUNNER) \
 			--bin-main-tier8 $(BENCH_RUNNER_8_MAIN) \
 			--bin-main-tier4 $(BENCH_RUNNER_4_MAIN) \
-			--data-dir ../benchmarks/main_benchmark/data \
-			--report ../benchmarks/main_benchmark/main_benchmark_report.md; \
+			--data-dir ../main_benchmark/data \
+			--report ../main_benchmark/main_benchmark_report.md; \
 	else \
 		echo "Error: Python 3 with river not found!"; exit 1; \
 	fi

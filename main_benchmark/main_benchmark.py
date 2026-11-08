@@ -330,7 +330,7 @@ def generate_markdown_report(report_path: str, results: List[Dict[str, Any]]):
         # Regression Table
         f.write("\n## 3. Resultados em Regressão Contínua (4 Datasets)\n\n")
         f.write("| Dataset | Modelo / Tier | Holdout MAE | Holdout RMSE | Holdout $R^2$ | Prequential MAE | Total Nós | RAM Intra-Treino (Mod+Heap) | RSS Treino (MB) | RSS Teste (MB) | RSS Total (MB) | Tempo/amostra ($\\mu$s) | Speedup vs River |\n")
-        f.write("| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |\n")
+        f.write("| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |\n")
 
         for r in results:
             if r["task"] != "regression":

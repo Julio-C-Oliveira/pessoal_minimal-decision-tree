@@ -35,11 +35,12 @@ A suíte é dividida balanceadamente entre **Classificação** (4 fluxos) e **Re
 ## 2. Estrutura de Arquivos
 
 ```
-benchmarks/main_benchmark/
+main_benchmark/ (ou pasta "main benchmark/")
 ├── main_benchmark.py           # Orquestrador principal da avaliação tripla (C11 vs River vs Scikit-Learn)
 ├── prepare_datasets.py         # Gerador e formatador padronizado dos 8 datasets
 ├── README.md                   # Este documento explicativo
 ├── main_benchmark_report.md    # Relatório detalhado gerado com tabelas de acurácia, nós, RAM e speedup
+├── runners/                    # Scripts isolados de execução para Scikit-Learn e River
 └── data/                       # Arquivos CSV formatados com metadados para ingestão direta
     ├── sea_train.csv / sea_test.csv
     ├── electricity_train.csv / electricity_test.csv
@@ -68,18 +69,18 @@ make -C code bench-main
 ### Execução Direta via Python
 Para executar todos os 8 datasets e gerar o relatório Markdown:
 ```bash
-./.venv/bin/python benchmarks/main_benchmark/main_benchmark.py
+./.venv/bin/python main_benchmark/main_benchmark.py
 ```
 
 Para executar um único dataset específico (ex: SEA ou Bikes):
 ```bash
-./.venv/bin/python benchmarks/main_benchmark/main_benchmark.py --dataset sea
-./.venv/bin/python benchmarks/main_benchmark/main_benchmark.py --dataset bikes
+./.venv/bin/python main_benchmark/main_benchmark.py --dataset sea
+./.venv/bin/python main_benchmark/main_benchmark.py --dataset bikes
 ```
 
 Para re-gerar ou atualizar os arquivos CSV de dados:
 ```bash
-./.venv/bin/python benchmarks/main_benchmark/prepare_datasets.py
+./.venv/bin/python main_benchmark/prepare_datasets.py
 ```
 *(Para tentar baixar versões remotas completas do River/OpenML caso haja conexão de rede, utilize `--download`)*.
 
