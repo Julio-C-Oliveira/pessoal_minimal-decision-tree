@@ -21,7 +21,7 @@ TEST_RUNNER = $(BUILD_DIR)/test_runner
 
 VERSION ?= $(shell cat ../VERSION 2>/dev/null || cat VERSION 2>/dev/null || echo "0.1.0")
 
-.PHONY: all lib test clean bench bench-triple bench-drift bench-regression bench-memory bench-main directories version
+.PHONY: all lib test clean bench bench-triple bench-drift bench-regression bench-memory bench-main bench-esp32 directories version
 
 version:
 	@echo "Minimal Decision Tree (libht) version $(VERSION)"
@@ -188,6 +188,10 @@ bench-main: $(BENCH_RUNNER) $(BENCH_RUNNER_8) $(BENCH_RUNNER_4) $(BENCH_MAIN_RUN
 	else \
 		echo "Error: Python 3 with river not found!"; exit 1; \
 	fi
+
+bench-esp32:
+	@echo "Executing ESP32 QEMU Emulation Benchmark..."
+	@bash ../emulation/esp32/run_qemu.sh bench
 
 clean:
 	rm -rf $(BUILD_DIR)
