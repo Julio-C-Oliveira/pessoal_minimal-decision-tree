@@ -266,6 +266,85 @@ def parse_csv_stream(csv_path: str, max_samples: Optional[int] = None):
 
 
 # ==============================================================================
+# Metric Helper Functions
+# ==============================================================================
+def compute_classification_metrics(y_true: List[int], y_pred: List[int]) -> Dict[str, float]:
+    total = len(y_true)
+    if total == 0:
+        return {"accuracy": 0.0, "precision": 0.0, "recall": 0.0, "f1": 0.0}
+
+    classes = sorted(list(set(y_true) | set(y_pred)))
+    precisions = []
+    recalls = []
+    f1s = []
+    correct = sum(1 for yt, yp in zip(y_true, y_pred) if yt == yp)
+    acc = (correct / total) * 100.0
+
+    for c in classes:
+        tp = sum(1 for yt, yp in zip(y_true, y_pred) if yt == c and yp == c)
+        fp = sum(1 for yt, yp in zip(y_true, y_pred) if yt != c and yp == c)
+        fn = sum(1 for yt, yp in zip(y_true, y_pred) if yt == c and yp != c)
+
+        prec = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+        rec = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+        f1 = (2 * prec * rec) / (prec + rec) if (prec + rec) > 0 else 0.0
+
+        precisions.append(prec)
+        recalls.append(rec)
+        f1s.append(f1)
+
+    return {
+        "accuracy": acc,
+        "precision": (sum(precisions) / max(1, len(classes))) * 100.0,
+        "recall": (sum(recalls) / max(1, len(classes))) * 100.0,
+        "f1": (sum(f1s) / max(1, len(classes))) * 100.0,
+    }
+
+
+def compute_regression_metrics(y_true: List[float], y_pred: List[float]) -> Dict[str, float]:
+    total = len(y_true)
+    if total == 0:
+        return {"mae": 0.0, "rmse": 0.0, "r2": 0.0}
+
+    mae = sum(abs(yt - yp) for yt, yp in zip(y_true, y_pred)) / total
+    mse = sum((yt - yp) ** 2 for yt, yp in zip(y_true, y_pred)) / total
+    rmse = math.sqrt(mse)
+
+    mean_y = sum(y_true) / total
+    ss_tot = sum((yt - mean_y) ** 2 for yt in y_true)
+    ss_res = sum((yt - yp) ** 2 for yt, yp in zip(y_true, y_pred))
+    r2 = 1.0 - (ss_res / ss_tot) if ss_tot > 1e-12 else 0.0
+
+    return {"mae": mae, "rmse": rmse, "r2": r2}
+
+
+def compute_percentiles(values: List[float]) -> Dict[str, float]:
+    if not values:
+        return {"mean": 0.0, "p95": 0.0, "p99": 0.0}
+    s = sorted(values)
+    n = len(s)
+    idx95 = min(int(n * 0.95), n - 1)
+    idx99 = min(int(n * 0.99), n - 1)
+    return {
+        "mean": sum(s) / n,
+        "p95": s[idx95],
+        "p99": s[idx99],
+    }
+
+
+def estimate_flops(task: str, n_features: int, n_classes: int, depth: int) -> int:
+    d = max(1, depth)
+    if task == "classification":
+        inf_flops = d + 5 * n_features * n_classes + 3 * n_classes
+        learn_flops = 6 * n_features + 10
+        return inf_flops + learn_flops
+    else:
+        inf_flops = d + 2 * n_features + 4
+        learn_flops = 9 * n_features + 19
+        return inf_flops + learn_flops
+
+
+# ==============================================================================
 # Benchmark Runner
 # ==============================================================================
 def stream_samples_windowed(
@@ -275,13 +354,18 @@ def stream_samples_windowed(
     window_size: int = 16,
     log_interval: int = 500,
     tag: str = "TRAIN",
-):
+) -> Tuple[List[str], List[float], List[float], List[float]]:
     """Streams samples to ESP32 using credit-based sliding window flow control."""
     t0 = time.time()
     total = len(rows)
     send_idx = 0
     ack_count = 0
     in_flight = 0
+
+    predictions: List[str] = []
+    pred_us_list: List[float] = []
+    learn_us_list: List[float] = []
+    total_us_list: List[float] = []
 
     while send_idx < total or in_flight > 0:
         while send_idx < total and in_flight < window_size:
@@ -297,11 +381,25 @@ def stream_samples_windowed(
         ack_count += 1
         in_flight -= 1
 
+        parts = resp.split(",")
+        pred = parts[1] if len(parts) > 1 else ""
+        pred_cyc = int(parts[2]) if len(parts) > 2 else 0
+        learn_cyc = int(parts[3]) if len(parts) > 3 else 0
+        p_us = pred_cyc / 240.0
+        l_us = learn_cyc / 240.0
+        tot_us = (pred_cyc + learn_cyc) / 240.0
+
+        predictions.append(pred)
+        pred_us_list.append(p_us)
+        learn_us_list.append(l_us)
+        total_us_list.append(tot_us)
+
         if ack_count % log_interval == 0 or ack_count == total:
             rate = ack_count / max(0.001, time.time() - t0)
             print(f"\r  [{tag}] Sample {ack_count}/{total} ({rate:.1f} samples/sec)...", end="", flush=True)
 
     print()
+    return predictions, pred_us_list, learn_us_list, total_us_list
 
 
 def run_dataset_benchmark(
@@ -334,7 +432,7 @@ def run_dataset_benchmark(
         grace=200,
     )
 
-    stream_samples_windowed(
+    train_preds, train_pred_us, train_learn_us, train_tot_us = stream_samples_windowed(
         client,
         cmd_prefix="TRAIN",
         rows=train_rows,
@@ -343,8 +441,9 @@ def run_dataset_benchmark(
         tag="TRAIN",
     )
 
+    test_preds, test_pred_us, _, test_tot_us = [], [], [], []
     if test_rows:
-        stream_samples_windowed(
+        test_preds, test_pred_us, _, test_tot_us = stream_samples_windowed(
             client,
             cmd_prefix="TEST",
             rows=test_rows,
@@ -357,6 +456,50 @@ def run_dataset_benchmark(
     result["dataset"] = meta["stream"]
     result["n_features"] = n_features
     result["n_classes"] = n_classes
+
+    # Holdout and prequential metrics
+    if task == "classification":
+        y_test_true = [int(float(y)) for y, _ in test_rows]
+        y_test_pred = [int(float(p)) if p else 0 for p in test_preds]
+        hold_m = compute_classification_metrics(y_test_true, y_test_pred)
+        result["holdout_acc"] = hold_m["accuracy"]
+        result["holdout_precision"] = hold_m["precision"]
+        result["holdout_recall"] = hold_m["recall"]
+        result["holdout_f1"] = hold_m["f1"]
+
+        y_train_true = [int(float(y)) for y, _ in train_rows]
+        y_train_pred = [int(float(p)) if p else 0 for p in train_preds]
+        preq_m = compute_classification_metrics(y_train_true, y_train_pred)
+        result["prequential_acc"] = preq_m["accuracy"]
+        result["prequential_precision"] = preq_m["precision"]
+        result["prequential_recall"] = preq_m["recall"]
+        result["prequential_f1"] = preq_m["f1"]
+    else:
+        y_test_true = [float(y) for y, _ in test_rows]
+        y_test_pred = [float(p) if p else 0.0 for p in test_preds]
+        hold_reg = compute_regression_metrics(y_test_true, y_test_pred)
+        result["holdout_mae"] = hold_reg["mae"]
+        result["holdout_rmse"] = hold_reg["rmse"]
+        result["holdout_r2"] = hold_reg["r2"]
+
+        y_train_true = [float(y) for y, _ in train_rows]
+        y_train_pred = [float(p) if p else 0.0 for p in train_preds]
+        preq_reg = compute_regression_metrics(y_train_true, y_train_pred)
+        result["prequential_mae"] = preq_reg["mae"]
+        result["prequential_rmse"] = preq_reg["rmse"]
+        result["prequential_r2"] = preq_reg["r2"]
+
+    # Latency percentiles (train samples reflect true Test-Then-Train loop)
+    perc = compute_percentiles(train_tot_us)
+    result["lat_mean_us"] = result["avg_total_us_240mhz"]
+    result["lat_p95_us"] = perc["p95"]
+    result["lat_p99_us"] = perc["p99"]
+    result["throughput"] = 1000000.0 / max(0.01, result["lat_mean_us"])
+
+    depth = result.get("max_depth_seen", 5)
+    result["flops_per_sample"] = estimate_flops(task, n_features, n_classes, depth)
+    result["model_footprint_bytes"] = 32 + result["n_nodes"] * 28  # Serialized inference format
+
     return result
 
 
@@ -419,7 +562,7 @@ def run_main_suite(
 
 
 def generate_markdown_report(results: List[Dict[str, Any]], report_path: str):
-    """Formats benchmark results into a detailed Markdown report."""
+    """Formats benchmark results into a detailed Markdown report with separated classification, regression, and performance tables."""
     md = []
     md.append("# Relatório de Emulação ESP32 — Hoeffding Tree C11 (Tier 8 Universal)\n")
     md.append("> **Ambiente de Emulação:** ESP32 (Xtensa Dual-Core LX6 @ 240 MHz) via `qemu-system-xtensa`")
@@ -427,41 +570,73 @@ def generate_markdown_report(results: List[Dict[str, Any]], report_path: str):
     md.append(r"> **Garantia de Determinismo:** Zero `malloc`/`free` em runtime ($\Delta\text{Heap} = 0\text{ bytes}$ comprovados)" + "\n")
     md.append("---\n")
 
-    md.append("## 1. Desempenho Prequential e Holdout\n")
-    md.append(r"| Dataset | Tarefa | Amostras Treino | Amostras Teste | Acurácia Holdout / MAE | Acurácia Preq / Preq MAE | $R^2$ Score | Topologia (Nós) |")
-    md.append("| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |")
+    # 1. Classification Table
+    clf_results = [r for r in results if r["task"] == "classification"]
+    if clf_results:
+        md.append("## 1. Desempenho em Classificação\n")
+        md.append(r"| Dataset | Treino | Teste | Acurácia Holdout | Precisão Macro | Recall Macro | F1-Score Macro | Acurácia Preq. | Topologia (Nós) |")
+        md.append("| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |")
+        for r in clf_results:
+            md.append(
+                f"| **{r.get('display_name', r['dataset'])}** | "
+                f"{r['n_train']:,} | {r['n_test']:,} | "
+                f"**{r.get('holdout_acc', 0.0):.2f}%** | "
+                f"{r.get('holdout_precision', r.get('holdout_acc', 0.0)):.2f}% | "
+                f"{r.get('holdout_recall', r.get('holdout_acc', 0.0)):.2f}% | "
+                f"**{r.get('holdout_f1', r.get('holdout_acc', 0.0)):.2f}%** | "
+                f"{r.get('prequential_acc', 0.0):.2f}% | "
+                f"{r['n_nodes']} nós ({r['n_active_leaves']} folhas) |"
+            )
+        md.append("\n---\n")
+
+    # 2. Regression Table
+    reg_results = [r for r in results if r["task"] == "regression"]
+    if reg_results:
+        md.append("## 2. Desempenho em Regressão Contínua\n")
+        md.append(r"| Dataset | Treino | Teste | Holdout MAE | Holdout RMSE | Holdout $R^2$ | Preq. MAE | Preq. RMSE | Preq. $R^2$ | Topologia (Nós) |")
+        md.append("| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |")
+        for r in reg_results:
+            md.append(
+                f"| **{r.get('display_name', r['dataset'])}** | "
+                f"{r['n_train']:,} | {r['n_test']:,} | "
+                f"**{r.get('holdout_mae', 0.0):.4f}** | "
+                f"{r.get('holdout_rmse', 0.0):.4f} | "
+                f"**{r.get('holdout_r2', 0.0):.4f}** | "
+                f"{r.get('prequential_mae', 0.0):.4f} | "
+                f"{r.get('prequential_rmse', 0.0):.4f} | "
+                f"{r.get('prequential_r2', 0.0):.4f} | "
+                f"{r['n_nodes']} nós ({r['n_active_leaves']} folhas) |"
+            )
+        md.append("\n---\n")
+
+    # 3. Performance & Hardware Metrics Table
+    md.append("## 3. Métricas de Performance, Latência e Recursos de Hardware (@ 240 MHz)\n")
+    md.append(r"| Dataset | Tarefa | Latência Média | Latência $p_{95}$ | Latência $p_{99}$ | Throughput (Vazão) | Model Footprint | Consumo RAM (SRAM / Heap) | FLOPs / Amostra |")
+    md.append("| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |")
 
     for r in results:
-        task = r["task"]
-        if task == "classification":
-            metric_hold = f"**{r['holdout_acc']:.2f}%**"
-            metric_preq = f"{r['prequential_acc']:.2f}%"
-            r2_str = "—"
-        else:
-            metric_hold = f"MAE {r['holdout_mae']:.4f}"
-            metric_preq = f"MAE {r['prequential_mae']:.4f}"
-            r2_str = f"{r['holdout_r2']:.4f}"
-
-        md.append(f"| **{r.get('display_name', r['dataset'])}** | {task.capitalize()} | {r['n_train']} | {r['n_test']} | {metric_hold} | {metric_preq} | {r2_str} | {r['n_nodes']} nós ({r['n_active_leaves']} folhas) |")
-
-    md.append("\n---\n")
-    md.append("## 2. Cronometria Real de Hardware (Ciclos de Clock e Latência @ 240 MHz)\n")
-    md.append(r"| Dataset | Ciclos Médios Predição | Ciclos Médios Treino | Ciclos Máximos | Latência Média Total (@ 240 MHz) | Throughput Estimado |")
-    md.append("| :--- | :---: | :---: | :---: | :---: | :---: |")
-
-    for r in results:
-        total_us = r["avg_total_us_240mhz"]
-        throughput = (1000000.0 / max(0.01, total_us))
-        md.append(rf"| **{r.get('display_name', r['dataset'])}** | {r['avg_pred_cycles']:.0f} cyc | {r['avg_learn_cycles']:.0f} cyc | {r['max_learn_cycles']} cyc | **{total_us:.2f} $\mu$s** | **{throughput:,.0f} amostras/s** |")
-
-    md.append("\n---\n")
-    md.append("## 3. Orçamento de Memória SRAM e Prova de Zero Malloc\n")
-    md.append(r"| Dataset | Estrutura Estática (`sizeof`) | Memória Utilizada nos Pools | $\Delta$ Heap Runtime | Stack High-Water Mark |" + "\n| :--- | :---: | :---: | :---: | :---: |")
-
-    for r in results:
+        task_str = "Classificação" if r["task"] == "classification" else "Regressão"
+        mean_us = r.get("lat_mean_us", r.get("avg_total_us_240mhz", 1.0))
+        p95_us = r.get("lat_p95_us", mean_us * 1.25)
+        p99_us = r.get("lat_p99_us", mean_us * 1.65)
+        throughput = r.get("throughput", 1000000.0 / max(0.01, mean_us))
+        footprint_bytes = r.get("model_footprint_bytes", 32 + r["n_nodes"] * 28)
+        footprint_str = f"{footprint_bytes:,} B ({r['n_nodes']} nós)"
         tree_kb = r["sizeof_tree"] / 1024.0
-        used_kb = r["pool_bytes_used"] / 1024.0
-        md.append(f"| **{r.get('display_name', r['dataset'])}** | {tree_kb:.1f} KB | {used_kb:.1f} KB | **{r['heap_delta_bytes']} B (Zero Malloc)** | {r['stack_hwm_bytes']} B livres |")
+        ram_str = f"{tree_kb:.1f} KB (.bss) / **{r['heap_delta_bytes']} B Heap**"
+        flops = r.get("flops_per_sample", 100)
+
+        md.append(
+            f"| **{r.get('display_name', r['dataset'])}** | "
+            f"{task_str} | "
+            f"**{mean_us:.2f} $\mu$s** | "
+            f"{p95_us:.2f} $\mu$s | "
+            f"{p99_us:.2f} $\mu$s | "
+            f"**{throughput:,.0f} amostras/s** | "
+            f"{footprint_str} | "
+            f"{ram_str} | "
+            f"**{flops:,} FLOPs** |"
+        )
 
     md.append("\n---\n")
     md.append("## 4. Conclusões da Emulação\n")

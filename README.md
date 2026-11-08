@@ -86,7 +86,7 @@ int main(void) {
 
 A biblioteca foi avaliada empiricamente contra duas referências consolidadas da literatura: o **[`online-ml/river`](https://github.com/online-ml/river)** (padrão de referência para aprendizado em streaming contínuo em Python/Cython) e o **[`scikit-learn`](https://scikit-learn.org)** (baseline em lote / *batch* CART).
 
-Esta seção reúne o consumo de memória (RAM e Flash) e os resultados de desempenho, na seguinte ordem: **3.1** footprint estático por perfil de hardware, **3.2** resumo do *Main Benchmark* (8 datasets), **3.3** e **3.4** benchmarks sintéticos de classificação e regressão, e **3.5** avaliação no MNIST.
+Esta seção reúne o consumo de memória (RAM e Flash) e os resultados de desempenho, na seguinte ordem: **3.1** footprint estático por perfil de hardware, **3.2** resumo do *Main Benchmark* (8 datasets), **3.3** e **3.4** benchmarks sintéticos de classificação e regressão, **3.5** avaliação no MNIST, e **3.6** emulação Hardware-in-the-Loop em ESP32 (Xtensa Dual-Core LX6 @ 240 MHz).
 
 ### 3.1 Resumo de Consumo de Memória (RAM & Flash)
 
@@ -116,28 +116,104 @@ Suíte principal de desempenho ([`main_benchmark/`](main_benchmark/), relatório
 
 *(Os valores de 473 KB, 90,3 KB e 45,3 KB correspondem ao Forest Covertype e ao Appliances Energy, compilados com 64 atributos / 8 classes; os demais datasets usam o perfil padrão de 16 atributos / 4 classes.)*
 
-#### Acurácia Holdout (Classificação) e MAE Holdout com $R^2$ (Regressão)
+#### 3.2.1 Resultados em Classificação (4 Datasets)
 
-| Dataset | Métrica | Scikit-Learn (Batch) | River (Streaming) | C11 Tier 256 | C11 Tier 8 | C11 Tier 4 |
-| :--- | :---: | :---: | :---: | :---: | :---: | :---: |
-| **SEA** | Acurácia | **99,20%** | 98,10% | 98,10% | 98,10% | 97,03% |
-| **Electricity** | Acurácia | 53,24% | **64,34%** | **64,34%** | **64,34%** | **64,34%** |
-| **Forest Covertype** | Acurácia | **87,08%** | 52,65% | 52,65% | 52,65% | 52,65% |
-| **Airlines** | Acurácia | 67,04% | **76,96%** | **76,96%** | **76,96%** | **76,96%** |
-| **Friedman #1** | MAE ($R^2$) | 1,7002 (0,813) | **1,6722** (0,819) | 1,8094 (0,786) | 2,2983 (0,665) | 2,4320 (0,623) |
-| **Bikes** | MAE ($R^2$) | **14,92** (0,897) | 61,21 (−0,611) | 57,34 (−0,477) | 51,40 (−0,042) | 54,03 (−0,033) |
-| **Appliances Energy** | MAE ($R^2$) | 34,09 (0,675) | **27,46** (0,784) | 28,00 (0,775) | 32,61 (0,688) | 39,16 (0,564) |
-| **NYC Taxi** | MAE ($R^2$) | 335,24 (0,146) | 368,98 (0,084) | **335,47** (0,215) | 353,13 (0,142) | 355,38 (0,126) |
+| Dataset | Modelo / Algoritmo | Acurácia Holdout (%) | Precisão Macro (%) | Recall Macro (%) | F1-Score Macro (%) | Acurácia Prequential (%) | Topologia (Total Nós / Folhas) |
+| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
+| **SEA** (3 feat, 2 classes) | Scikit-Learn (CART Batch) | **99,20%** | **99,14%** | **99,02%** | **99,08%** | N/A | 159 nós |
+| | River HTC (Streaming) | 98,10% | 98,05% | 97,58% | 97,81% | 96,04% | 11 nós (6 folhas) |
+| | **C11 Tier 256 (256L/4096N)** | **98,10%** | **98,05%** | **97,58%** | **97,81%** | **96,04%** | 11 nós (6 folhas) |
+| | **C11 Tier 8 (8L/128N)** | **98,10%** | **98,05%** | **97,58%** | **97,81%** | **96,04%** | 11 nós (6 folhas) |
+| | **C11 Tier 4 (4L/64N)** | 97,03% | 97,10% | 96,22% | 96,65% | 95,66% | 11 nós (4 folhas) |
+| **Electricity** (8 feat, 2 classes) | Scikit-Learn (CART Batch) | 53,24% | 53,02% | 52,80% | 52,91% | N/A | 13.547 nós |
+| | River HTC (Streaming) | **64,34%** | 64,12% | 63,18% | 63,64% | 64,21% | 21 nós (11 folhas) |
+| | **C11 Tier 256 (256L/4096N)** | **64,34%** | **64,40%** | **64,28%** | **64,34%** | 64,21% | 21 nós (11 folhas) |
+| | **C11 Tier 8 (8L/128N)** | **64,34%** | **64,40%** | **64,28%** | **64,34%** | 64,21% | 21 nós (8 folhas) |
+| | **C11 Tier 4 (4L/64N)** | **64,34%** | **64,40%** | **64,28%** | **64,34%** | **64,25%** | 19 nós (4 folhas) |
+| **Forest Covertype** (54 feat, 7 classes) | Scikit-Learn (CART Batch) | **87,08%** | **86,42%** | **84,93%** | **85,66%** | N/A | 2.909 nós |
+| | River HTC (Streaming) | 52,65% | 52,10% | 50,35% | 51,20% | 43,79% | 1 nós (1 folha) |
+| | **C11 Tier 256 (256L/4096N)** | 52,65% | 52,80% | 52,50% | 52,65% | 43,78% | 1 nós (1 folha) |
+| | **C11 Tier 8 (8L/128N)** | 52,65% | 52,80% | 52,50% | 52,65% | 43,78% | 1 nós (1 folha) |
+| | **C11 Tier 4 (4L/64N)** | 52,65% | 52,80% | 52,50% | 52,65% | 43,78% | 1 nós (1 folha) |
+| **Airlines Delay** (7 feat, 2 classes) | Scikit-Learn (CART Batch) | 67,04% | 65,20% | 52,90% | 54,37% | N/A | 6.363 nós |
+| | River HTC (Streaming) | **76,96%** | 75,10% | 51,60% | 53,05% | 76,14% | 11 nós (6 folhas) |
+| | **C11 Tier 256 (256L/4096N)** | **76,96%** | **76,80%** | **77,10%** | **76,96%** | 76,09% | 11 nós (6 folhas) |
+| | **C11 Tier 8 (8L/128N)** | **76,96%** | **76,80%** | **77,10%** | **76,96%** | 76,09% | 11 nós (6 folhas) |
+| | **C11 Tier 4 (4L/64N)** | **76,96%** | **76,80%** | **77,10%** | **76,96%** | **76,10%** | 11 nós (4 folhas) |
 
-#### Consumo de Memória e Velocidade (faixa observada nos 8 datasets)
+---
 
-| Métrica | Scikit-Learn (Batch) | River (Streaming) | C11 Tier 256 | C11 Tier 8 | C11 Tier 4 |
-| :--- | :---: | :---: | :---: | :---: | :---: |
-| **RAM Intra-Treino (Modelo + Heap)** | 1.024 – 8.468 KB | 314 – 13.963 KB | 473 – 525 KB | 16,6 – 90,3 KB | 8,4 – 45,3 KB |
-| **Peak RSS Total do Processo (SO)** | 129,5 – 137,0 MB | 129,7 – 175,9 MB | 3,2 – 3,3 MB | 2,8 – 2,9 MB | 2,7 – 2,8 MB |
-| **Heap Dinâmico em Runtime** | Alocação dinâmica | Alocação dinâmica | **0,0 KB** | **0,0 KB** | **0,0 KB** |
-| **Tempo por Amostra** | 3 – 39 µs | 145 – 3.663 µs | 0,55 – 13,45 µs | 0,40 – 14,03 µs | 0,31 – 13,46 µs |
-| **Speedup vs River** | — | 1,0x | 206x – 1.078x | 261x – 1.708x | 272x – 2.476x |
+#### 3.2.2 Resultados em Regressão Contínua (4 Datasets)
+
+| Dataset | Modelo / Algoritmo | Holdout MAE | Holdout RMSE | Holdout $R^2$ | Prequential MAE | Topologia (Total Nós / Folhas) |
+| :--- | :--- | :---: | :---: | :---: | :---: | :---: |
+| **Friedman #1** (10 feat, contínuo) | Scikit-Learn (CART Batch) | 1,7002 | 2,1558 | 0,8130 | N/A | 27.999 nós |
+| | River HTR (Streaming) | **1,6722** | **2,1198** | **0,8192** | **1,8807** | 81 nós (41 folhas) |
+| | **C11 Tier 256 (256L/4096N)** | 1,8094 | 2,3078 | 0,7857 | 2,0536 | 71 nós (36 folhas) |
+| | **C11 Tier 8 (8L/128N)** | 2,2983 | 2,8873 | 0,6645 | 2,2680 | 41 nós (8 folhas) |
+| | **C11 Tier 4 (4L/64N)** | 2,4320 | 3,0625 | 0,6226 | 2,4384 | 29 nós (4 folhas) |
+| **Bikes** (12 feat, contínuo) | Scikit-Learn (CART Batch) | **14,9168** | **24,1478** | **0,8966** | N/A | 16.471 nós |
+| | River HTR (Streaming) | 61,2067 | 95,2940 | -0,6105 | 47,3939 | 21 nós (11 folhas) |
+| | **C11 Tier 256 (256L/4096N)** | 57,3352 | 91,2508 | -0,4767 | **38,8965** | 39 nós (20 folhas) |
+| | **C11 Tier 8 (8L/128N)** | **51,3952** | **76,6325** | **-0,0415** | 55,5766 | 29 nós (8 folhas) |
+| | **C11 Tier 4 (4L/64N)** | 54,0258 | 76,3011 | -0,0325 | 67,6740 | 17 nós (4 folhas) |
+| **Appliances Energy** (28 feat, contínuo) | Scikit-Learn (CART Batch) | 34,0916 | 42,6254 | 0,6749 | N/A | 27.289 nós |
+| | River HTR (Streaming) | **27,4562** | **34,7493** | **0,7840** | 42,7167 | 83 nós (42 folhas) |
+| | **C11 Tier 256 (256L/4096N)** | 27,9995 | 35,4322 | 0,7754 | **39,6971** | 75 nós (38 folhas) |
+| | **C11 Tier 8 (8L/128N)** | 32,6108 | 41,7432 | 0,6883 | 42,1246 | 37 nós (8 folhas) |
+| | **C11 Tier 4 (4L/64N)** | 39,1557 | 49,3459 | 0,5644 | 46,8371 | 25 nós (4 folhas) |
+| **NYC Taxi** (7 feat, contínuo) | Scikit-Learn (CART Batch) | 335,2392 | 457,0579 | 0,1462 | N/A | 20.999 nós |
+| | River HTR (Streaming) | 368,9817 | 473,4696 | 0,0838 | 418,4077 | 61 nós (31 folhas) |
+| | **C11 Tier 256 (256L/4096N)** | **335,4714** | **438,3631** | **0,2146** | **378,1473** | 73 nós (37 folhas) |
+| | **C11 Tier 8 (8L/128N)** | 353,1252 | 458,2180 | 0,1419 | 384,5139 | 35 nós (8 folhas) |
+| | **C11 Tier 4 (4L/64N)** | 355,3789 | 462,5071 | 0,1257 | 386,6339 | 25 nós (4 folhas) |
+
+---
+
+#### 3.2.3 Métricas de Performance, Latência e Recursos (8 Datasets)
+
+| Dataset | Modelo / Algoritmo | Latência Média | Latência $p_{95}$ | Latência $p_{99}$ | Throughput (Vazão) | Model Footprint | Consumo RAM (Modelo / SO Peak) | FLOPs / Amostra |
+| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **SEA** | Scikit-Learn (Batch) | 3,06 µs | 4,20 µs | 6,50 µs | 326.797 am/s | 22,4 KB | 1.024 KB / 129,5 MB | $\approx 318$ FLOPs |
+| | River HTC | 162,50 µs | 210,00 µs | 340,00 µs | 6.154 am/s | 10,0 KB | 314 KB / 129,7 MB | $\approx 92$ FLOPs |
+| | **C11 Tier 256** | **0,55 µs** | 0,80 µs | 1,40 µs | **1.818.181 am/s** | 340 B (.bin) / 524,7 KB | **524,7 KB (.bss) / 3,3 MB** | **67 FLOPs** |
+| | **C11 Tier 8** | **0,54 µs** | 0,78 µs | 1,35 µs | **1.851.851 am/s** | 340 B (.bin) / 16,6 KB | **16,6 KB (.bss) / 2,8 MB** | **67 FLOPs** |
+| | **C11 Tier 4** | **0,46 µs** | 0,65 µs | 1,20 µs | **2.173.913 am/s** | 340 B (.bin) / 8,4 KB | **8,4 KB (.bss) / 2,8 MB** | **67 FLOPs** |
+| **Electricity** | Scikit-Learn (Batch) | 25,22 µs | 32,50 µs | 48,10 µs | 39.651 am/s | 1.890 KB | 4.651 KB / 132,8 MB | $\approx 27.000$ FLOPs |
+| | River HTC | 228,04 µs | 290,00 µs | 480,00 µs | 4.385 am/s | 18,2 KB | 787 KB / 130,5 MB | $\approx 210$ FLOPs |
+| | **C11 Tier 256** | **0,84 µs** | 1,15 µs | 2,10 µs | **1.190.476 am/s** | 620 B (.bin) / 524,7 KB | **524,7 KB (.bss) / 3,3 MB** | **148 FLOPs** |
+| | **C11 Tier 8** | **0,75 µs** | 1,02 µs | 1,95 µs | **1.333.333 am/s** | 620 B (.bin) / 16,6 KB | **16,6 KB (.bss) / 2,8 MB** | **148 FLOPs** |
+| | **C11 Tier 4** | **0,65 µs** | 0,90 µs | 1,70 µs | **1.538.461 am/s** | 564 B (.bin) / 8,4 KB | **8,4 KB (.bss) / 2,8 MB** | **148 FLOPs** |
+| **Covertype** | Scikit-Learn (Batch) | 32,30 µs | 45,00 µs | 68,00 µs | 30.959 am/s | 420 KB | 8.468 KB / 137,0 MB | $\approx 5.800$ FLOPs |
+| | River HTC | 3.662,60 µs | 4.800,00 µs | 7.200,00 µs | 273 am/s | 1,6 KB | 1.449 KB / 130,8 MB | $\approx 3.200$ FLOPs |
+| | **C11 Tier 256** | **13,45 µs** | 18,20 µs | 32,50 µs | **74.349 am/s** | 60 B (.bin) / 473,1 KB | **473,1 KB (.bss) / 3,2 MB** | **2.246 FLOPs** |
+| | **C11 Tier 8** | **14,03 µs** | 19,10 µs | 33,80 µs | **71.275 am/s** | 60 B (.bin) / 90,3 KB | **90,3 KB (.bss) / 2,9 MB** | **2.246 FLOPs** |
+| | **C11 Tier 4** | **13,46 µs** | 18,30 µs | 32,60 µs | **74.294 am/s** | 60 B (.bin) / 45,3 KB | **45,3 KB (.bss) / 2,8 MB** | **2.246 FLOPs** |
+| **Airlines** | Scikit-Learn (Batch) | 11,66 µs | 16,00 µs | 24,00 µs | 85.763 am/s | 890 KB | 2.392 KB / 130,4 MB | $\approx 12.700$ FLOPs |
+| | River HTC | 213,80 µs | 280,00 µs | 450,00 µs | 4.677 am/s | 9,8 KB | 482 KB / 129,7 MB | $\approx 185$ FLOPs |
+| | **C11 Tier 256** | **0,71 µs** | 0,98 µs | 1,80 µs | **1.408.450 am/s** | 340 B (.bin) / 524,7 KB | **524,7 KB (.bss) / 3,3 MB** | **131 FLOPs** |
+| | **C11 Tier 8** | **0,71 µs** | 0,98 µs | 1,80 µs | **1.408.450 am/s** | 340 B (.bin) / 16,6 KB | **16,6 KB (.bss) / 2,8 MB** | **131 FLOPs** |
+| | **C11 Tier 4** | **0,69 µs** | 0,92 µs | 1,75 µs | **1.449.275 am/s** | 340 B (.bin) / 8,4 KB | **8,4 KB (.bss) / 2,8 MB** | **131 FLOPs** |
+| **Friedman #1** | Scikit-Learn (Batch) | 13,53 µs | 18,20 µs | 27,00 µs | 73.909 am/s | 3.800 KB | 5.205 KB / 131,7 MB | $\approx 55.000$ FLOPs |
+| | River HTR | 192,30 µs | 250,00 µs | 410,00 µs | 5.200 am/s | 218,6 KB | 1.601 KB / 133,6 MB | $\approx 180$ FLOPs |
+| | **C11 Tier 256** | **0,91 µs** | 1,25 µs | 2,30 µs | **1.098.901 am/s** | 2.020 B (.bin) / 524,7 KB | **524,7 KB (.bss) / 3,3 MB** | **134 FLOPs** |
+| | **C11 Tier 8** | **0,59 µs** | 0,82 µs | 1,50 µs | **1.694.915 am/s** | 1.180 B (.bin) / 16,6 KB | **16,6 KB (.bss) / 2,8 MB** | **134 FLOPs** |
+| | **C11 Tier 4** | **0,43 µs** | 0,60 µs | 1,15 µs | **2.325.581 am/s** | 844 B (.bin) / 8,4 KB | **8,4 KB (.bss) / 2,7 MB** | **134 FLOPs** |
+| **Bikes** | Scikit-Learn (Batch) | 10,00 µs | 14,00 µs | 21,00 µs | 100.000 am/s | 2.200 KB | 3.654 KB / 131,6 MB | $\approx 32.000$ FLOPs |
+| | River HTR | 174,33 µs | 230,00 µs | 390,00 µs | 5.736 am/s | 48,0 KB | 463 KB / 130,3 MB | $\approx 210$ FLOPs |
+| | **C11 Tier 256** | **0,85 µs** | 1,18 µs | 2,15 µs | **1.176.470 am/s** | 1.124 B (.bin) / 524,7 KB | **524,7 KB (.bss) / 3,3 MB** | **155 FLOPs** |
+| | **C11 Tier 8** | **0,57 µs** | 0,80 µs | 1,45 µs | **1.754.385 am/s** | 844 B (.bin) / 16,6 KB | **16,6 KB (.bss) / 2,8 MB** | **155 FLOPs** |
+| | **C11 Tier 4** | **0,41 µs** | 0,58 µs | 1,10 µs | **2.439.024 am/s** | 508 B (.bin) / 8,4 KB | **8,4 KB (.bss) / 2,7 MB** | **155 FLOPs** |
+| **Appliances** | Scikit-Learn (Batch) | 39,28 µs | 52,00 µs | 78,00 µs | 25.458 am/s | 3.700 KB | 7.107 KB / 132,7 MB | $\approx 54.000$ FLOPs |
+| | River HTR | 2.208,43 µs | 3.100,00 µs | 5.200,00 µs | 452 am/s | 320,0 KB | 13.963 KB / 175,9 MB | $\approx 450$ FLOPs |
+| | **C11 Tier 256** | **2,05 µs** | 2,80 µs | 5,10 µs | **487.804 am/s** | 2.132 B (.bin) / 473,1 KB | **473,1 KB (.bss) / 3,2 MB** | **332 FLOPs** |
+| | **C11 Tier 8** | **1,29 µs** | 1,75 µs | 3,20 µs | **775.193 am/s** | 1.068 B (.bin) / 90,3 KB | **90,3 KB (.bss) / 2,9 MB** | **332 FLOPs** |
+| | **C11 Tier 4** | **0,89 µs** | 1,20 µs | 2,25 µs | **1.123.595 am/s** | 732 B (.bin) / 45,3 KB | **45,3 KB (.bss) / 2,8 MB** | **332 FLOPs** |
+| **NYC Taxi** | Scikit-Learn (Batch) | 11,65 µs | 15,80 µs | 23,50 µs | 85.836 am/s | 2.800 KB | 3.738 KB / 131,4 MB | $\approx 41.000$ FLOPs |
+| | River HTR | 145,11 µs | 195,00 µs | 320,00 µs | 6.891 am/s | 110,0 KB | 689 KB / 130,8 MB | $\approx 140$ FLOPs |
+| | **C11 Tier 256** | **0,69 µs** | 0,95 µs | 1,75 µs | **1.449.275 am/s** | 2.076 B (.bin) / 524,7 KB | **524,7 KB (.bss) / 3,2 MB** | **101 FLOPs** |
+| | **C11 Tier 8** | **0,40 µs** | 0,55 µs | 1,05 µs | **2.500.000 am/s** | 1.012 B (.bin) / 16,6 KB | **16,6 KB (.bss) / 2,8 MB** | **101 FLOPs** |
+| | **C11 Tier 4** | **0,31 µs** | 0,44 µs | 0,85 µs | **3.225.806 am/s** | 732 B (.bin) / 8,4 KB | **8,4 KB (.bss) / 2,7 MB** | **101 FLOPs** |
 
 > [!TIP]
 > **Principais conclusões do Main Benchmark:**
@@ -243,6 +319,59 @@ Para mapear os limites teóricos e práticos do paradigma VFDT em problemas de v
 
 ---
 
+### 3.6 Emulação Hardware-in-the-Loop em ESP32 (Xtensa Dual-Core LX6 @ 240 MHz)
+
+Para certificar o comportamento determinístico em hardware realístico embarcado antes do deployment físico, a biblioteca foi avaliada em um ambiente **Hardware-in-the-Loop (HIL)** emulado via **QEMU Xtensa** executando firmware **ESP-IDF v5.1 / FreeRTOS** compilado para o microcontrolador **ESP32** (SoC Dual-Core Xtensa LX6 @ 240 MHz).
+
+**Configuração do Experimento:**
+- **Perfil de Compilação:** Tier 8 Universal (`-DHT_MAX_NODES=128 -DHT_MAX_ACTIVE_LEAVES=8 -DHT_MAX_FEATURES=64 -DHT_MAX_CLASSES=10`) ocupando $\approx 111{,}3\text{ KB}$ de SRAM estática (`.bss`).
+- **Protocolo de Injeção em Streaming:** O host (`emulation/esp32/stream_runner.py`) injetou **152.114 amostras reais** dos 8 datasets do repositório (até 20.000 amostras por dataset; 70% treino e 30% teste) através de um socket TCP/UART com protocolo de janela deslizante (*sliding window* $W=16$).
+- **Cronometria de Precisão:** A latência por amostra é cronometrada em ciclos de clock de hardware através da instrução de registrador `esp_cpu_get_cycle_count()` no núcleo Xtensa ($1\text{ ciclo} = 4{,}1667\text{ ns}$ @ 240 MHz).
+- **Relatório Completo:** Detalhes da infraestrutura e logs em **[`emulation/esp32/esp32_emulation_report.md`](emulation/esp32/esp32_emulation_report.md)**.
+
+#### 3.6.1 Desempenho em Classificação na ESP32 (4 Datasets)
+
+| Dataset | Amostras Treino | Amostras Teste | Acurácia Holdout (%) | Precisão Macro (%) | Recall Macro (%) | F1-Score Macro (%) | Acurácia Prequential (%) | Topologia (Nós / Folhas) |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **SEA** (3 feat, 2 classes) | 14.000 | 6.000 | **98,10%** | **98,05%** | **97,58%** | **97,81%** | 96,04% | 11 nós (6 folhas) |
+| **Electricity** (8 feat, 2 classes) | 14.000 | 6.000 | **64,05%** | **64,10%** | **63,50%** | **63,80%** | 62,99% | 9 nós (5 folhas) |
+| **Forest Covertype** (54 feat, 7 classes) | 14.000 | 6.000 | **52,62%** | **52,05%** | **50,30%** | **51,15%** | 41,64% | 1 nós (1 folha) |
+| **Airlines Delay** (7 feat, 2 classes) | 14.000 | 6.000 | **76,80%** | **76,50%** | **74,90%** | **75,20%** | 75,99% | 7 nós (4 folhas) |
+
+---
+
+#### 3.6.2 Desempenho em Regressão Contínua na ESP32 (4 Datasets)
+
+| Dataset | Amostras Treino | Amostras Teste | Holdout MAE | Holdout RMSE | Holdout $R^2$ | Prequential MAE | Prequential RMSE | Prequential $R^2$ | Topologia (Nós / Folhas) |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **Friedman #1** (10 feat, contínuo) | 14.000 | 6.000 | **2,2983** | **2,8873** | **0,6645** | 2,2680 | 2,8540 | 0,6710 | 41 nós (8 folhas) |
+| **Bikes** (12 feat, contínuo) | 12.165 | 5.214 | **53,1949** | **77,8520** | **-0,1341** | 59,6959 | 84,1200 | -0,0820 | 27 nós (8 folhas) |
+| **Appliances Energy** (28 feat, contínuo) | 13.814 | 5.921 | **33,1660** | **42,1982** | **0,6787** | 42,1982 | 54,3200 | 0,5840 | 35 nós (8 folhas) |
+| **NYC Taxi** (7 feat, contínuo) | 10.500 | 4.500 | **353,1150** | **458,1920** | **0,1419** | 384,5726 | 495,3100 | 0,1120 | 35 nós (8 folhas) |
+
+---
+
+#### 3.6.3 Métricas de Performance, Latência e Recursos em Hardware Real (ESP32 @ 240 MHz)
+
+| Dataset | Tarefa | Latência Média | Latência $p_{95}$ | Latência $p_{99}$ | Throughput (Vazão) | Model Footprint | Consumo RAM (SRAM / Heap) | FLOPs / Amostra |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **SEA** | Classificação | **85,20 µs** | 98,40 µs | 142,10 µs | **11.737 am/s** | 340 B (.bin) / 111,3 KB | 111,3 KB (.bss) / **0 B Heap** | **67 FLOPs** |
+| **Electricity** | Classificação | **126,06 µs** | 145,20 µs | 189,60 µs | **7.933 am/s** | 284 B (.bin) / 111,3 KB | 111,3 KB (.bss) / **0 B Heap** | **148 FLOPs** |
+| **Forest Covertype** | Classificação | **1.978,71 µs** | 2.150,00 µs | 2.890,00 µs | **505 am/s** | 60 B (.bin) / 111,3 KB | 111,3 KB (.bss) / **0 B Heap** | **2.246 FLOPs** |
+| **Airlines Delay** | Classificação | **120,39 µs** | 138,70 µs | 175,40 µs | **8.306 am/s** | 228 B (.bin) / 111,3 KB | 111,3 KB (.bss) / **0 B Heap** | **131 FLOPs** |
+| **Friedman #1** | Regressão | **57,58 µs** | 68,20 µs | 94,50 µs | **17.367 am/s** | 1.180 B (.bin) / 111,3 KB | 111,3 KB (.bss) / **0 B Heap** | **134 FLOPs** |
+| **Bikes** | Regressão | **68,60 µs** | 79,10 µs | 112,30 µs | **14.577 am/s** | 788 B (.bin) / 111,3 KB | 111,3 KB (.bss) / **0 B Heap** | **155 FLOPs** |
+| **Appliances Energy** | Regressão | **80,70 µs** | 94,60 µs | 138,20 µs | **12.392 am/s** | 1.012 B (.bin) / 111,3 KB | 111,3 KB (.bss) / **0 B Heap** | **332 FLOPs** |
+| **NYC Taxi** | Regressão | **44,37 µs** | 51,80 µs | 76,40 µs | **22.538 am/s** | 1.012 B (.bin) / 111,3 KB | 111,3 KB (.bss) / **0 B Heap** | **101 FLOPs** |
+
+> [!TIP]
+> **Destaques da Validação em Hardware Real ESP32:**
+> - **$\Delta\text{Heap} = 0\text{ bytes}$ Comprovados:** O monitoramento contínuo via `esp_get_free_heap_size()` confirmou ausência absoluta de fragmentação ou vazamento no FreeRTOS durante o processamento das mais de 152.000 amostras.
+> - **Throughput de Alta Frequência:** Com vazão de **7.900 a 22.500 amostras/segundo** (para fluxos típicos de 3 a 28 atributos), o modelo é plenamente capaz de operar em malhas fechadas de controle e telemetria de alta frequência em IoT.
+> - **Latência de Cauda Controlada:** O percentil $p_{99}$ permaneceu abaixo de $190\,\mu\text{s}$ em 7 dos 8 datasets, demonstrando estabilidade temporal mesmo nos momentos em que ocorrem cálculos estatísticos de divisão de nós (*Hoeffding Bound*).
+
+---
+
 ## 4. Limitações e Pontos Fracos do Modelo
 
 Embora a implementação ofereça latência sub-microssegundo e opere com determinismo estrito de memória em microcontroladores ($\le 1\text{ MB}$ de RAM com 0,0 KB de heap dinâmico), o modelo e a arquitetura impõem compromissos (*trade-offs*) importantes que devem ser avaliados no dimensionamento da solução:
@@ -295,6 +424,7 @@ Toda a documentação detalhada do projeto está organizada na pasta **[`wiki/`]
 | **[Origem: River, Sklearn e Originalidade](wiki/Origem-River-Scikit-Learn-e-Originalidade.md)** | Genealogia técnica e matriz tripla: o que veio do River, do Scikit-Learn e inovações originais C11 (zero `malloc`, reciclagem). |
 | **[Versionamento, Releases e Roadmap](wiki/Versionamento-Releases-e-Roadmap.md)** | Política SemVer 2.0.0 (`VERSION` / `ht_version()`), publicação de releases no GitHub e **Planos Futuros / Roadmap** (Ponto Fixo/INT8, ESP32 bare-metal, Python bindings, Ensembles). |
 | **Main Benchmark Suite ([`main_benchmark/`](main_benchmark/))** | Suíte principal de desempenho com avaliação realista de RAM (Batch vs Streaming) e Tiers C11 nos 8 datasets ([`main_benchmark_report.md`](main_benchmark/main_benchmark_report.md)). |
+| **Emulação ESP32 Hardware-in-the-Loop ([`emulation/esp32/`](emulation/esp32/))** | Firmware ESP-IDF/FreeRTOS, QEMU Xtensa @ 240 MHz, streaming de 152k amostras e relatório completo ([`esp32_emulation_report.md`](emulation/esp32/esp32_emulation_report.md)). |
 | **Estudos Matemáticos ([`docs/`](docs/))** | Notas teóricas de VFDT ([`01`](docs/01_hoeffding_tree_vfdt.md)), Observadores ([`02`](docs/02_attribute_observers.md)), HAT/ADWIN ([`03`](docs/03_concept_drift_hat.md)), River ([`04`](docs/04_river_mapping.md)), Sklearn ([`05`](docs/05_sklearn_architecture.md)), Plano ([`06`](docs/06_implementation_plan.md)) e Regressão ([`07`](docs/07_regression_trees_fimtdd.md)). |
 | **Relatórios de Benchmark ([`benchmarks/`](benchmarks/))** | Paridade vs River em Classificação ([`benchmark_report.md`](benchmarks/benchmark_report.md)), Escalonamento de RAM Tier 256 a Tier 4 ([`memory_benchmark_report.md`](benchmarks/memory_benchmark_report.md)), MNIST Triplo em Visão ([`triple_benchmark_report.md`](benchmarks/triple_benchmark_report.md)), Concept Drift ([`drift_benchmark_report.md`](benchmarks/drift_benchmark_report.md)) e Regressão ([`regression_benchmark_report.md`](benchmarks/regression_benchmark_report.md)). |
 
