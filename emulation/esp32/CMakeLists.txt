@@ -9,14 +9,6 @@ add_compile_definitions(
     HT_MAX_ADWIN_DETECTORS=32
 )
 
-# Standard C11 compilation flags
-add_compile_options(
-    -std=c11
-    -Wall
-    -Wextra
-    -Werror
-    -pedantic
-)
-
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 project(esp32_hoeffding_tree)
+

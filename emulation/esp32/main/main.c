@@ -458,14 +458,13 @@ static void handle_end(void) {
     double hold_rmse = (test_samples > 0) ? sqrt(test_sum_sq_err / test_samples) : 0.0;
     double hold_r2 = 0.0;
     if (test_samples > 1) {
-        double mean_y = test_sum_y / test_samples;
         double ss_tot = test_sum_y_sq - (test_sum_y * test_sum_y / test_samples);
         if (ss_tot > 1e-9) {
             hold_r2 = 1.0 - (test_sum_sq_err / ss_tot);
         }
     }
 
-    uint16_t total_nodes = tree_instance.memory.nodes_used;
+    uint16_t total_nodes = tree_instance.memory.nodes_allocated;
     uint16_t active_leaves = tree_instance.n_active_leaves;
     size_t pool_bytes = ht_memory_bytes_used(&tree_instance.memory);
 
@@ -525,7 +524,7 @@ void app_main(void) {
         } else if (strcmp(rx_line_buf, "END") == 0) {
             handle_end();
         } else {
-            snprintf(tx_line_buf, sizeof(tx_line_buf), "ERR,unknown_cmd:%s\n", rx_line_buf);
+            snprintf(tx_line_buf, sizeof(tx_line_buf), "ERR,unknown_cmd:%.100s\n", rx_line_buf);
             send_line(tx_line_buf);
         }
     }

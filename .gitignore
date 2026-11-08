@@ -1,6 +1,9 @@
 # Build artifacts
 build/
 code/build/
+emulation/esp32/build/
+emulation/esp32/sdkconfig
+emulation/esp32/sdkconfig.old
 *.o
 *.d
 *.a

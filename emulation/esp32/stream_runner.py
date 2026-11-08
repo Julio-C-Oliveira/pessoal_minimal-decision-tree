@@ -82,30 +82,63 @@ class Esp32Client:
             if not line:
                 raise ConnectionResetError("Connection closed by ESP32")
             clean = line.strip("\r\n")
-            # Filter out bootloader noise lines
-            if clean.startswith("===") or clean.startswith("ets ") or clean.startswith("rst:") or clean.startswith("configsip:"):
+            if not clean:
+                continue
+            # Filter out bootloader and IDF log noise lines
+            if (
+                clean.startswith("===")
+                or clean.startswith("ets ")
+                or clean.startswith("rst:")
+                or clean.startswith("configsip:")
+                or clean.startswith("clk_drv:")
+                or clean.startswith("mode:")
+                or clean.startswith("load:")
+                or clean.startswith("entry")
+                or clean.startswith("I (")
+                or clean.startswith("W (")
+                or clean.startswith("E (")
+            ):
                 continue
             return clean
 
-    def ping(self, max_retries: int = 30) -> Dict[str, Any]:
+    def ping(self, timeout: float = 30.0) -> Dict[str, Any]:
         """Sends PING until receiving PONG, synchronizing after boot."""
-        for _ in range(max_retries):
-            self.send_line("PING")
-            time.sleep(0.05)
-            # Drain non-PONG lines
+        if not self.sock:
+            raise RuntimeError("Not connected")
+        self.sock.settimeout(0.5)
+        deadline = time.time() + timeout
+        last_ping = 0.0
+
+        while time.time() < deadline:
+            now = time.time()
+            if now - last_ping >= 0.3:
+                try:
+                    self.send_line("PING")
+                except Exception:
+                    pass
+                last_ping = now
+
             try:
-                line = self.read_line()
-                if line.startswith("PONG"):
-                    parts = line.split(",")
-                    res = {"raw": line}
+                line = self.reader.readline()
+                if not line:
+                    time.sleep(0.05)
+                    continue
+                clean = line.strip("\r\n")
+                if clean.startswith("PONG"):
+                    parts = clean.split(",")
+                    res = {"raw": clean}
                     for p in parts[1:]:
                         if "=" in p:
                             k, v = p.split("=", 1)
                             res[k] = v
+                    self.sock.settimeout(self.timeout)
                     return res
+            except socket.timeout:
+                continue
             except Exception:
-                pass
-            time.sleep(0.2)
+                time.sleep(0.05)
+
+        self.sock.settimeout(self.timeout)
         raise TimeoutError("Failed to synchronize with ESP32 firmware via PING/PONG.")
 
     def init_session(

@@ -137,6 +137,22 @@ cmd_qemu() {
         cmd_flash_image
     fi
 
+    if [ "${USE_DOCKER}" -eq 1 ]; then
+        log_info "Starting ESP32 QEMU via Docker container on port ${target_port}..."
+        docker run --rm -it \
+            -v "${PROJECT_ROOT}:/project" \
+            -w "/project/emulation/esp32" \
+            -p "${target_port}:${target_port}" \
+            espressif/idf:v5.1.2 \
+            /opt/qemu/bin/qemu-system-xtensa \
+                -nographic \
+                -machine esp32 \
+                -drive file=/project/emulation/esp32/build/flash_image.bin,if=mtd,format=raw \
+                -nic none \
+                -serial "tcp:0.0.0.0:${target_port},server,nowait"
+        return 0
+    fi
+
     local qemu_bin=""
     if command -v qemu-system-xtensa >/dev/null 2>&1; then
         qemu_bin="qemu-system-xtensa"
@@ -165,36 +181,58 @@ cmd_bench() {
         cmd_flash_image
     fi
 
-    local qemu_bin=""
-    if command -v qemu-system-xtensa >/dev/null 2>&1; then
-        qemu_bin="qemu-system-xtensa"
-    elif [ -f "${HOME}/.espressif/tools/qemu-xtensa/bin/qemu-system-xtensa" ]; then
-        qemu_bin="${HOME}/.espressif/tools/qemu-xtensa/bin/qemu-system-xtensa"
+    local QEMU_PID=""
+    if [ "${USE_DOCKER}" -eq 1 ]; then
+        log_info "Launching background QEMU container (esp32_qemu_bench) on port ${target_port}..."
+        docker rm -f esp32_qemu_bench >/dev/null 2>&1 || true
+        docker run -d --rm \
+            --name esp32_qemu_bench \
+            -v "${PROJECT_ROOT}:/project" \
+            -w "/project/emulation/esp32" \
+            -p "${target_port}:${target_port}" \
+            espressif/idf:v5.1.2 \
+            /opt/qemu/bin/qemu-system-xtensa \
+                -nographic \
+                -machine esp32 \
+                -drive file=/project/emulation/esp32/build/flash_image.bin,if=mtd,format=raw \
+                -nic none \
+                -serial "tcp:0.0.0.0:${target_port},server,nowait" > "${BUILD_DIR}/qemu.log" 2>&1
+        trap 'docker rm -f esp32_qemu_bench >/dev/null 2>&1 || true' EXIT
+    else
+        local qemu_bin=""
+        if command -v qemu-system-xtensa >/dev/null 2>&1; then
+            qemu_bin="qemu-system-xtensa"
+        elif [ -f "${HOME}/.espressif/tools/qemu-xtensa/bin/qemu-system-xtensa" ]; then
+            qemu_bin="${HOME}/.espressif/tools/qemu-xtensa/bin/qemu-system-xtensa"
+        fi
+
+        if [ -z "${qemu_bin}" ]; then
+            log_error "qemu-system-xtensa not found in PATH or ~/.espressif!"
+            exit 1
+        fi
+
+        log_info "Launching background QEMU instance on port ${target_port}..."
+        "${qemu_bin}" \
+            -nographic \
+            -machine esp32 \
+            -drive file="${FLASH_IMG}",if=mtd,format=raw \
+            -nic none \
+            -serial "tcp:127.0.0.1:${target_port},server,nowait" > "${BUILD_DIR}/qemu.log" 2>&1 &
+        QEMU_PID=$!
+        trap 'kill -9 ${QEMU_PID} 2>/dev/null || true' EXIT
     fi
-
-    if [ -z "${qemu_bin}" ]; then
-        log_error "qemu-system-xtensa not found in PATH or ~/.espressif!"
-        exit 1
-    fi
-
-    log_info "Launching background QEMU instance on port ${target_port}..."
-    "${qemu_bin}" \
-        -nographic \
-        -machine esp32 \
-        -drive file="${FLASH_IMG}",if=mtd,format=raw \
-        -nic none \
-        -serial "tcp:127.0.0.1:${target_port},server,nowait" > "${BUILD_DIR}/qemu.log" 2>&1 &
-    QEMU_PID=$!
-
-    # Cleanup trap on exit
-    trap 'kill -9 ${QEMU_PID} 2>/dev/null || true' EXIT
 
     log_info "Waiting for QEMU socket to open on port ${target_port}..."
-    sleep 1
+    sleep 3
 
     PYTHON_BIN="python3"
     if [ -x "${PROJECT_ROOT}/.venv/bin/python" ]; then
         PYTHON_BIN="${PROJECT_ROOT}/.venv/bin/python"
+    fi
+
+    local extra_args=()
+    if [ -n "${MAX_SAMPLES:-}" ] && [ "${MAX_SAMPLES}" != "0" ]; then
+        extra_args+=(--max-samples "${MAX_SAMPLES}")
     fi
 
     log_info "Running ESP32 Stream Benchmark Runner via ${PYTHON_BIN}..."
@@ -202,7 +240,8 @@ cmd_bench() {
         --host 127.0.0.1 \
         --port "${target_port}" \
         --suite main \
-        --report "${SCRIPT_DIR}/esp32_emulation_report.md"
+        --report "${SCRIPT_DIR}/esp32_emulation_report.md" \
+        ${extra_args[@]+"${extra_args[@]}"}
 
     log_success "Benchmark completed! Report saved in ${SCRIPT_DIR}/esp32_emulation_report.md"
 }

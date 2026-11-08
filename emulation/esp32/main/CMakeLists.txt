@@ -15,3 +15,11 @@ idf_component_register(
         freertos
         driver
 )
+
+target_compile_options(${COMPONENT_LIB} PRIVATE
+    -std=gnu11
+    -Wall
+    -Wextra
+    -Werror
+)
+
