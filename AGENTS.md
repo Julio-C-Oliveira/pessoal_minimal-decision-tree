@@ -59,3 +59,4 @@ Ative a skill correspondente antes de iniciar cada tipo de tarefa:
 - **`implementation-plan`**: Para criar, consultar ou atualizar o plano de implementação persistente em [`docs/06_implementation_plan.md`](docs/06_implementation_plan.md) entre diferentes chats e agentes.
 - **`embedded-c-tree`**: Para implementar, revisar ou otimizar módulos em `code/include/`, `code/src/` e `code/tests/` respeitando o orçamento de 1 MB e o protocolo de testes em 3 níveis.
 - **`river-parity-benchmark`**: Para validar acurácia *prequential*, número de splits e consumo de RAM em `benchmarks/` contra o River.
+- **`sync-wiki`**: Para sincronizar e publicar automaticamente as alterações de `wiki/` no repositório oficial da GitHub Wiki (`pessoal_minimal-decision-tree.wiki.git`).
