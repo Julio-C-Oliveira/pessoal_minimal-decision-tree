@@ -237,9 +237,13 @@ Toda a documentação detalhada do projeto está organizada na pasta **[`wiki/`]
 | **[Orçamento de Memória e Cross-Compilation](wiki/Orcamento-de-Memoria-e-Cross-Compilation.md)** | Consumo de Flash/ROM, peso de arquivos `.bin` serializados e flags para `arm-none-eabi-gcc` e Linux embarcado. |
 | **[Arquitetura e Fluxogramas](wiki/Arquitetura-e-Fluxogramas.md)** | Comparativo Hoeffding vs CART, decisões de design C11 e fluxogramas Mermaid passo a passo de todos os algoritmos. |
 | **[Origem: River, Sklearn e Originalidade](wiki/Origem-River-Scikit-Learn-e-Originalidade.md)** | Genealogia técnica e matriz tripla: o que veio do River, do Scikit-Learn e inovações originais C11 (zero `malloc`, reciclagem). |
-| **[Versionamento, Releases e Roadmap](wiki/Versionamento-Releases-e-Roadmap.md)** | Política SemVer 2.0.0 (`VERSION` / `ht_version()`), publicação de releases no GitHub e trabalhos futuros. |
+| **[Versionamento, Releases e Roadmap](wiki/Versionamento-Releases-e-Roadmap.md)** | Política SemVer 2.0.0 (`VERSION` / `ht_version()`), publicação de releases no GitHub e **Planos Futuros / Roadmap** (Ponto Fixo/INT8, ESP32 bare-metal, Python bindings, Ensembles). |
+| **Main Benchmark Suite ([`main_benchmark/`](main_benchmark/))** | Suíte principal de desempenho com avaliação realista de RAM (Batch vs Streaming) e Tiers C11 nos 8 datasets ([`main_benchmark_report.md`](main_benchmark/main_benchmark_report.md)). |
 | **Estudos Matemáticos ([`docs/`](docs/))** | Notas teóricas de VFDT ([`01`](docs/01_hoeffding_tree_vfdt.md)), Observadores ([`02`](docs/02_attribute_observers.md)), HAT/ADWIN ([`03`](docs/03_concept_drift_hat.md)), River ([`04`](docs/04_river_mapping.md)), Sklearn ([`05`](docs/05_sklearn_architecture.md)), Plano ([`06`](docs/06_implementation_plan.md)) e Regressão ([`07`](docs/07_regression_trees_fimtdd.md)). |
 | **Relatórios de Benchmark ([`benchmarks/`](benchmarks/))** | Paridade vs River em Classificação ([`benchmark_report.md`](benchmarks/benchmark_report.md)), Escalonamento de RAM Tier 256 a Tier 4 ([`memory_benchmark_report.md`](benchmarks/memory_benchmark_report.md)), MNIST Triplo em Visão ([`triple_benchmark_report.md`](benchmarks/triple_benchmark_report.md)), Concept Drift ([`drift_benchmark_report.md`](benchmarks/drift_benchmark_report.md)) e Regressão ([`regression_benchmark_report.md`](benchmarks/regression_benchmark_report.md)). |
+
+> [!NOTE]
+> **Planos Futuros e Roadmap:** O detalhamento dos próximos passos e extensões planejadas para o projeto (incluindo aritmética de ponto fixo/INT8 para MCUs sem FPU, bindings em Python com CFFI, validação de firmware com máquina de estados em ESP32 real e ensembles em streaming como Online Bagging) está documentado na Wiki em **[`wiki/Versionamento-Releases-e-Roadmap.md` (Seção 5: Possíveis Trabalhos Futuros e Extensões)](wiki/Versionamento-Releases-e-Roadmap.md#5-possíveis-trabalhos-futuros-e-extensões-roadmap)**.
 
 ---
 
@@ -251,10 +255,11 @@ pessoal_minimal-decision-tree/
 ├── VERSION                      # Versão canônica do projeto (SemVer 2.0.0)
 ├── README.md                    # Visão geral, Quick Start e índice de navegação
 ├── Makefile                     # Root Makefile (compilação, testes e benchmarks)
-├── wiki/                        # Páginas da GitHub Wiki (Exemplos, Parâmetros, Memória, Arquitetura)
+├── wiki/                        # Páginas da GitHub Wiki (Exemplos, Parâmetros, Memória, Arquitetura, Roadmap)
 ├── docs/                        # Estudos matemáticos dos papers e plano de implementação (01 a 07)
 ├── references/                  # Artigos originais (PDFs) e código de referência (River e Scikit-Learn)
 ├── code/                        # Implementação em C11 puro (include/, src/, tests/ e Makefile)
+├── main_benchmark/              # Suíte principal de benchmark de desempenho (8 datasets, profiling de RAM)
 └── benchmarks/                  # Scripts e runners de validação comparativa (C11 vs River vs Sklearn)
 ```
 
