@@ -35,13 +35,11 @@ class Esp32Client:
         self.reader = None
         self.writer = None
 
-    def connect(self, max_retries: int = 20, retry_delay: float = 0.5):
+    def connect(self, max_retries: int = 30, retry_delay: float = 0.5):
         for attempt in range(1, max_retries + 1):
             try:
                 self.sock = socket.create_connection((self.host, self.port), timeout=self.timeout)
                 self.sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-                self.reader = self.sock.makefile("r", encoding="utf-8", errors="replace")
-                self.writer = self.sock.makefile("w", encoding="utf-8", errors="replace")
                 return
             except (ConnectionRefusedError, OSError):
                 if attempt == max_retries:
@@ -105,35 +103,40 @@ class Esp32Client:
         """Sends PING until receiving PONG, synchronizing after boot."""
         if not self.sock:
             raise RuntimeError("Not connected")
-        self.sock.settimeout(0.5)
+        self.sock.settimeout(0.2)
         deadline = time.time() + timeout
         last_ping = 0.0
+        buf = b""
 
         while time.time() < deadline:
             now = time.time()
-            if now - last_ping >= 0.3:
+            if now - last_ping >= 0.4:
                 try:
-                    self.send_line("PING")
+                    self.sock.sendall(b"PING\n")
                 except Exception:
                     pass
                 last_ping = now
 
             try:
-                line = self.reader.readline()
-                if not line:
-                    time.sleep(0.05)
-                    continue
-                clean = line.strip("\r\n")
-                if clean.startswith("PONG"):
-                    parts = clean.split(",")
-                    res = {"raw": clean}
-                    for p in parts[1:]:
-                        if "=" in p:
-                            k, v = p.split("=", 1)
-                            res[k] = v
-                    self.sock.settimeout(self.timeout)
-                    return res
-            except socket.timeout:
+                chunk = self.sock.recv(4096)
+                if chunk:
+                    buf += chunk
+                    if b"PONG" in buf:
+                        lines = buf.decode("utf-8", errors="replace").splitlines()
+                        for line in lines:
+                            clean = line.strip()
+                            if clean.startswith("PONG"):
+                                parts = clean.split(",")
+                                res = {"raw": clean}
+                                for p in parts[1:]:
+                                    if "=" in p:
+                                        k, v = p.split("=", 1)
+                                        res[k] = v
+                                self.sock.settimeout(self.timeout)
+                                self.reader = self.sock.makefile("r", encoding="utf-8", errors="replace")
+                                self.writer = self.sock.makefile("w", encoding="utf-8", errors="replace")
+                                return res
+            except (socket.timeout, BlockingIOError):
                 continue
             except Exception:
                 time.sleep(0.05)
@@ -265,12 +268,49 @@ def parse_csv_stream(csv_path: str, max_samples: Optional[int] = None):
 # ==============================================================================
 # Benchmark Runner
 # ==============================================================================
+def stream_samples_windowed(
+    client: Esp32Client,
+    cmd_prefix: str,
+    rows: List[Tuple[Any, List[Any]]],
+    window_size: int = 16,
+    log_interval: int = 500,
+    tag: str = "TRAIN",
+):
+    """Streams samples to ESP32 using credit-based sliding window flow control."""
+    t0 = time.time()
+    total = len(rows)
+    send_idx = 0
+    ack_count = 0
+    in_flight = 0
+
+    while send_idx < total or in_flight > 0:
+        while send_idx < total and in_flight < window_size:
+            y, x = rows[send_idx]
+            feat_str = ",".join(str(v) for v in x)
+            client.send_line(f"{cmd_prefix},{y},{feat_str}")
+            send_idx += 1
+            in_flight += 1
+
+        resp = client.read_line()
+        if not resp.startswith("ACK"):
+            raise RuntimeError(f"Unexpected response to {cmd_prefix}: {resp}")
+        ack_count += 1
+        in_flight -= 1
+
+        if ack_count % log_interval == 0 or ack_count == total:
+            rate = ack_count / max(0.001, time.time() - t0)
+            print(f"\r  [{tag}] Sample {ack_count}/{total} ({rate:.1f} samples/sec)...", end="", flush=True)
+
+    print()
+
+
 def run_dataset_benchmark(
     client: Esp32Client,
     train_csv: str,
     test_csv: Optional[str] = None,
     max_train_samples: Optional[int] = None,
     max_test_samples: Optional[int] = None,
+    window_size: int = 16,
     log_interval: int = 500,
 ) -> Dict[str, Any]:
     """Runs Test-Then-Train prequential evaluation followed by holdout inference."""
@@ -294,22 +334,24 @@ def run_dataset_benchmark(
         grace=200,
     )
 
-    t0 = time.time()
-    for idx, (y, x) in enumerate(train_rows, start=1):
-        client.send_train(y, x)
-        if idx % log_interval == 0 or idx == len(train_rows):
-            rate = idx / max(0.001, time.time() - t0)
-            print(f"\r  [TRAIN] Sample {idx}/{len(train_rows)} ({rate:.1f} samples/sec)...", end="", flush=True)
-    print()
+    stream_samples_windowed(
+        client,
+        cmd_prefix="TRAIN",
+        rows=train_rows,
+        window_size=window_size,
+        log_interval=log_interval,
+        tag="TRAIN",
+    )
 
     if test_rows:
-        t_test0 = time.time()
-        for idx, (y, x) in enumerate(test_rows, start=1):
-            client.send_test(y, x)
-            if idx % log_interval == 0 or idx == len(test_rows):
-                rate = idx / max(0.001, time.time() - t_test0)
-                print(f"\r  [TEST]  Sample {idx}/{len(test_rows)} ({rate:.1f} samples/sec)...", end="", flush=True)
-        print()
+        stream_samples_windowed(
+            client,
+            cmd_prefix="TEST",
+            rows=test_rows,
+            window_size=window_size,
+            log_interval=log_interval,
+            tag="TEST",
+        )
 
     result = client.end_session()
     result["dataset"] = meta["stream"]
@@ -318,7 +360,12 @@ def run_dataset_benchmark(
     return result
 
 
-def run_main_suite(client: Esp32Client, data_dir: str, max_samples: Optional[int] = None) -> List[Dict[str, Any]]:
+def run_main_suite(
+    client: Esp32Client,
+    data_dir: str,
+    max_samples: Optional[int] = None,
+    window_size: int = 16,
+) -> List[Dict[str, Any]]:
     """Runs all 8 datasets from main_benchmark sequentially through the emulated ESP32."""
     datasets = [
         ("sea", "SEA", "classification"),
@@ -345,13 +392,17 @@ def run_main_suite(client: Esp32Client, data_dir: str, max_samples: Optional[int
             train_csv = os.path.join(data_dir, f"{d_id}.csv")
             test_csv = None
 
+        train_limit = int(max_samples * 0.70) if max_samples else None
+        test_limit = int(max_samples * 0.30) if max_samples else None
+
         print(f"\n>>> Running Dataset: {name} [{task.upper()}]")
         res = run_dataset_benchmark(
             client,
             train_csv=train_csv,
             test_csv=test_csv,
-            max_train_samples=max_samples,
-            max_test_samples=max_samples // 3 if max_samples else None,
+            max_train_samples=train_limit,
+            max_test_samples=test_limit,
+            window_size=window_size,
         )
         res["display_name"] = name
         results.append(res)
@@ -436,6 +487,7 @@ def main():
     parser.add_argument("--data-dir", default=None, help="Data directory containing benchmark CSVs")
     parser.add_argument("--report", default=None, help="Path to write output markdown report")
     parser.add_argument("--max-samples", type=int, default=None, help="Max samples per dataset for quick smoke tests")
+    parser.add_argument("--window-size", type=int, default=16, help="Sliding window size for flow control (default: 16)")
 
     args = parser.parse_args()
 
@@ -468,12 +520,12 @@ def main():
             if not args.data_dir or not os.path.isdir(args.data_dir):
                 print(f"Error: Data directory not found: {args.data_dir}")
                 sys.exit(1)
-            results = run_main_suite(client, args.data_dir, max_samples=args.max_samples)
+            results = run_main_suite(client, args.data_dir, max_samples=args.max_samples, window_size=args.window_size)
         elif args.csv or args.train_csv:
             train_f = args.train_csv or args.csv
             test_f = args.test_csv
             print(f"Running single dataset: {train_f}")
-            res = run_dataset_benchmark(client, train_csv=train_f, test_csv=test_f, max_train_samples=args.max_samples)
+            res = run_dataset_benchmark(client, train_csv=train_f, test_csv=test_f, max_train_samples=args.max_samples, window_size=args.window_size)
             results.append(res)
         else:
             print("Please specify --suite main or --csv <file.csv>")

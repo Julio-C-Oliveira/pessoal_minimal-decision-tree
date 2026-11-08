@@ -86,6 +86,10 @@ static size_t heap_after_init = 0;
 /* ========================================================================== */
 /* UART Helpers                                                               */
 /* ========================================================================== */
+static uint8_t uart_rx_chunk[1024];
+static int     uart_rx_chunk_len = 0;
+static int     uart_rx_chunk_pos = 0;
+
 static void init_uart(void) {
     uart_config_t uart_config = {
         .baud_rate  = UART_BAUD_RATE,
@@ -99,20 +103,43 @@ static void init_uart(void) {
     };
     uart_param_config(UART_PORT_NUM, &uart_config);
     uart_driver_install(UART_PORT_NUM, UART_RX_BUF_SIZE * 2, 0, 0, NULL, 0);
+    uart_rx_chunk_len = 0;
+    uart_rx_chunk_pos = 0;
 }
 
 static int read_line(char *buf, size_t max_len) {
     size_t idx = 0;
     while (idx < max_len - 1) {
-        uint8_t ch = 0;
-        int len = uart_read_bytes(UART_PORT_NUM, &ch, 1, portMAX_DELAY);
-        if (len > 0) {
-            if (ch == '\n') {
-                buf[idx] = '\0';
-                return (int)idx;
-            } else if (ch != '\r') {
-                buf[idx++] = (char)ch;
+        if (uart_rx_chunk_pos >= uart_rx_chunk_len) {
+            uart_rx_chunk_pos = 0;
+            uart_rx_chunk_len = 0;
+
+            /* Read 1 byte to block efficiently without timeout penalties */
+            int r = uart_read_bytes(UART_PORT_NUM, uart_rx_chunk, 1, portMAX_DELAY);
+            if (r <= 0) {
+                continue;
             }
+            uart_rx_chunk_len = 1;
+
+            /* Read all remaining buffered bytes immediately */
+            size_t buffered = 0;
+            if (uart_get_buffered_data_len(UART_PORT_NUM, &buffered) == ESP_OK && buffered > 0) {
+                size_t to_read = buffered;
+                if (to_read > sizeof(uart_rx_chunk) - 1) {
+                    to_read = sizeof(uart_rx_chunk) - 1;
+                }
+                int extra = uart_read_bytes(UART_PORT_NUM, uart_rx_chunk + 1, to_read, 0);
+                if (extra > 0) {
+                    uart_rx_chunk_len += extra;
+                }
+            }
+        }
+        uint8_t ch = uart_rx_chunk[uart_rx_chunk_pos++];
+        if (ch == '\n') {
+            buf[idx] = '\0';
+            return (int)idx;
+        } else if (ch != '\r') {
+            buf[idx++] = (char)ch;
         }
     }
     buf[idx] = '\0';

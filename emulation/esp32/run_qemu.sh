@@ -223,16 +223,17 @@ cmd_bench() {
     fi
 
     log_info "Waiting for QEMU socket to open on port ${target_port}..."
-    sleep 3
+    sleep 6
 
     PYTHON_BIN="python3"
     if [ -x "${PROJECT_ROOT}/.venv/bin/python" ]; then
         PYTHON_BIN="${PROJECT_ROOT}/.venv/bin/python"
     fi
 
+    local max_samp="${MAX_SAMPLES:-20000}"
     local extra_args=()
-    if [ -n "${MAX_SAMPLES:-}" ] && [ "${MAX_SAMPLES}" != "0" ]; then
-        extra_args+=(--max-samples "${MAX_SAMPLES}")
+    if [ "${max_samp}" != "0" ]; then
+        extra_args+=(--max-samples "${max_samp}")
     fi
 
     log_info "Running ESP32 Stream Benchmark Runner via ${PYTHON_BIN}..."
