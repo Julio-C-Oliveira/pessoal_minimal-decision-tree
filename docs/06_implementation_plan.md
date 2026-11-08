@@ -653,7 +653,7 @@ flowchart LR
 - Relatório consolidado gerado automaticamente em [`benchmarks/memory_benchmark_report.md`](file:///home/julio/Documentos/pessoal_minimal-decision-tree/benchmarks/memory_benchmark_report.md).
 
 ### Entrega 4.7: Main Benchmark Suite — Avaliação Realista de RAM e Multi-Tier C11 (`make bench-main`)
-- Suite principal de benchmark em `benchmarks/main_benchmark/` (com link simbólico `benchmarks/main benchmark/`) avaliando **8 datasets emblemáticos**:
+- Suite principal de benchmark na raiz em `main_benchmark/` (com link simbólico `main benchmark/`) avaliando **8 datasets emblemáticos**:
   - **Classificação (4):** SEA (Sintético), Electricity/Elec2 (Real), Forest Covertype (Real), Airlines Delay (Real).
   - **Regressão Contínua (4):** Friedman #1 (Sintético), Bikes (Real), Appliances Energy (Real), NYC Taxi (Real).
 - Metodologia de Avaliação Realista de Memória RAM:
@@ -668,4 +668,4 @@ flowchart LR
   - Consistência de Acurácia: No SEA e Airlines, o Tier 8 atinge rigorosamente a mesma acurácia que o Tier 256 e River (SEA: 98.10%, Airlines: 76.96%).
   - Superioridade em Streaming: No dataset Electricity, o C11 (64.34%) e River (64.34%) superam expressivamente o Scikit-Learn Batch (53.24%), comprovando a superioridade do modelo adaptativo a streams.
   - Latência e Throughput: O C11 atinge **$0.32\text{ a }2.13\,\mu\text{s}$ por amostra**, garantindo speedups de **$200\times$ a mais de $3.000\times$** frente ao River em Python.
-- Relatório consolidado gerado automaticamente em [`benchmarks/main_benchmark/main_benchmark_report.md`](file:///home/julio/Documentos/pessoal_minimal-decision-tree/benchmarks/main_benchmark/main_benchmark_report.md).
+- Relatório consolidado gerado automaticamente em [`main_benchmark/main_benchmark_report.md`](file:///home/julio/Documentos/pessoal_minimal-decision-tree/main_benchmark/main_benchmark_report.md).
