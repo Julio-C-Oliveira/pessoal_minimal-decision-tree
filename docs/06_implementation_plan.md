@@ -31,6 +31,8 @@
 | **4.4** | **Fase 4:** Árvore de Regressão VFDT-R (Mean/Model SGD/Adaptive) e HAT-R (ADWIN + Z-Test) | `code/include/ht_tree.h`, `code/src/ht_tree.c`, `code/include/ht_drift.h`, `code/src/ht_drift.c`, `code/tests/test_tree.c`, `code/tests/test_drift.c`, `code/tests/test_e2e_flow.c` | **N1:** predição `HT_LEAF_MEAN`, `HT_LEAF_MODEL` (SGD com clip), `HT_LEAF_ADAPTIVE` ($\text{fmse}$ $\alpha=0.95$) e Teste Z bilateral ($p \le \alpha$)<br/>**N2:** herança de pesos SGD/$\text{fmse}$ no split, desativação por profundidade e Switch/Prune de subárvore em regressão<br/>**N3:** treino *prequential* E2E (estacionário + drift abrupto) e `ht_tree_save`/`ht_tree_load` | `[x]` | `7a9d2a5` |
 | **4.5** | **Fase 4:** Benchmark Triplo de Regressão e Drift (C11 vs River HTR/HATR vs Scikit-Learn) | `benchmarks/generate_streams.py`, `benchmarks/bench_c_runner.c`, `benchmarks/compare_river.py`, `benchmarks/regression_benchmark_report.md`, `Makefile`, `code/Makefile` | Avaliação tripla em fluxos de regressão estacionários e com drift (Friedman, Friedman Drift, Planes2D, Piecewise Linear) em `float` e `double`: MAE, RMSE, $R^2$, Nós, RAM ($\le 1\text{ MB}$, heap 0.0 KB) e Speedup vs River | `[x]` | `7f7e760` |
 | **4.6** | **Fase 4:** Dimensionamento por Macros e Benchmark de Escalonamento de RAM (256 a 4 Folhas) | `code/Makefile`, `Makefile`, `benchmarks/compare_river.py`, `benchmarks/memory_benchmark_report.md` | Avaliação rigorosa da árvore C11 dimensionada via macros de compilação (`HT_MAX_ACTIVE_LEAVES` e `HT_MAX_NODES`), variando de 256 a 4 folhas (4.096 a 64 nós). Avaliação em 5 fluxos provando retenção de acurácia com apenas 8,4 KB de RAM e zero heap em runtime. | `[x]` | `76575c3` |
+| **4.7** | **Fase 4:** Main Benchmark Suite — Avaliação Realista de RAM e Multi-Tier C11 | `main_benchmark/main_benchmark.py`, `main_benchmark/prepare_datasets.py`, `main_benchmark/main_benchmark_report.md`, `Makefile`, `code/Makefile` | Avaliação em 8 datasets emblemáticos (4 classificação, 4 regressão) comparando C11 Multi-Tier (256, 8, 4) vs River (Streaming 1-a-1) vs Scikit-Learn (Full Batch in RAM). Medição de Peak RSS, intra-train RAM, latência por amostra e speedup >200x a 3.000x. | `[x]` | `6552912` |
+| **5.1** | **Fase 5:** Emulação Hardware-in-the-Loop em ESP32 via QEMU | `emulation/esp32/CMakeLists.txt`, `emulation/esp32/main/CMakeLists.txt`, `emulation/esp32/sdkconfig.defaults`, `emulation/esp32/main/main.c`, `emulation/esp32/run_qemu.sh`, `emulation/esp32/stream_runner.py`, `code/Makefile`, `Makefile` | Validação de firmware ESP-IDF/FreeRTOS emulando ESP32 no QEMU (`qemu-system-xtensa`) no perfil Tier 8 Universal ($\approx 111\text{ KB}$ SRAM estática, zero heap). Cronometria por ciclos (`esp_cpu_get_cycle_count()`), handshake serial Stop-and-Wait sobre Socket TCP, e prequential evaluation nos 8 datasets principais. | `[-]` | Em andamento |
 
 ---
 
@@ -669,3 +671,27 @@ flowchart LR
   - Superioridade em Streaming: No dataset Electricity, o C11 (64.34%) e River (64.34%) superam expressivamente o Scikit-Learn Batch (53.24%), comprovando a superioridade do modelo adaptativo a streams.
   - Latência e Throughput: O C11 atinge **$0.32\text{ a }2.13\,\mu\text{s}$ por amostra**, garantindo speedups de **$200\times$ a mais de $3.000\times$** frente ao River em Python.
 - Relatório consolidado gerado automaticamente em [`main_benchmark/main_benchmark_report.md`](file:///home/julio/Documentos/pessoal_minimal-decision-tree/main_benchmark/main_benchmark_report.md).
+
+---
+
+## 6. Fase 5: Emulação Hardware-in-the-Loop em ESP32 (`emulation/esp32/`)
+
+### Entrega 5.1: Emulação ESP32 (QEMU) da Hoeffding Tree C11 (`make bench-esp32`)
+- **Objetivo:** Comprovar experimentalmente a execução do núcleo C11 em um microcontrolador ESP32 realístico sem depender de hardware físico, empregando o emulador oficial `qemu-system-xtensa` da Espressif.
+- **Perfil Tier 8 Universal:**
+  - Compilação configurada via macros de pré-processador:
+    `-DHT_MAX_NODES=128 -DHT_MAX_ACTIVE_LEAVES=8 -DHT_MAX_FEATURES=64 -DHT_MAX_CLASSES=10 -DHT_MAX_ADWIN_DETECTORS=32`.
+  - Instância da árvore (`tree_instance`) alocada integralmente na seção `.bss` ($\approx 111,15\text{ KB}$ de SRAM estática).
+  - Alocação dinâmica estritamente proibida em runtime: monitoramento de `esp_get_free_heap_size()` comprovando $\Delta\text{Heap} = 0\text{ bytes}$ após processamento do stream.
+- **Firmware em C11 (`main/main.c` com ESP-IDF / FreeRTOS):**
+  - Implementa ciclo de medição de latência de CPU através de `esp_cpu_get_cycle_count()` a 240 MHz, medindo ciclos puros de inferência (`ht_tree_predict` / `ht_tree_predict_reg`) e treino online (`ht_tree_learn_one` / `ht_tree_learn_one_reg`).
+  - Monitoramento de Stack High-Water Mark (`uxTaskGetStackHighWaterMark()`).
+  - Máquina de estados serial Stop-and-Wait sobre UART0 (mapeada para Socket TCP pelo QEMU):
+    - `PING` $\to$ `PONG` (sincronização inicial pós-boot).
+    - `INIT,<params>` $\to$ `OK_INIT` (configuração dinâmica de sessão para múltiplos datasets sem reboot).
+    - `TRAIN,y,x0,...` $\to$ `ACK,pred,pred_cycles,learn_cycles` (fluxo Test-Then-Train amostra por amostra).
+    - `TEST,y,x0,...` $\to$ `ACK,pred,pred_cycles,0` (avaliação pura de inferência holdout).
+    - `END` $\to$ `RESULT,{<json_telemetry>}` (emissão de relatório JSON com métricas prequential, ciclos e uso de SRAM).
+- **Automação e Orquestração (`run_qemu.sh` e `stream_runner.py`):**
+  - `run_qemu.sh`: Detecta ambiente ESP-IDF/QEMU no host ou via container Docker (`espressif/idf`), compila o firmware, gera imagem binária de 4 MB (`esptool.py merge_bin`) e inicia o QEMU com serial redirecionado para `tcp:127.0.0.1:4000`.
+  - `stream_runner.py`: Driver Python que se conecta à porta TCP do QEMU, executa o handshake Stop-and-Wait contra o firmware e injeta datasets CSVs (avulsos via `--csv` ou a suíte completa de 8 datasets via `--suite main`), gerando [`emulation/esp32/esp32_emulation_report.md`](file:///home/julio/Documentos/pessoal_minimal-decision-tree/emulation/esp32/esp32_emulation_report.md).
