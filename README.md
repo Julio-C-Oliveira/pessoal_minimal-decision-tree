@@ -42,6 +42,10 @@ make bench
 make bench-drift
 make bench-regression
 make bench-triple
+make bench-main
+
+# Executa a suíte de emulação ESP32 (Hardware-in-the-Loop via QEMU)
+make bench-esp32
 ```
 
 ### 2.2 Exemplo Básico em C11 (`VFDT`)
@@ -311,6 +315,7 @@ pessoal_minimal-decision-tree/
 ├── docs/                        # Estudos matemáticos dos papers e plano de implementação (01 a 07)
 ├── references/                  # Artigos originais (PDFs) e código de referência (River e Scikit-Learn)
 ├── code/                        # Implementação em C11 puro (include/, src/, tests/ e Makefile)
+├── emulation/                   # Emulação Hardware-in-the-Loop em ESP32 (ESP-IDF, FreeRTOS e QEMU)
 ├── main_benchmark/              # Suíte principal de benchmark de desempenho (8 datasets, profiling de RAM)
 └── benchmarks/                  # Scripts e runners de validação comparativa (C11 vs River vs Sklearn)
 ```
