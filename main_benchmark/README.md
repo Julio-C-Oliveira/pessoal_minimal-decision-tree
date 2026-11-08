@@ -35,7 +35,7 @@ A suíte é dividida balanceadamente entre **Classificação** (4 fluxos) e **Re
 ## 2. Estrutura de Arquivos
 
 ```
-main_benchmark/ (ou pasta "main benchmark/")
+main_benchmark/
 ├── main_benchmark.py           # Orquestrador principal da avaliação tripla (C11 vs River vs Scikit-Learn)
 ├── prepare_datasets.py         # Gerador e formatador padronizado dos 8 datasets
 ├── README.md                   # Este documento explicativo
