@@ -541,15 +541,24 @@ def generate_markdown_report(
                 else:
                     by_engine[eng].append(t)
 
-            # Sort trials
-            metric_sort_key = "holdout_acc" if task == "classification" else "holdout_mae"
-            reverse_sort = True if task == "classification" else False
-
-            for k in by_engine:
-                by_engine[k].sort(key=lambda x: x.get(metric_sort_key, 0.0 if reverse_sort else 1e9), reverse=reverse_sort)
+            # Sort trials:
+            # - Classificação: 1º F1 Score (macro), 2º Acurácia (desempate)
+            # - Regressão: 1º R² (maior melhor), 2º RMSE (menor melhor como desempate)
+            if task == "classification":
+                for k in by_engine:
+                    by_engine[k].sort(
+                        key=lambda x: (x.get("f1_macro", 0.0), x.get("holdout_acc", 0.0)),
+                        reverse=True,
+                    )
+            else:
+                for k in by_engine:
+                    by_engine[k].sort(
+                        key=lambda x: (x.get("holdout_r2", -1e9), -x.get("holdout_rmse", 1e9)),
+                        reverse=True,
+                    )
 
             engines_to_show = [
-                ("c11_global", "C11 libht (Global / T256)"),
+                ("c11_global", "C11 libht (Global)"),
                 ("c11_t8", "C11 libht (Tier 8)"),
                 ("river", "River"),
                 ("sklearn", "Scikit-Learn"),
