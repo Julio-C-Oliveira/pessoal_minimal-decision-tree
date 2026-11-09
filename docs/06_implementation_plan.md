@@ -38,7 +38,7 @@
 | **6.3** | **Fase 6:** `libht_prep` Parte 2: Discretizador Ben-Haim e Pipeline Unificado | `code/include/ht_prep.h`, `code/src/ht_prep.c`, `code/tests/test_prep.c` | **N1:** quantis e bins Ben-Haim em distribuições bimodais/exponenciais<br/>**N2:** pipeline completo `ht_prep_pipeline_t` transformando tuplas `ht_value_t[]` | `[x]` | `ae604c9` |
 | **6.4** | **Fase 6:** Observador Não-Paramétrico de Histograma na Árvore | `code/include/ht_memory.h`, `code/include/ht_observer.h`, `code/src/ht_observer.c`, `code/src/ht_criterion.c`, `code/src/ht_tree.c`, `code/tests/test_observer.c` | **N1:** fusão de bins `ht_hist_obs_t`, `cond_proba` e split suggestions<br/>**N2:** `union` estrita mantendo $80\text{ B}$/$160\text{ B}$ em `ht_feature_obs_t`<br/>**N3:** classificação bimodal com `HT_OBS_HISTOGRAM` | `[x]` | `52d762a` |
 | **6.5** | **Fase 6:** Normalização Z-Score Híbrida nas Folhas SGD, Pipeline Anexo e SemVer `0.2.0` | `VERSION`, `code/include/ht_config.h`, `code/include/ht_tree.h`, `code/src/ht_tree.c`, `code/Makefile`, `code/tests/test_tree.c`, `code/tests/test_e2e_flow.c`, `code/tests/test_main.c` | **N1:** credibilidade $\alpha$ e estabilização de SGD multi-escala<br/>**N2:** herança de pesos mãe $\to$ filhas sem descontinuidade pós-split<br/>**N3:** `ht_tree_set_prep_pipeline` no fluxo E2E + asserções `HT_VERSION_CHECK(0, 2, 0)` | `[x]` | `cec52ee` |
-| **6.6** | **Fase 6:** Benchmark Experimental de Pré-Processamento e Atualização da Wiki | `benchmarks/compare_prep.py`, `benchmarks/bench_c_runner.c`, `benchmarks/prep_benchmark_report.md`, `Makefile`, `wiki/*.md`, `README.md` | Avaliação em multi-escala (Bikes), ruído industrial de sensores (outliers) e distribuições multimodais; sincronização da GitHub Wiki | `[ ]` | — |
+| **6.6** | **Fase 6:** Benchmark Experimental de Pré-Processamento e Atualização da Wiki | `benchmarks/compare_prep.py`, `benchmarks/bench_c_runner.c`, `benchmarks/prep_benchmark_report.md`, `Makefile`, `wiki/*.md`, `README.md` | Avaliação em multi-escala (Bikes), ruído industrial de sensores (outliers) e distribuições multimodais; sincronização da GitHub Wiki | `[x]` | `22fb55e` |
 
 ---
 
@@ -753,7 +753,11 @@ flowchart LR
 - Testes N1, N2 e N3 em `code/tests/test_tree.c`, `code/tests/test_e2e_flow.c` e `code/tests/test_main.c`.
 
 ### Entrega 6.6: Benchmark Experimental de Pré-Processamento e Atualização da Wiki
-- Criação de `benchmarks/compare_prep.py` e relatório `benchmarks/prep_benchmark_report.md`.
-- Target no Makefile: `make bench-prep`.
-- Atualização e sincronização da Wiki com os novos módulos implementados.
+- Criação de `benchmarks/compare_prep.py` e relatório consolidado `benchmarks/prep_benchmark_report.md`.
+- Target automatizado no Makefile: `make bench-prep`.
+- Avaliação comparativa completa em 3 cenários experimentais contra River e Scikit-Learn:
+  1. **Regressão Multi-Escala:** Comprovação da explosão de gradiente com SGD cru ($MAE \sim 10^{14}$) e estabilização para $MAE = 1.1248$ via Z-Score Híbrido com credibilidade $\alpha$ no C11, operando com **0.0 KB de heap em runtime** e speedup de **200.1x** frente ao pipeline `StandardScaler` do River ($1.39\,\mu\text{s}$ vs $278.3\,\mu\text{s}$).
+  2. **Rejeição de Espículas de Sensores Industriais:** Filtro Hampel MAD ($W=7, 3\sigma$) acoplado via `ht_prep_pipeline_t`, contendo espículas de $+2.000$ e reduzindo o erro de $MAE \approx 2.6 \times 10^{13}$ para **$MAE = 0.9992$** e **$R^2 = 0.9914$**.
+  3. **Distribuições Bimodais Não-Paramétricas:** O observador `HT_OBS_HISTOGRAM` (Ben-Haim & Tom-Tov) atingiu 95.68% de acurácia com 7 nós na árvore, em paridade estrutural com o `HistogramSplitter` do River (7 nós), mantendo **0.0 KB de heap** e latência de apenas $0.75\,\mu\text{s}$/amostra.
+- Atualização e sincronização da Wiki (`wiki/Versionamento-Releases-e-Roadmap.md`, `wiki/Arquitetura-e-Fluxogramas.md`, `wiki/Home.md`) e `README.md` documentando a release `0.2.0` e os novos módulos da biblioteca companheira `libht_prep`.
 
