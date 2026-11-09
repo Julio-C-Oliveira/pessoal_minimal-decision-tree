@@ -171,6 +171,9 @@ int main(void) {
     /* Nível 1 & 2: Detector ADWIN com Histograma Exponencial Fixo */
     test_drift_run();
 
+    /* Nível 1 & 2: Micro-Pipelines de Pré-Processamento (libht_prep) */
+    test_prep_run();
+
     /* Nível 3: Fluxo Ponta a Ponta Acumulado */
     test_e2e_flow_run();
 
