@@ -1,30 +1,31 @@
 # Relatório de Emulação ESP32 — Hoeffding Tree C11 (Tier 8 Universal)
 
 > **Ambiente de Emulação:** ESP32 (Xtensa Dual-Core LX6 @ 240 MHz) via `qemu-system-xtensa`
-> **Perfil de Memória:** Tier 8 Universal (`HT_MAX_NODES=128`, `HT_MAX_ACTIVE_LEAVES=8`, `HT_MAX_FEATURES=64`, `HT_MAX_CLASSES=10`)
+> **Perfil de Memória:** Tier 8 Universal (`HT_MAX_NODES=128`, `HT_MAX_ACTIVE_LEAVES=8`, `HT_MAX_FEATURES=64`, `HT_MAX_CLASSES=10`, `HT_REG_NUM_SLOTS=8`)
+> **Otimização de Hiperparâmetros:** Melhores configurações empíricas do **Tier 8** extraídas de `main_benchmark/hyperparam_report.md`
 > **Garantia de Determinismo:** Zero `malloc`/`free` em runtime ($\Delta\text{Heap} = 0\text{ bytes}$ comprovados)
 
 ---
 
 ## 1. Desempenho em Classificação
 
-| Dataset | Treino | Teste | Acurácia Holdout | Precisão Macro | Recall Macro | F1-Score Macro | Acurácia Preq. | Topologia (Nós) |
-| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **SEA** | 14,000 | 6,000 | **98.10%** | 98.11% | 97.52% | **97.81%** | 96.04% | 11 nós (6 folhas) |
-| **Electricity** | 14,000 | 6,000 | **64.05%** | 63.68% | 63.29% | **63.32%** | 62.99% | 9 nós (5 folhas) |
-| **Forest Covertype** | 14,000 | 6,000 | **52.62%** | 50.23% | 51.59% | **50.63%** | 41.64% | 1 nós (1 folhas) |
-| **Airlines** | 14,000 | 6,000 | **76.80%** | 68.70% | 54.15% | **52.21%** | 75.99% | 7 nós (4 folhas) |
+| Dataset | Hiperparâmetros (Tier 8) | Treino | Teste | Acurácia Holdout | Precisão Macro | Recall Macro | F1-Score Macro | Acurácia Preq. | Topologia (Nós) |
+| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **SEA** | `grace=100`, `delta=0.01`, `tau=0.1`, `crit=info_gain`, `leaf=nba` | 14,000 | 6,000 | **99.02%** | 98.76% | 98.99% | **98.87%** | 97.29% | 43 nós (8 folhas) |
+| **Electricity** | `grace=400`, `delta=0.01`, `tau=0.1`, `crit=gini`, `leaf=mc` | 14,000 | 6,000 | **64.20%** | 63.83% | 63.63% | **63.67%** | 63.93% | 49 nós (8 folhas) |
+| **Forest Covertype** | `grace=50`, `delta=0.001`, `tau=0.1`, `crit=gini`, `leaf=nba` | 14,000 | 6,000 | **66.43%** | 67.08% | 62.48% | **63.69%** | 59.00% | 73 nós (8 folhas) |
+| **Airlines** | `grace=50`, `delta=0.0001`, `tau=0.05`, `crit=gini`, `leaf=mc` | 14,000 | 6,000 | **76.53%** | 66.01% | 56.82% | **56.93%** | 75.79% | 15 nós (8 folhas) |
 
 ---
 
 ## 2. Desempenho em Regressão Contínua
 
-| Dataset | Treino | Teste | Holdout MAE | Holdout RMSE | Holdout $R^2$ | Preq. MAE | Preq. RMSE | Preq. $R^2$ | Topologia (Nós) |
-| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **Friedman #1** | 14,000 | 6,000 | **2.2983** | 2.8873 | **0.6645** | 2.2680 | 2.8777 | 0.6631 | 41 nós (8 folhas) |
-| **Bikes** | 12,165 | 5,214 | **53.1949** | 79.9699 | **-0.1341** | 59.6959 | 91.8369 | 0.4256 | 27 nós (8 folhas) |
-| **Appliances Energy** | 13,814 | 5,921 | **33.1660** | 42.3745 | **0.6787** | 42.1982 | 508.0700 | -44.5799 | 35 nós (8 folhas) |
-| **NYC Taxi** | 10,500 | 4,500 | **353.1150** | 458.2122 | **0.1419** | 384.5726 | 2306.8679 | -20.2186 | 35 nós (8 folhas) |
+| Dataset | Hiperparâmetros (Tier 8) | Treino | Teste | Holdout MAE | Holdout RMSE | Holdout $R^2$ | Preq. MAE | Preq. RMSE | Preq. $R^2$ | Topologia (Nós) |
+| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **Friedman #1** | `grace=200`, `delta=1e-07`, `tau=0.01`, `leaf=model` | 14,000 | 6,000 | **2.2244** | 2.7960 | **0.6854** | 2.2319 | 2.8466 | 0.6704 | 43 nós (8 folhas) |
+| **Bikes** | `grace=200`, `delta=0.01`, `tau=0.1`, `leaf=mean` | 12,165 | 5,214 | **39.6668** | 58.4939 | **0.3932** | 52.2378 | 77.4104 | 0.5919 | 39 nós (8 folhas) |
+| **Appliances Energy** | `grace=100`, `delta=1e-07`, `tau=0.01`, `leaf=adaptive` | 13,814 | 5,921 | **29.9763** | 37.8965 | **0.7431** | 38.3980 | 507.6419 | -44.5031 | 51 nós (8 folhas) |
+| **NYC Taxi** | `grace=50`, `delta=1e-07`, `tau=0.15`, `leaf=adaptive` | 10,500 | 4,500 | **331.8239** | 432.7701 | **0.2345** | 361.9140 | 2302.3561 | -20.1357 | 61 nós (8 folhas) |
 
 ---
 
@@ -33,18 +34,19 @@
 > **Nota sobre as Colunas de Latência:**
 > - **Ciclo Test-Then-Train:** Cada medição cobre o tempo para predição (`predict`) + treino incremental (`learn_one`) daquela amostra.
 > - **Cronometria por Ciclos:** As latências são obtidas em ciclos de clock de CPU via `esp_cpu_get_cycle_count()` e convertidas para microssegundos ($\mu\text{s}$) na frequência nominal de 240 MHz ($\mu\text{s} = \text{ciclos} / 240$).
-> - **Latência Média vs Cauda ($p_{95}, p_{99}$):** A latência média reflete o processamento contínuo nas folhas em $O(1)$. Os percentis de cauda ($p_{95}$ e $p_{99}$) capturam o impacto transitório do teste estatístico do *Hoeffding Bound* executado a cada 200 amostras (`grace_period`).
+> - **Latência Média vs Cauda ($p_{95}, p_{99}$):** A latência média reflete o processamento contínuo nas folhas em $O(1)$. Os percentis de cauda ($p_{95}$ e $p_{99}$) capturam o impacto transitório do teste estatístico do *Hoeffding Bound* executado a cada `grace_period` amostras.
+
 
 | Dataset | Tarefa | Latência Média | Latência $p_{95}$ | Latência $p_{99}$ | Throughput (Vazão) | Model Footprint | Consumo RAM (SRAM / Heap) | FLOPs / Amostra |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **SEA** | Classificação | **73.81 $\mu$s** | 132.11 $\mu$s | 535.88 $\mu$s | **13,548 amostras/s** | 340 B (11 nós) | 111.3 KB (.bss) / **0 B Heap** | **69 FLOPs** |
-| **Electricity** | Classificação | **115.50 $\mu$s** | 206.87 $\mu$s | 965.48 $\mu$s | **8,658 amostras/s** | 284 B (9 nós) | 111.3 KB (.bss) / **0 B Heap** | **149 FLOPs** |
-| **Forest Covertype** | Classificação | **1947.20 $\mu$s** | 2250.05 $\mu$s | 4288.57 $\mu$s | **514 amostras/s** | 60 B (1 nós) | 111.3 KB (.bss) / **0 B Heap** | **2,250 FLOPs** |
-| **Airlines** | Classificação | **115.84 $\mu$s** | 162.18 $\mu$s | 228.89 $\mu$s | **8,633 amostras/s** | 228 B (7 nós) | 111.3 KB (.bss) / **0 B Heap** | **133 FLOPs** |
-| **Friedman #1** | Regressão | **53.68 $\mu$s** | 83.53 $\mu$s | 113.50 $\mu$s | **18,629 amostras/s** | 1,180 B (41 nós) | 111.3 KB (.bss) / **0 B Heap** | **138 FLOPs** |
-| **Bikes** | Regressão | **63.20 $\mu$s** | 95.74 $\mu$s | 121.85 $\mu$s | **15,823 amostras/s** | 788 B (27 nós) | 111.3 KB (.bss) / **64 B Heap** | **160 FLOPs** |
-| **Appliances Energy** | Regressão | **79.85 $\mu$s** | 151.95 $\mu$s | 195.40 $\mu$s | **12,523 amostras/s** | 1,012 B (35 nós) | 111.3 KB (.bss) / **0 B Heap** | **336 FLOPs** |
-| **NYC Taxi** | Regressão | **41.81 $\mu$s** | 80.66 $\mu$s | 157.95 $\mu$s | **23,918 amostras/s** | 1,012 B (35 nós) | 111.3 KB (.bss) / **0 B Heap** | **105 FLOPs** |
+| **SEA** | Classificação | **46.80 $\mu$s** | 161.40 $\mu$s | 236.79 $\mu$s | **21,368 amostras/s** | 1,236 B (43 nós) | 111.3 KB (.bss) / **0 B Heap** | **69 FLOPs** |
+| **Electricity** | Classificação | **46.84 $\mu$s** | 75.94 $\mu$s | 113.50 $\mu$s | **21,349 amostras/s** | 1,404 B (49 nós) | 111.3 KB (.bss) / **0 B Heap** | **149 FLOPs** |
+| **Forest Covertype** | Classificação | **690.55 $\mu$s** | 2028.09 $\mu$s | 5963.50 $\mu$s | **1,448 amostras/s** | 2,076 B (73 nós) | 111.3 KB (.bss) / **0 B Heap** | **2,250 FLOPs** |
+| **Airlines** | Classificação | **58.73 $\mu$s** | 82.17 $\mu$s | 1027.95 $\mu$s | **17,027 amostras/s** | 452 B (15 nós) | 111.3 KB (.bss) / **0 B Heap** | **133 FLOPs** |
+| **Friedman #1** | Regressão | **90.51 $\mu$s** | 211.18 $\mu$s | 284.93 $\mu$s | **11,049 amostras/s** | 1,236 B (43 nós) | 111.3 KB (.bss) / **0 B Heap** | **138 FLOPs** |
+| **Bikes** | Regressão | **69.60 $\mu$s** | 165.62 $\mu$s | 224.60 $\mu$s | **14,368 amostras/s** | 1,124 B (39 nós) | 111.3 KB (.bss) / **64 B Heap** | **160 FLOPs** |
+| **Appliances Energy** | Regressão | **97.42 $\mu$s** | 263.98 $\mu$s | 368.92 $\mu$s | **10,265 amostras/s** | 1,460 B (51 nós) | 111.3 KB (.bss) / **0 B Heap** | **336 FLOPs** |
+| **NYC Taxi** | Regressão | **48.98 $\mu$s** | 122.19 $\mu$s | 180.91 $\mu$s | **20,416 amostras/s** | 1,740 B (61 nós) | 111.3 KB (.bss) / **0 B Heap** | **105 FLOPs** |
 
 ---
 

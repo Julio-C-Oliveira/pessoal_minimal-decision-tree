@@ -35,7 +35,7 @@ class Esp32Client:
         self.reader = None
         self.writer = None
 
-    def connect(self, max_retries: int = 30, retry_delay: float = 0.5):
+    def connect(self, max_retries: int = 60, retry_delay: float = 0.5):
         for attempt in range(1, max_retries + 1):
             try:
                 self.sock = socket.create_connection((self.host, self.port), timeout=self.timeout)
@@ -161,6 +161,7 @@ class Esp32Client:
         n_classes: int,
         feature_types: List[int],
         leaf: str = "adaptive",
+        criterion: str = "info_gain",
         grace: int = 200,
         delta: float = 1e-7,
         tau: float = 0.05,
@@ -169,7 +170,7 @@ class Esp32Client:
         types_str = "".join(str(t) for t in feature_types)
         cmd = (
             f"INIT,task={task},n_features={n_features},n_classes={n_classes},"
-            f"types={types_str},leaf={leaf},grace={grace},delta={delta},tau={tau},hat={1 if hat else 0}"
+            f"types={types_str},leaf={leaf},crit={criterion},grace={grace},delta={delta},tau={tau},hat={1 if hat else 0}"
         )
         self.send_line(cmd)
         while True:
@@ -423,6 +424,11 @@ def run_dataset_benchmark(
     max_test_samples: Optional[int] = None,
     window_size: int = 16,
     log_interval: int = 500,
+    leaf: Optional[str] = None,
+    criterion: str = "info_gain",
+    grace: int = 200,
+    delta: float = 1e-7,
+    tau: float = 0.05,
 ) -> Dict[str, Any]:
     """Runs Test-Then-Train prequential evaluation followed by holdout inference."""
     meta, train_rows = parse_csv_stream(train_csv, max_samples=max_train_samples)
@@ -435,14 +441,18 @@ def run_dataset_benchmark(
     n_classes = meta["n_classes"]
     feat_types = meta["feature_types"]
 
-    leaf_strategy = "adaptive" if task == "regression" else "nba"
+    if leaf is None:
+        leaf = "adaptive" if task == "regression" else "nba"
     client.init_session(
         task=task,
         n_features=n_features,
         n_classes=n_classes,
         feature_types=feat_types,
-        leaf=leaf_strategy,
-        grace=200,
+        leaf=leaf,
+        criterion=criterion,
+        grace=grace,
+        delta=delta,
+        tau=tau,
     )
 
     train_preds, train_pred_us, train_learn_us, train_tot_us = stream_samples_windowed(
@@ -469,6 +479,11 @@ def run_dataset_benchmark(
     result["dataset"] = meta["stream"]
     result["n_features"] = n_features
     result["n_classes"] = n_classes
+    result["grace"] = grace
+    result["delta"] = delta
+    result["tau"] = tau
+    result["criterion"] = criterion
+    result["leaf"] = leaf
 
     # Holdout and prequential metrics
     if task == "classification":
@@ -523,24 +538,27 @@ def run_main_suite(
     window_size: int = 16,
 ) -> List[Dict[str, Any]]:
     """Runs all 8 datasets from main_benchmark sequentially through the emulated ESP32."""
+    # Optimal Tier 8 hyperparameters extracted from main_benchmark/hyperparam_report.md
     datasets = [
-        ("sea", "SEA", "classification"),
-        ("electricity", "Electricity", "classification"),
-        ("covertype", "Forest Covertype", "classification"),
-        ("airlines", "Airlines", "classification"),
-        ("friedman", "Friedman #1", "regression"),
-        ("bikes", "Bikes", "regression"),
-        ("appliances_energy", "Appliances Energy", "regression"),
-        ("nyc_taxi", "NYC Taxi", "regression"),
+        # (d_id, name, task, grace, delta, tau, criterion, leaf)
+        ("sea", "SEA", "classification", 100, 0.01, 0.10, "info_gain", "nba"),
+        ("electricity", "Electricity", "classification", 400, 0.01, 0.10, "gini", "mc"),
+        ("covertype", "Forest Covertype", "classification", 50, 0.001, 0.10, "gini", "nba"),
+        ("airlines", "Airlines", "classification", 50, 0.0001, 0.05, "gini", "mc"),
+        ("friedman", "Friedman #1", "regression", 200, 1e-07, 0.01, "variance_reduction", "model"),
+        ("bikes", "Bikes", "regression", 200, 0.01, 0.10, "variance_reduction", "mean"),
+        ("appliances_energy", "Appliances Energy", "regression", 100, 1e-07, 0.01, "variance_reduction", "adaptive"),
+        ("nyc_taxi", "NYC Taxi", "regression", 50, 1e-07, 0.15, "variance_reduction", "adaptive"),
     ]
 
     results = []
     print("\n" + "=" * 80)
-    print(" ESP32 HARDWARE-IN-THE-LOOP EMULATION: 8 DATASETS (TIER 8 UNIVERSAL)")
+    print(" ESP32 HARDWARE-IN-THE-LOOP EMULATION: 8 DATASETS (TIER 8 OPTIMAL)")
     print(" Architecture: Xtensa LX6 @ 240 MHz | RAM Budget: <= 115 KB static SRAM")
+    print(" Hyperparameters: Top-1 Tier 8 configurations from hyperparam_report.md")
     print("=" * 80)
 
-    for d_id, name, task in datasets:
+    for d_id, name, task, grace, delta, tau, criterion, leaf in datasets:
         train_csv = os.path.join(data_dir, f"{d_id}_train.csv")
         test_csv = os.path.join(data_dir, f"{d_id}_test.csv")
         if not os.path.exists(train_csv):
@@ -551,7 +569,7 @@ def run_main_suite(
         train_limit = int(max_samples * 0.70) if max_samples else None
         test_limit = int(max_samples * 0.30) if max_samples else None
 
-        print(f"\n>>> Running Dataset: {name} [{task.upper()}]")
+        print(f"\n>>> Running Dataset: {name} [{task.upper()}] (Tier 8: grace={grace}, delta={delta}, tau={tau}, crit={criterion}, leaf={leaf})")
         res = run_dataset_benchmark(
             client,
             train_csv=train_csv,
@@ -559,6 +577,11 @@ def run_main_suite(
             max_train_samples=train_limit,
             max_test_samples=test_limit,
             window_size=window_size,
+            leaf=leaf,
+            criterion=criterion,
+            grace=grace,
+            delta=delta,
+            tau=tau,
         )
         res["display_name"] = name
         results.append(res)
@@ -579,7 +602,8 @@ def generate_markdown_report(results: List[Dict[str, Any]], report_path: str):
     md = []
     md.append("# Relatório de Emulação ESP32 — Hoeffding Tree C11 (Tier 8 Universal)\n")
     md.append("> **Ambiente de Emulação:** ESP32 (Xtensa Dual-Core LX6 @ 240 MHz) via `qemu-system-xtensa`")
-    md.append("> **Perfil de Memória:** Tier 8 Universal (`HT_MAX_NODES=128`, `HT_MAX_ACTIVE_LEAVES=8`, `HT_MAX_FEATURES=64`, `HT_MAX_CLASSES=10`)")
+    md.append("> **Perfil de Memória:** Tier 8 Universal (`HT_MAX_NODES=128`, `HT_MAX_ACTIVE_LEAVES=8`, `HT_MAX_FEATURES=64`, `HT_MAX_CLASSES=10`, `HT_REG_NUM_SLOTS=8`)")
+    md.append("> **Otimização de Hiperparâmetros:** Melhores configurações empíricas do **Tier 8** extraídas de `main_benchmark/hyperparam_report.md`")
     md.append(r"> **Garantia de Determinismo:** Zero `malloc`/`free` em runtime ($\Delta\text{Heap} = 0\text{ bytes}$ comprovados)" + "\n")
     md.append("---\n")
 
@@ -587,11 +611,13 @@ def generate_markdown_report(results: List[Dict[str, Any]], report_path: str):
     clf_results = [r for r in results if r["task"] == "classification"]
     if clf_results:
         md.append("## 1. Desempenho em Classificação\n")
-        md.append(r"| Dataset | Treino | Teste | Acurácia Holdout | Precisão Macro | Recall Macro | F1-Score Macro | Acurácia Preq. | Topologia (Nós) |")
-        md.append("| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |")
+        md.append(r"| Dataset | Hiperparâmetros (Tier 8) | Treino | Teste | Acurácia Holdout | Precisão Macro | Recall Macro | F1-Score Macro | Acurácia Preq. | Topologia (Nós) |")
+        md.append("| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |")
         for r in clf_results:
+            hp_str = f"`grace={r.get('grace', 200)}`, `delta={r.get('delta', 1e-7)}`, `tau={r.get('tau', 0.05)}`, `crit={r.get('criterion', 'info_gain')}`, `leaf={r.get('leaf', 'nba')}`"
             md.append(
                 f"| **{r.get('display_name', r['dataset'])}** | "
+                f"{hp_str} | "
                 f"{r['n_train']:,} | {r['n_test']:,} | "
                 f"**{r.get('holdout_acc', 0.0):.2f}%** | "
                 f"{r.get('holdout_precision', r.get('holdout_acc', 0.0)):.2f}% | "
@@ -606,11 +632,13 @@ def generate_markdown_report(results: List[Dict[str, Any]], report_path: str):
     reg_results = [r for r in results if r["task"] == "regression"]
     if reg_results:
         md.append("## 2. Desempenho em Regressão Contínua\n")
-        md.append(r"| Dataset | Treino | Teste | Holdout MAE | Holdout RMSE | Holdout $R^2$ | Preq. MAE | Preq. RMSE | Preq. $R^2$ | Topologia (Nós) |")
-        md.append("| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |")
+        md.append(r"| Dataset | Hiperparâmetros (Tier 8) | Treino | Teste | Holdout MAE | Holdout RMSE | Holdout $R^2$ | Preq. MAE | Preq. RMSE | Preq. $R^2$ | Topologia (Nós) |")
+        md.append("| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |")
         for r in reg_results:
+            hp_str = f"`grace={r.get('grace', 200)}`, `delta={r.get('delta', 1e-7)}`, `tau={r.get('tau', 0.05)}`, `leaf={r.get('leaf', 'adaptive')}`"
             md.append(
                 f"| **{r.get('display_name', r['dataset'])}** | "
+                f"{hp_str} | "
                 f"{r['n_train']:,} | {r['n_test']:,} | "
                 f"**{r.get('holdout_mae', 0.0):.4f}** | "
                 f"{r.get('holdout_rmse', 0.0):.4f} | "
@@ -627,7 +655,7 @@ def generate_markdown_report(results: List[Dict[str, Any]], report_path: str):
     md.append("> **Nota sobre as Colunas de Latência:**\n"
               "> - **Ciclo Test-Then-Train:** Cada medição cobre o tempo para predição (`predict`) + treino incremental (`learn_one`) daquela amostra.\n"
               r"> - **Cronometria por Ciclos:** As latências são obtidas em ciclos de clock de CPU via `esp_cpu_get_cycle_count()` e convertidas para microssegundos ($\mu\text{s}$) na frequência nominal de 240 MHz ($\mu\text{s} = \text{ciclos} / 240$)." + "\n"
-              "> - **Latência Média vs Cauda ($p_{95}, p_{99}$):** A latência média reflete o processamento contínuo nas folhas em $O(1)$. Os percentis de cauda ($p_{95}$ e $p_{99}$) capturam o impacto transitório do teste estatístico do *Hoeffding Bound* executado a cada 200 amostras (`grace_period`).\n\n")
+              "> - **Latência Média vs Cauda ($p_{95}, p_{99}$):** A latência média reflete o processamento contínuo nas folhas em $O(1)$. Os percentis de cauda ($p_{95}$ e $p_{99}$) capturam o impacto transitório do teste estatístico do *Hoeffding Bound* executado a cada `grace_period` amostras.\n\n")
     md.append(r"| Dataset | Tarefa | Latência Média | Latência $p_{95}$ | Latência $p_{99}$ | Throughput (Vazão) | Model Footprint | Consumo RAM (SRAM / Heap) | FLOPs / Amostra |")
     md.append("| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |")
 
