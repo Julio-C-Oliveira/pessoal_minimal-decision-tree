@@ -26,6 +26,7 @@ Produces:
 """
 
 import argparse
+import concurrent.futures
 import csv
 import itertools
 import json
@@ -34,8 +35,11 @@ import os
 import random
 import subprocess
 import sys
+import threading
 import time
 from typing import Dict, Any, List, Optional, Tuple
+
+_compile_lock = threading.Lock()
 
 
 # ==============================================================================
@@ -74,88 +78,89 @@ def resolve_executable(bin_name: str) -> str:
 def ensure_c11_binary(tier: int, slots: int, is_high_dim: bool) -> str:
     """
     Compiles or retrieves a cached C11 benchmark runner binary with the required
-    tier (active leaves) and regression slot macros.
+    tier (active leaves) and regression slot macros. Thread-safe with lock.
     """
-    os.makedirs(BUILD_DIR, exist_ok=True)
-    suffix = "_main" if is_high_dim else ""
-    bin_name = f"bench_c_runner_t{tier}_s{slots}{suffix}"
-    bin_path = os.path.join(BUILD_DIR, bin_name)
+    with _compile_lock:
+        os.makedirs(BUILD_DIR, exist_ok=True)
+        suffix = "_main" if is_high_dim else ""
+        bin_name = f"bench_c_runner_t{tier}_s{slots}{suffix}"
+        bin_path = os.path.join(BUILD_DIR, bin_name)
 
-    # Check if binary already exists and is newer than source files
-    c_srcs = [
-        BENCH_SRC,
-        os.path.join(CODE_DIR, "src", "ht_tree.c"),
-        os.path.join(CODE_DIR, "src", "ht_memory.c"),
-        os.path.join(CODE_DIR, "src", "ht_observer.c"),
-        os.path.join(CODE_DIR, "src", "ht_criterion.c"),
-        os.path.join(CODE_DIR, "src", "ht_drift.c"),
-        os.path.join(CODE_DIR, "include", "ht_config.h"),
-        os.path.join(CODE_DIR, "include", "ht_memory.h"),
-    ]
-
-    needs_compile = not os.path.exists(bin_path)
-    if not needs_compile:
-        bin_mtime = os.path.getmtime(bin_path)
-        for s in c_srcs:
-            if os.path.exists(s) and os.path.getmtime(s) > bin_mtime:
-                needs_compile = True
-                break
-
-    if needs_compile:
-        print(f"    [Compiling C11 binary: {bin_name}]...", end="", flush=True)
-        # Node and active leaf capacity logic per tier and slot count (ensuring <= 1 MB)
-        if tier == 4:
-            leaves = 4
-            nodes = 64
-        elif tier == 8:
-            leaves = 8
-            nodes = 128
-        else:
-            if is_high_dim:
-                leaves = 40
-                nodes = 1024
-            elif slots >= 32:
-                leaves = 100
-                nodes = 1024
-            elif slots >= 16:
-                leaves = 192
-                nodes = 2048
-            else:
-                leaves = 256
-                nodes = 2048
-
-        macros = [
-            f"-DHT_MAX_ACTIVE_LEAVES={leaves}",
-            f"-DHT_MAX_NODES={nodes}",
-            f"-DHT_REG_NUM_SLOTS={slots}",
-        ]
-        if is_high_dim:
-            macros.extend(["-DHT_MAX_FEATURES=64", "-DHT_MAX_CLASSES=8"])
-
-        src_files = [
+        # Check if binary already exists and is newer than source files
+        c_srcs = [
+            BENCH_SRC,
+            os.path.join(CODE_DIR, "src", "ht_tree.c"),
             os.path.join(CODE_DIR, "src", "ht_memory.c"),
             os.path.join(CODE_DIR, "src", "ht_observer.c"),
             os.path.join(CODE_DIR, "src", "ht_criterion.c"),
-            os.path.join(CODE_DIR, "src", "ht_tree.c"),
             os.path.join(CODE_DIR, "src", "ht_drift.c"),
-            BENCH_SRC,
+            os.path.join(CODE_DIR, "include", "ht_config.h"),
+            os.path.join(CODE_DIR, "include", "ht_memory.h"),
         ]
 
-        cmd = [
-            "gcc",
-            "-std=c11",
-            "-O2",
-            "-Wall",
-            "-Wextra",
-            "-Werror",
-            "-pedantic",
-            f"-I{os.path.join(CODE_DIR, 'include')}",
-        ] + macros + src_files + ["-lm", "-o", bin_path]
+        needs_compile = not os.path.exists(bin_path)
+        if not needs_compile:
+            bin_mtime = os.path.getmtime(bin_path)
+            for s in c_srcs:
+                if os.path.exists(s) and os.path.getmtime(s) > bin_mtime:
+                    needs_compile = True
+                    break
 
-        subprocess.run(cmd, check=True)
-        print(" Done.")
+        if needs_compile:
+            print(f"    [Compiling C11 binary: {bin_name}]...", end="", flush=True)
+            # Node and active leaf capacity logic per tier and slot count (ensuring <= 1 MB)
+            if tier == 4:
+                leaves = 4
+                nodes = 64
+            elif tier == 8:
+                leaves = 8
+                nodes = 128
+            else:
+                if is_high_dim:
+                    leaves = 40
+                    nodes = 1024
+                elif slots >= 32:
+                    leaves = 100
+                    nodes = 1024
+                elif slots >= 16:
+                    leaves = 192
+                    nodes = 2048
+                else:
+                    leaves = 256
+                    nodes = 2048
 
-    return bin_path
+            macros = [
+                f"-DHT_MAX_ACTIVE_LEAVES={leaves}",
+                f"-DHT_MAX_NODES={nodes}",
+                f"-DHT_REG_NUM_SLOTS={slots}",
+            ]
+            if is_high_dim:
+                macros.extend(["-DHT_MAX_FEATURES=64", "-DHT_MAX_CLASSES=8"])
+
+            src_files = [
+                os.path.join(CODE_DIR, "src", "ht_memory.c"),
+                os.path.join(CODE_DIR, "src", "ht_observer.c"),
+                os.path.join(CODE_DIR, "src", "ht_criterion.c"),
+                os.path.join(CODE_DIR, "src", "ht_tree.c"),
+                os.path.join(CODE_DIR, "src", "ht_drift.c"),
+                BENCH_SRC,
+            ]
+
+            cmd = [
+                "gcc",
+                "-std=c11",
+                "-O2",
+                "-Wall",
+                "-Wextra",
+                "-Werror",
+                "-pedantic",
+                f"-I{os.path.join(CODE_DIR, 'include')}",
+            ] + macros + src_files + ["-lm", "-o", bin_path]
+
+            subprocess.run(cmd, check=True)
+            print(" Done.")
+
+        return bin_path
 
 
 # ==============================================================================
@@ -266,7 +271,7 @@ def run_trial_c11(
     slots = params.get("reg_num_slots", 16)
     bin_path = ensure_c11_binary(tier, slots, is_high_dim)
 
-    json_path = f"/tmp/tune_c11_{os.path.basename(bin_path)}_{time.time_ns()}.json"
+    json_path = f"/tmp/tune_c11_{os.path.basename(bin_path)}_{time.time_ns()}_{random.randint(0, 10000000)}.json"
     cmd = [
         bin_path,
         train_csv,
@@ -615,6 +620,48 @@ def generate_markdown_report(
         f.write("   - O **C11 Tier 8** consolida-se como o *Sweet Spot* ideal para microcontroladores com 32-64 KB de RAM, entregando >95% da acurácia máxima com tempo de inferência sub-microssegundo.\n")
 
 
+def run_engine_trials(
+    engine_name: str,
+    trial_fn,
+    configs: List[Dict[str, Any]],
+    task: str,
+    jobs: int,
+) -> List[Dict[str, Any]]:
+    results: List[Dict[str, Any]] = []
+    total = len(configs)
+    completed = 0
+    lock = threading.Lock()
+
+    def worker(idx_cfg):
+        nonlocal completed
+        idx, cfg = idx_cfg
+        try:
+            res = trial_fn(cfg)
+            with lock:
+                completed += 1
+                metric_val = f"Acc={res.get('holdout_acc', 0.0):.2f}%" if task == "classification" else f"MAE={res.get('holdout_mae', 0.0):.4f}, R2={res.get('holdout_r2', 0.0):.4f}"
+                print(f"    [{engine_name.upper()}] {completed:4d}/{total}: {metric_val}, RAM={res['intra_train_ram_kb']:.1f}KB, Time={res['avg_us_per_sample']:.2f}us | {cfg}", flush=True)
+            return res
+        except Exception as e:
+            with lock:
+                completed += 1
+                print(f"    [{engine_name.upper()}] {completed:4d}/{total}: ERROR ({e}) | {cfg}", flush=True)
+            return None
+
+    if jobs > 1:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=jobs) as executor:
+            for r in executor.map(worker, enumerate(configs, start=1)):
+                if r is not None:
+                    results.append(r)
+    else:
+        for idx_cfg in enumerate(configs, start=1):
+            r = worker(idx_cfg)
+            if r is not None:
+                results.append(r)
+
+    return results
+
+
 # ==============================================================================
 # Suite Orchestrator
 # ==============================================================================
@@ -665,57 +712,55 @@ def run_tuning_suite(
         if "c11" in selected_engines or "all" in selected_engines:
             c11_space = get_c11_space(task)
             c11_configs = sample_hyperparameters(c11_space, n_iter, is_grid, seed)
-            print(f"  [1/3] Running C11 libht ({len(c11_configs)} trials)...")
-            for idx, cfg in enumerate(c11_configs, start=1):
-                try:
-                    res = run_trial_c11(train_csv, test_csv, task, cfg, y_test, is_high_dim)
-                    dataset_trials.append(res)
-                    metric_val = f"Acc={res.get('holdout_acc', 0.0):.2f}%" if task == "classification" else f"MAE={res.get('holdout_mae', 0.0):.4f}, R2={res.get('holdout_r2', 0.0):.4f}"
-                    print(f"    Trial {idx:2d}/{len(c11_configs)}: {metric_val}, RAM={res['intra_train_ram_kb']:.1f}KB, Time={res['avg_us_per_sample']:.2f}us | {cfg}")
-                except Exception as e:
-                    print(f"    Trial {idx:2d}/{len(c11_configs)}: ERROR ({e}) | {cfg}")
+            print(f"  [1/3] Running C11 libht ({len(c11_configs)} trials, {jobs} workers)...")
+            c11_trials = run_engine_trials(
+                "c11",
+                lambda cfg: run_trial_c11(train_csv, test_csv, task, cfg, y_test, is_high_dim),
+                c11_configs,
+                task,
+                jobs,
+            )
+            dataset_trials.extend(c11_trials)
 
         # 2. River
         if "river" in selected_engines or "all" in selected_engines:
             river_space = get_river_space(task)
             river_configs = sample_hyperparameters(river_space, n_iter, is_grid, seed)
-            print(f"  [2/3] Running River ({len(river_configs)} trials)...")
-            for idx, cfg in enumerate(river_configs, start=1):
-                try:
-                    res = run_trial_river(train_csv, test_csv, task, cfg)
-                    dataset_trials.append(res)
-                    metric_val = f"Acc={res.get('holdout_acc', 0.0):.2f}%" if task == "classification" else f"MAE={res.get('holdout_mae', 0.0):.4f}, R2={res.get('holdout_r2', 0.0):.4f}"
-                    print(f"    Trial {idx:2d}/{len(river_configs)}: {metric_val}, RAM={res['intra_train_ram_kb']:.1f}KB, Time={res['avg_us_per_sample']:.2f}us | {cfg}")
-                except Exception as e:
-                    print(f"    Trial {idx:2d}/{len(river_configs)}: ERROR ({e}) | {cfg}")
+            print(f"  [2/3] Running River ({len(river_configs)} trials, {jobs} workers)...")
+            river_trials = run_engine_trials(
+                "river",
+                lambda cfg: run_trial_river(train_csv, test_csv, task, cfg),
+                river_configs,
+                task,
+                jobs,
+            )
+            dataset_trials.extend(river_trials)
 
         # 3. Scikit-Learn
         if "sklearn" in selected_engines or "all" in selected_engines:
             sklearn_space = get_sklearn_space(task)
             sklearn_configs = sample_hyperparameters(sklearn_space, n_iter, is_grid, seed)
-            print(f"  [3/3] Running Scikit-Learn ({len(sklearn_configs)} trials)...")
-            for idx, cfg in enumerate(sklearn_configs, start=1):
-                try:
-                    res = run_trial_sklearn(train_csv, test_csv, task, cfg)
-                    dataset_trials.append(res)
-                    metric_val = f"Acc={res.get('holdout_acc', 0.0):.2f}%" if task == "classification" else f"MAE={res.get('holdout_mae', 0.0):.4f}, R2={res.get('holdout_r2', 0.0):.4f}"
-                    print(f"    Trial {idx:2d}/{len(sklearn_configs)}: {metric_val}, RAM={res['intra_train_ram_kb']:.1f}KB, Time={res['avg_us_per_sample']:.2f}us | {cfg}")
-                except Exception as e:
-                    print(f"    Trial {idx:2d}/{len(sklearn_configs)}: ERROR ({e}) | {cfg}")
+            print(f"  [3/3] Running Scikit-Learn ({len(sklearn_configs)} trials, {jobs} workers)...")
+            sklearn_trials = run_engine_trials(
+                "sklearn",
+                lambda cfg: run_trial_sklearn(train_csv, test_csv, task, cfg),
+                sklearn_configs,
+                task,
+                jobs,
+            )
+            dataset_trials.extend(sklearn_trials)
 
         all_results[d_id] = dataset_trials
 
-    # Export results to JSON
-    print(f"\nSaving results to JSON: {output_json}...")
-    os.makedirs(os.path.dirname(output_json), exist_ok=True)
-    with open(output_json, "w", encoding="utf-8") as f:
-        json.dump(all_results, f, indent=2)
-    print("Done.")
+        # Incremental save after each dataset
+        os.makedirs(os.path.dirname(output_json), exist_ok=True)
+        with open(output_json, "w", encoding="utf-8") as f:
+            json.dump(all_results, f, indent=2)
+        generate_markdown_report(all_results, output_report)
+        print(f"  [✔] Checkpoint: Results and Report updated for {d_name}.")
 
-    # Generate Markdown Report
-    print(f"Generating Markdown report: {output_report}...")
-    generate_markdown_report(all_results, output_report)
-    print("Done. Report generated successfully!")
+    print(f"\nFinal results saved to JSON: {output_json}")
+    print(f"Final Markdown report generated: {output_report}")
 
 
 def main():
