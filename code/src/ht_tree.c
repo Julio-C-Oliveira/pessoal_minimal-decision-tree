@@ -7,6 +7,7 @@
  */
 
 #include "ht_tree.h"
+#include "ht_prep.h"
 #include <string.h>
 
 /* ========================================================================= */
@@ -41,6 +42,60 @@ static uint16_t ht_most_common_child(const ht_tree_t *tree, const ht_node_t *nod
     return (left_w >= right_w) ? node->left_child : node->right_child;
 }
 
+static ht_float_t ht_tree_normalize_feature_for_sgd(const ht_tree_t *tree,
+                                                    const ht_leaf_stats_t *stats,
+                                                    uint8_t f,
+                                                    ht_float_t val) {
+    /* 1. Global tree-level prior */
+    ht_float_t mu_tree = (ht_float_t)0.0;
+    ht_float_t sigma2_tree = (ht_float_t)1.0;
+    if (tree->feat_stats[f].count > (ht_float_t)1.0) {
+        mu_tree = tree->feat_stats[f].mean;
+        sigma2_tree = tree->feat_stats[f].m2 / tree->feat_stats[f].count;
+        if (sigma2_tree < (ht_float_t)1e-6) {
+            sigma2_tree = (ht_float_t)1e-6;
+        }
+    }
+
+    /* 2. Local leaf statistics from the 5 slots of reg_num */
+    ht_float_t n_slots = (ht_float_t)0.0;
+    ht_float_t sum_prod = (ht_float_t)0.0;
+    for (uint8_t s = 0; s < HT_REG_NUM_SLOTS; ++s) {
+        ht_float_t w = stats->observers[f].reg_num.slots[s].y_stats.count;
+        n_slots += w;
+        sum_prod += w * stats->observers[f].reg_num.slots[s].x_mean;
+    }
+
+    ht_float_t mu_slots = mu_tree;
+    ht_float_t sigma2_slots = sigma2_tree;
+    if (n_slots > (ht_float_t)0.0) {
+        mu_slots = sum_prod / n_slots;
+        /* Sample variance across slot centroids */
+        ht_float_t sum_sq_diff = (ht_float_t)0.0;
+        for (uint8_t s = 0; s < HT_REG_NUM_SLOTS; ++s) {
+            ht_float_t w = stats->observers[f].reg_num.slots[s].y_stats.count;
+            if (w > (ht_float_t)0.0) {
+                ht_float_t diff = stats->observers[f].reg_num.slots[s].x_mean - mu_slots;
+                sum_sq_diff += w * diff * diff;
+            }
+        }
+        sigma2_slots = sum_sq_diff / n_slots;
+        if (sigma2_slots < (ht_float_t)1e-6) {
+            sigma2_slots = sigma2_tree;
+        }
+    }
+
+    /* 3. Credibility blend: alpha = n_slots / (n_slots + 10.0) */
+    ht_float_t alpha = n_slots / (n_slots + (ht_float_t)10.0);
+    ht_float_t mu_eff = alpha * mu_slots + ((ht_float_t)1.0 - alpha) * mu_tree;
+    ht_float_t sigma2_eff = alpha * sigma2_slots + ((ht_float_t)1.0 - alpha) * sigma2_tree;
+    if (sigma2_eff < (ht_float_t)1e-6) {
+        sigma2_eff = (ht_float_t)1e-6;
+    }
+
+    return (val - mu_eff) / HT_SQRT(sigma2_eff);
+}
+
 static ht_float_t ht_leaf_predict_linear_model(const ht_tree_t *tree,
                                                const ht_leaf_stats_t *stats,
                                                const ht_value_t x[HT_MAX_FEATURES]) {
@@ -48,7 +103,11 @@ static ht_float_t ht_leaf_predict_linear_model(const ht_tree_t *tree,
     for (uint8_t f = 0; f < tree->params.n_features; ++f) {
         if (tree->params.feature_types[f] == HT_FEAT_NUMERIC) {
             if (!HT_ISNAN(x[f].num)) {
-                pred += stats->reg_weights[f] * x[f].num;
+                ht_float_t val = x[f].num;
+                if (tree->params.leaf_sgd_normalize) {
+                    val = ht_tree_normalize_feature_for_sgd(tree, stats, f, val);
+                }
+                pred += stats->reg_weights[f] * val;
             }
         }
     }
@@ -150,7 +209,12 @@ static bool ht_leaf_predict_nb_proba(const ht_tree_t *tree,
             for (uint8_t f = 0; f < n_features; ++f) {
                 if (tree->params.feature_types[f] == HT_FEAT_NUMERIC) {
                     if (!HT_ISNAN(x[f].num)) {
-                        ht_float_t log_p = ht_gaussian_cond_log_proba(&stats->observers[f].num[c], x[f].num);
+                        ht_float_t log_p;
+                        if (tree->params.numeric_obs_type == HT_OBS_HISTOGRAM) {
+                            log_p = ht_hist_cond_log_proba(&stats->observers[f].hist, c, x[f].num);
+                        } else {
+                            log_p = ht_gaussian_cond_log_proba(&stats->observers[f].num[c], x[f].num);
+                        }
                         if (log_p > -HT_INFINITY) {
                             log_likelihood[c] += log_p;
                         }
@@ -550,16 +614,17 @@ static ht_status_t ht_tree_attempt_split(ht_tree_t *tree, uint16_t leaf_idx, uin
     ht_split_candidate_t best;
     ht_split_candidate_t second_best;
 
-    ht_find_best_split_candidates(stats,
-                                  node->class_counts,
-                                  tree->params.feature_types,
-                                  tree->params.n_features,
-                                  tree->params.n_classes,
-                                  tree->criterion_vtable,
-                                  tree->params.min_branch_fraction,
-                                  tree->params.merit_preprune,
-                                  &best,
-                                  &second_best);
+    ht_find_best_split_candidates_ext(stats,
+                                      node->class_counts,
+                                      tree->params.feature_types,
+                                      tree->params.n_features,
+                                      tree->params.n_classes,
+                                      tree->criterion_vtable,
+                                      tree->params.min_branch_fraction,
+                                      tree->params.merit_preprune,
+                                      tree->params.numeric_obs_type,
+                                      &best,
+                                      &second_best);
 
     /* 4. Evaluate Hoeffding Bound */
     ht_float_t r = tree->criterion_vtable->range_of_merit(node->class_counts, tree->params.n_classes);
@@ -732,6 +797,8 @@ void ht_default_params(ht_config_params_t *params, uint8_t n_features, uint8_t n
     params->l2_regularization = (ht_float_t)1e-4;
     params->model_selector_decay = (ht_float_t)0.95;
     params->min_samples_split = (ht_float_t)5.0;
+    params->numeric_obs_type = HT_OBS_GAUSSIAN;
+    params->leaf_sgd_normalize = false;
 }
 
 void ht_default_hat_params(ht_config_params_t *params, uint8_t n_features, uint8_t n_classes) {
@@ -774,6 +841,8 @@ void ht_default_reg_params(ht_config_params_t *params, uint8_t n_features) {
     params->l2_regularization = (ht_float_t)1e-4;
     params->model_selector_decay = (ht_float_t)0.95;
     params->min_samples_split = (ht_float_t)5.0;
+    params->numeric_obs_type = HT_OBS_GAUSSIAN;
+    params->leaf_sgd_normalize = false;
 }
 
 void ht_default_hat_reg_params(ht_config_params_t *params, uint8_t n_features) {
@@ -896,6 +965,14 @@ ht_status_t ht_tree_set_adwin_pool(ht_tree_t *tree, ht_adwin_pool_t *adwin_pool)
             tree->node_drift[tree->root_idx].adwin_idx = ht_adwin_pool_alloc(adwin_pool, &ad_cfg);
         }
     }
+    return HT_OK;
+}
+
+ht_status_t ht_tree_set_prep_pipeline(ht_tree_t *tree, struct ht_prep_pipeline *prep) {
+    if (tree == NULL) {
+        return HT_ERR_INVALID_ARG;
+    }
+    tree->prep_pipeline = prep;
     return HT_OK;
 }
 
@@ -1113,15 +1190,22 @@ ht_status_t ht_tree_predict_proba(const ht_tree_t *tree,
         return HT_ERR_INVALID_ARG;
     }
 
+    const ht_value_t *x_in = x;
+    ht_value_t x_prep[HT_MAX_FEATURES];
+    if (tree->prep_pipeline != NULL) {
+        ht_prep_transform_one(tree->prep_pipeline, x, x_prep);
+        x_in = x_prep;
+    }
+
     if (!tree->params.enable_hat || tree->adwin_pool == NULL) {
-        uint16_t leaf_idx = ht_tree_route(tree, x, NULL, NULL, NULL);
+        uint16_t leaf_idx = ht_tree_route(tree, x_in, NULL, NULL, NULL);
         if (leaf_idx == HT_INVALID_IDX) {
             for (uint8_t c = 0; c < HT_MAX_CLASSES; ++c) {
                 proba_out[c] = (ht_float_t)0.0;
             }
             return HT_ERR_INVALID_ARG;
         }
-        ht_predict_proba_at_leaf(tree, leaf_idx, x, proba_out);
+        ht_predict_proba_at_leaf(tree, leaf_idx, x_in, proba_out);
         return HT_OK;
     }
 
@@ -1149,7 +1233,7 @@ ht_status_t ht_tree_predict_proba(const ht_tree_t *tree,
             uint8_t f = node->feature_idx;
             uint16_t next_idx;
             if (node->flags & HT_NODE_SPLIT_CAT) {
-                int32_t cat = x[f].cat;
+                int32_t cat = x_in[f].cat;
                 if (cat < 0 || cat >= (int32_t)HT_MAX_CATEGORIES) {
                     next_idx = ht_most_common_child(tree, node);
                 } else if (cat == node->split_val.cat_val) {
@@ -1158,7 +1242,7 @@ ht_status_t ht_tree_predict_proba(const ht_tree_t *tree,
                     next_idx = node->right_child;
                 }
             } else {
-                ht_float_t num = x[f].num;
+                ht_float_t num = x_in[f].num;
                 if (HT_ISNAN(num)) {
                     next_idx = ht_most_common_child(tree, node);
                 } else if (num <= node->split_val.threshold) {
@@ -1179,7 +1263,7 @@ ht_status_t ht_tree_predict_proba(const ht_tree_t *tree,
     }
 
     if (n_reached == 1) {
-        ht_predict_proba_at_leaf(tree, reached_leaves[0], x, proba_out);
+        ht_predict_proba_at_leaf(tree, reached_leaves[0], x_in, proba_out);
         return HT_OK;
     }
 
@@ -1187,7 +1271,7 @@ ht_status_t ht_tree_predict_proba(const ht_tree_t *tree,
     ht_float_t leaf_errors[64];
     for (uint8_t i = 0; i < n_reached; ++i) {
         uint16_t l_idx = reached_leaves[i];
-        ht_predict_proba_at_leaf(tree, l_idx, x, &leaf_probas[(size_t)i * HT_MAX_CLASSES]);
+        ht_predict_proba_at_leaf(tree, l_idx, x_in, &leaf_probas[(size_t)i * HT_MAX_CLASSES]);
         leaf_errors[i] = tree->node_drift[l_idx].mean_error;
     }
 
@@ -1425,7 +1509,11 @@ static ht_status_t ht_tree_learn_one_subtree(ht_tree_t *tree,
         for (uint8_t f = 0; f < tree->params.n_features; ++f) {
             if (tree->params.feature_types[f] == HT_FEAT_NUMERIC) {
                 if (!HT_ISNAN(x[f].num)) {
-                    ht_gaussian_update(stats->observers[f].num, y, x[f].num, weight);
+                    if (tree->params.numeric_obs_type == HT_OBS_HISTOGRAM) {
+                        ht_hist_update(&stats->observers[f].hist, y, x[f].num, weight);
+                    } else {
+                        ht_gaussian_update(stats->observers[f].num, y, x[f].num, weight);
+                    }
                 }
             } else {
                 int32_t cat = x[f].cat;
@@ -1477,6 +1565,13 @@ ht_status_t ht_tree_learn_one(ht_tree_t *tree,
         return HT_ERR_INVALID_ARG;
     }
 
+    const ht_value_t *x_in = x;
+    ht_value_t x_prep[HT_MAX_FEATURES];
+    if (tree->prep_pipeline != NULL) {
+        ht_prep_learn_transform_one(tree->prep_pipeline, x, x_prep, weight);
+        x_in = x_prep;
+    }
+
     if (tree->params.enable_hat && tree->params.bootstrap_sampling) {
         uint32_t k = ht_poisson_1(&tree->rng_state);
         if (k > 0) {
@@ -1485,12 +1580,19 @@ ht_status_t ht_tree_learn_one(ht_tree_t *tree,
     }
 
     tree->train_weight_seen += weight;
-    return ht_tree_learn_one_subtree(tree, tree->root_idx, x, y, weight, 0);
+    return ht_tree_learn_one_subtree(tree, tree->root_idx, x_in, y, weight, 0);
 }
 
 ht_float_t ht_tree_predict_reg(const ht_tree_t *tree, const ht_value_t x[HT_MAX_FEATURES]) {
     if (tree == NULL || x == NULL || tree->root_idx == HT_INVALID_IDX) {
         return (ht_float_t)0.0;
+    }
+
+    const ht_value_t *x_in = x;
+    ht_value_t x_prep[HT_MAX_FEATURES];
+    if (tree->prep_pipeline != NULL) {
+        ht_prep_transform_one(tree->prep_pipeline, x, x_prep);
+        x_in = x_prep;
     }
 
     if (tree->params.enable_hat && tree->adwin_pool != NULL) {
@@ -1501,16 +1603,16 @@ ht_float_t ht_tree_predict_reg(const ht_tree_t *tree, const ht_value_t x[HT_MAX_
         while (curr_idx != HT_INVALID_IDX) {
             const ht_node_t *node = &tree->memory.node_pool[curr_idx];
             if (node->flags & HT_NODE_IS_LEAF) {
-                sum_pred += ht_predict_reg_at_leaf(tree, curr_idx, x);
+                sum_pred += ht_predict_reg_at_leaf(tree, curr_idx, x_in);
                 n_leaves++;
                 break;
             }
 
             const ht_node_drift_t *nd = &tree->node_drift[curr_idx];
             if (nd->alt_tree_idx != HT_INVALID_IDX) {
-                uint16_t alt_leaf = ht_tree_route_from(tree, nd->alt_tree_idx, x);
+                uint16_t alt_leaf = ht_tree_route_from(tree, nd->alt_tree_idx, x_in);
                 if (alt_leaf != HT_INVALID_IDX) {
-                    sum_pred += ht_predict_reg_at_leaf(tree, alt_leaf, x);
+                    sum_pred += ht_predict_reg_at_leaf(tree, alt_leaf, x_in);
                     n_leaves++;
                 }
             }
@@ -1518,7 +1620,7 @@ ht_float_t ht_tree_predict_reg(const ht_tree_t *tree, const ht_value_t x[HT_MAX_
             uint8_t f = node->feature_idx;
             uint16_t next_idx;
             if (node->flags & HT_NODE_SPLIT_CAT) {
-                int32_t cat = x[f].cat;
+                int32_t cat = x_in[f].cat;
                 if (cat < 0 || cat >= (int32_t)HT_MAX_CATEGORIES) {
                     next_idx = ht_most_common_child(tree, node);
                 } else if (cat == node->split_val.cat_val) {
@@ -1527,7 +1629,7 @@ ht_float_t ht_tree_predict_reg(const ht_tree_t *tree, const ht_value_t x[HT_MAX_
                     next_idx = node->right_child;
                 }
             } else {
-                ht_float_t num = x[f].num;
+                ht_float_t num = x_in[f].num;
                 if (HT_ISNAN(num)) {
                     next_idx = ht_most_common_child(tree, node);
                 } else if (num <= node->split_val.threshold) {
@@ -1545,8 +1647,8 @@ ht_float_t ht_tree_predict_reg(const ht_tree_t *tree, const ht_value_t x[HT_MAX_
         return sum_pred / (ht_float_t)n_leaves;
     }
 
-    uint16_t leaf_idx = ht_tree_route(tree, x, NULL, NULL, NULL);
-    return ht_predict_reg_at_leaf(tree, leaf_idx, x);
+    uint16_t leaf_idx = ht_tree_route(tree, x_in, NULL, NULL, NULL);
+    return ht_predict_reg_at_leaf(tree, leaf_idx, x_in);
 }
 
 static ht_status_t ht_tree_learn_one_reg_subtree(ht_tree_t *tree,
@@ -1753,7 +1855,11 @@ static ht_status_t ht_tree_learn_one_reg_subtree(ht_tree_t *tree,
             for (uint8_t f = 0; f < tree->params.n_features; ++f) {
                 if (tree->params.feature_types[f] == HT_FEAT_NUMERIC) {
                     if (!HT_ISNAN(x[f].num)) {
-                        stats->reg_weights[f] = stats->reg_weights[f] * l2_decay + eta * weight * err * x[f].num;
+                        ht_float_t val = x[f].num;
+                        if (tree->params.leaf_sgd_normalize) {
+                            val = ht_tree_normalize_feature_for_sgd(tree, stats, f, val);
+                        }
+                        stats->reg_weights[f] = stats->reg_weights[f] * l2_decay + eta * weight * err * val;
                         if (stats->reg_weights[f] > (ht_float_t)1e12) stats->reg_weights[f] = (ht_float_t)1e12;
                         else if (stats->reg_weights[f] < (ht_float_t)-1e12) stats->reg_weights[f] = (ht_float_t)-1e12;
                     }
@@ -1808,6 +1914,21 @@ ht_status_t ht_tree_learn_one_reg(ht_tree_t *tree,
         return HT_ERR_INVALID_ARG;
     }
 
+    const ht_value_t *x_in = x;
+    ht_value_t x_prep[HT_MAX_FEATURES];
+    if (tree->prep_pipeline != NULL) {
+        ht_prep_learn_transform_one(tree->prep_pipeline, x, x_prep, weight);
+        x_in = x_prep;
+    }
+
+    for (uint8_t f = 0; f < tree->params.n_features; ++f) {
+        if (tree->params.feature_types[f] == HT_FEAT_NUMERIC) {
+            if (!HT_ISNAN(x_in[f].num)) {
+                ht_var_update(&tree->feat_stats[f], x_in[f].num, weight);
+            }
+        }
+    }
+
     tree->train_weight_seen += weight;
 
     if (tree->params.enable_hat && tree->params.bootstrap_sampling) {
@@ -1817,7 +1938,7 @@ ht_status_t ht_tree_learn_one_reg(ht_tree_t *tree,
         }
     }
 
-    return ht_tree_learn_one_reg_subtree(tree, tree->root_idx, x, y, weight, 0);
+    return ht_tree_learn_one_reg_subtree(tree, tree->root_idx, x_in, y, weight, 0);
 }
 
 ht_float_t ht_tree_node_promise(const ht_node_t *node, uint8_t n_classes) {

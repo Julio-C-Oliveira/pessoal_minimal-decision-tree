@@ -65,7 +65,11 @@ typedef struct {
     ht_float_t          l2_regularization;              /**< SGD L2 penalty lambda (default: 1e-4) */
     ht_float_t          model_selector_decay;           /**< fMSE exponential decay alpha (default: 0.95) */
     ht_float_t          min_samples_split;              /**< Min sample weight per branch for regression split (default: 5.0) */
+    ht_numeric_obs_type_t numeric_obs_type;             /**< HT_OBS_GAUSSIAN (default) or HT_OBS_HISTOGRAM */
+    bool                leaf_sgd_normalize;             /**< Online Z-Score normalization for leaf SGD in regression */
 } ht_config_params_t;
+
+struct ht_prep_pipeline;
 
 /**
  * @brief Node concept drift monitoring and alternate subtree metadata for HAT.
@@ -89,6 +93,8 @@ typedef struct {
     ht_config_params_t           params;
     const ht_criterion_vtable_t *criterion_vtable;
     ht_adwin_pool_t             *adwin_pool;
+    struct ht_prep_pipeline     *prep_pipeline;
+    ht_var_stat_t                feat_stats[HT_MAX_FEATURES];
     ht_node_drift_t              node_drift[HT_MAX_NODES];
     ht_float_t                   train_weight_seen;
     uint32_t                     rng_state;
@@ -326,6 +332,18 @@ ht_status_t ht_tree_init_hat(ht_tree_t *tree,
  * @return HT_OK on success, or negative error code.
  */
 ht_status_t ht_tree_set_adwin_pool(ht_tree_t *tree, ht_adwin_pool_t *adwin_pool);
+
+/**
+ * @brief Attaches (or detaches) an optional data preprocessing micro-pipeline to the tree.
+ *
+ * When attached, ht_tree_learn_one/predict automatically process incoming raw feature
+ * vectors through the pipeline before feeding the tree.
+ *
+ * @param tree Pointer to tree instance.
+ * @param prep Pointer to initialized ht_prep_pipeline_t (or NULL to detach).
+ * @return HT_OK on success, or negative error code.
+ */
+ht_status_t ht_tree_set_prep_pipeline(ht_tree_t *tree, struct ht_prep_pipeline *prep);
 
 /**
  * @brief Recursively/iteratively frees an entire subtree and returns all its nodes,
