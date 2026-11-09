@@ -28,7 +28,7 @@
 
 ---
 
-## 3. Métricas de Performance, Latência e Recursos de Hardware (@ 240 MHz)
+## 3. Métricas de Performance, Latência e Recursos em Hardware Emulado (QEMU @ 240 MHz)
 
 | Dataset | Tarefa | Latência Média | Latência $p_{95}$ | Latência $p_{99}$ | Throughput (Vazão) | Model Footprint | Consumo RAM (SRAM / Heap) | FLOPs / Amostra |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |

@@ -623,7 +623,7 @@ def generate_markdown_report(results: List[Dict[str, Any]], report_path: str):
         md.append("\n---\n")
 
     # 3. Performance & Hardware Metrics Table
-    md.append("## 3. Métricas de Performance, Latência e Recursos de Hardware (@ 240 MHz)\n")
+    md.append("## 3. Métricas de Performance, Latência e Recursos em Hardware Emulado (QEMU @ 240 MHz)\n")
     md.append(r"| Dataset | Tarefa | Latência Média | Latência $p_{95}$ | Latência $p_{99}$ | Throughput (Vazão) | Model Footprint | Consumo RAM (SRAM / Heap) | FLOPs / Amostra |")
     md.append("| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |")
 

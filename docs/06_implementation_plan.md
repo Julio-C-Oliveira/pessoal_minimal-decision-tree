@@ -677,7 +677,7 @@ flowchart LR
 ## 6. Fase 5: Emulação Hardware-in-the-Loop em ESP32 (`emulation/esp32/`)
 
 ### Entrega 5.1: Emulação ESP32 (QEMU) da Hoeffding Tree C11 (`make bench-esp32`)
-- **Objetivo:** Comprovar experimentalmente a execução do núcleo C11 em um microcontrolador ESP32 realístico sem depender de hardware físico, empregando o emulador oficial `qemu-system-xtensa` da Espressif.
+- **Objetivo:** Comprovar experimentalmente a execução do núcleo C11 em ambiente de hardware emulado (QEMU ESP32) sem depender de placa física na bancada, empregando o emulador oficial `qemu-system-xtensa` da Espressif.
 - **Perfil Tier 8 Universal:**
   - Compilação configurada via macros de pré-processador:
     `-DHT_MAX_NODES=128 -DHT_MAX_ACTIVE_LEAVES=8 -DHT_MAX_FEATURES=64 -DHT_MAX_CLASSES=10 -DHT_MAX_ADWIN_DETECTORS=32`.
@@ -699,6 +699,6 @@ flowchart LR
   - Execução validada em mais de 152.000 amostras na ESP32 emulada (14.000 treino / 6.000 teste por dataset, ou 100% dos dados para fluxos menores que 20k).
   - Acurácia Holdout: **98.10%** no SEA, **76.80%** no Airlines, **64.05%** no Electricity, **52.62%** no Covertype.
   - Regressão com Crescimento de Árvore: **$R^2 = 0.6645$** (41 nós) no Friedman #1 e **$R^2 = 0.6787$** (35 nós) no Appliances Energy.
-  - Latência de Hardware @ 240 MHz: **$44\,\mu\text{s}$ a $126\,\mu\text{s}$** por amostra completa (predição + treino online).
+  - Latência em Hardware Emulado (QEMU @ 240 MHz): **$41\,\mu\text{s}$ a $1.947\,\mu\text{s}$** por amostra completa (predição + treino online).
   - Determinismo e Memória: **$0\text{ bytes}$ de $\Delta\text{Heap}$** (Zero Malloc comprovado) e $> 9.200\text{ bytes}$ de margem livre na stack FreeRTOS.
   - Documentação consolidada no `README.md` (Seção 3.2 e Seção 3.6) estruturada em 3 tabelas independentes: Classificação, Regressão Contínua e Performance/Recursos.

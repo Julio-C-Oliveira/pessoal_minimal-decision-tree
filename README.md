@@ -321,7 +321,7 @@ Para mapear os limites teóricos e práticos do paradigma VFDT em problemas de v
 
 ### 3.6 Emulação Hardware-in-the-Loop em ESP32 (Xtensa Dual-Core LX6 @ 240 MHz)
 
-Para certificar o comportamento determinístico em hardware realístico embarcado antes do deployment físico, a biblioteca foi avaliada em um ambiente **Hardware-in-the-Loop (HIL)** emulado via **QEMU Xtensa** executando firmware **ESP-IDF v5.1 / FreeRTOS** compilado para o microcontrolador **ESP32** (SoC Dual-Core Xtensa LX6 @ 240 MHz).
+Para certificar o comportamento determinístico em **ambiente embarcado emulado (QEMU Xtensa)** antes do deployment físico em placa real, a biblioteca foi avaliada em um ambiente **Hardware-in-the-Loop (HIL)** emulado via **QEMU Xtensa** executando firmware **ESP-IDF v5.1 / FreeRTOS** compilado para o microcontrolador **ESP32** (SoC Dual-Core Xtensa LX6 @ 240 MHz).
 
 **Configuração do Experimento:**
 - **Perfil de Compilação:** Tier 8 Universal (`-DHT_MAX_NODES=128 -DHT_MAX_ACTIVE_LEAVES=8 -DHT_MAX_FEATURES=64 -DHT_MAX_CLASSES=10`) ocupando $\approx 111{,}3\text{ KB}$ de SRAM estática (`.bss`).
@@ -351,7 +351,7 @@ Para certificar o comportamento determinístico em hardware realístico embarcad
 
 ---
 
-#### 3.6.3 Métricas de Performance, Latência e Recursos em Hardware Real (ESP32 @ 240 MHz)
+#### 3.6.3 Métricas de Performance, Latência e Recursos em Hardware Emulado (QEMU ESP32 @ 240 MHz)
 
 | Dataset | Tarefa | Latência Média | Latência $p_{95}$ | Latência $p_{99}$ | Throughput (Vazão) | Model Footprint | Consumo RAM (SRAM / Heap) | FLOPs / Amostra |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
@@ -365,7 +365,7 @@ Para certificar o comportamento determinístico em hardware realístico embarcad
 | **NYC Taxi** | Regressão | **41,81 µs** | 80,66 µs | 157,95 µs | **23.918 am/s** | 1.012 B (.bin) / 111,3 KB | 111,3 KB (.bss) / **0 B Heap** | **105 FLOPs** |
 
 > [!TIP]
-> **Destaques da Validação em Hardware Real ESP32:**
+> **Destaques da Validação em Hardware Emulado (QEMU ESP32):**
 > - **Zero Alocação em Runtime Comprovada:** O monitoramento contínuo via `esp_get_free_heap_size()` confirmou ausência de fragmentação ou vazamento no FreeRTOS durante o processamento das 152.114 amostras reais.
 > - **Throughput de Alta Frequência em Microcontrolador:** Com vazão de **8.600 a 23.900 amostras/segundo** (para fluxos de 3 a 28 atributos a 240 MHz), o modelo é plenamente capaz de operar em malhas fechadas de controle e telemetria preditiva de alta frequência em IoT.
 > - **Latência de Cauda Controlada:** O percentil $p_{99}$ permaneceu abaixo de $230\,\mu\text{s}$ na maioria dos fluxos, demonstrando extrema estabilidade temporal em tempo real.
