@@ -161,7 +161,7 @@ typedef struct {
 } ht_memory_pool_t;
 
 /* Compile-time static assertions for exact memory layout in default configuration */
-#if HT_MAX_CLASSES == 4 && HT_MAX_FEATURES == 16
+#if HT_MAX_CLASSES == 4 && HT_MAX_FEATURES == 16 && HT_REG_NUM_SLOTS == 5
 #ifndef HT_USE_DOUBLE
 _Static_assert(sizeof(ht_node_t) == 28, "ht_node_t must be exactly 28 bytes in float32 mode");
 _Static_assert(sizeof(ht_gaussian_obs_t) == 20, "ht_gaussian_obs_t must be 20 bytes in float32 mode");
