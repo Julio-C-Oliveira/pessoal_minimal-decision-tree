@@ -30,6 +30,11 @@
 
 ## 3. Métricas de Performance, Latência e Recursos em Hardware Emulado (QEMU @ 240 MHz)
 
+> **Nota sobre as Colunas de Latência:**
+> - **Ciclo Test-Then-Train:** Cada medição cobre o tempo para predição (`predict`) + treino incremental (`learn_one`) daquela amostra.
+> - **Cronometria por Ciclos:** As latências são obtidas em ciclos de clock de CPU via `esp_cpu_get_cycle_count()` e convertidas para microssegundos ($\mu\text{s}$) na frequência nominal de 240 MHz ($\mu\text{s} = \text{ciclos} / 240$).
+> - **Latência Média vs Cauda ($p_{95}, p_{99}$):** A latência média reflete o processamento contínuo nas folhas em $O(1)$. Os percentis de cauda ($p_{95}$ e $p_{99}$) capturam o impacto transitório do teste estatístico do *Hoeffding Bound* executado a cada 200 amostras (`grace_period`).
+
 | Dataset | Tarefa | Latência Média | Latência $p_{95}$ | Latência $p_{99}$ | Throughput (Vazão) | Model Footprint | Consumo RAM (SRAM / Heap) | FLOPs / Amostra |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
 | **SEA** | Classificação | **73.81 $\mu$s** | 132.11 $\mu$s | 535.88 $\mu$s | **13,548 amostras/s** | 340 B (11 nós) | 111.3 KB (.bss) / **0 B Heap** | **69 FLOPs** |

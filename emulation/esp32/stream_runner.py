@@ -624,6 +624,10 @@ def generate_markdown_report(results: List[Dict[str, Any]], report_path: str):
 
     # 3. Performance & Hardware Metrics Table
     md.append("## 3. Métricas de Performance, Latência e Recursos em Hardware Emulado (QEMU @ 240 MHz)\n")
+    md.append("> **Nota sobre as Colunas de Latência:**\n"
+              "> - **Ciclo Test-Then-Train:** Cada medição cobre o tempo para predição (`predict`) + treino incremental (`learn_one`) daquela amostra.\n"
+              r"> - **Cronometria por Ciclos:** As latências são obtidas em ciclos de clock de CPU via `esp_cpu_get_cycle_count()` e convertidas para microssegundos ($\mu\text{s}$) na frequência nominal de 240 MHz ($\mu\text{s} = \text{ciclos} / 240$)." + "\n"
+              "> - **Latência Média vs Cauda ($p_{95}, p_{99}$):** A latência média reflete o processamento contínuo nas folhas em $O(1)$. Os percentis de cauda ($p_{95}$ e $p_{99}$) capturam o impacto transitório do teste estatístico do *Hoeffding Bound* executado a cada 200 amostras (`grace_period`).\n\n")
     md.append(r"| Dataset | Tarefa | Latência Média | Latência $p_{95}$ | Latência $p_{99}$ | Throughput (Vazão) | Model Footprint | Consumo RAM (SRAM / Heap) | FLOPs / Amostra |")
     md.append("| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |")
 

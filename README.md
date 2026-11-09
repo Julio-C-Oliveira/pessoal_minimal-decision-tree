@@ -172,6 +172,12 @@ Suíte principal de desempenho ([`main_benchmark/`](main_benchmark/), relatório
 
 #### 3.2.3 Métricas de Performance, Latência e Recursos (8 Datasets)
 
+> [!NOTE]
+> **Entendendo as Métricas de Latência por Amostra:**
+> - **Escopo:** Cada amostra em streaming é avaliada no ciclo completo **Test-Then-Train** (inferência da predição com `ht_tree_predict` seguida de treino online e atualização dos observadores de Welford com `ht_tree_learn_one`).
+> - **Latência Média:** Média aritmética em microssegundos ($\mu\text{s}$) necessária para processar 1 amostra completa.
+> - **Latência $p_{95}$ e $p_{99}$ (Latência de Cauda):** Percentis 95% e 99% da distribuição de tempo por amostra. No algoritmo VFDT, a maioria das amostras é absorvida em tempo constante $O(1)$ pelas folhas; contudo, a cada $N = \text{grace\_period} = 200$ amostras, a folha avalia o *Hoeffding Bound* e testa critérios de impureza/variância para todos os atributos, gerando um custo computacional momentâneo que é rigorosamente delimitado por essas métricas de cauda.
+
 | Dataset | Modelo / Algoritmo | Latência Média | Latência $p_{95}$ | Latência $p_{99}$ | Throughput (Vazão) | Model Footprint | Consumo RAM (Modelo / SO Peak) | FLOPs / Amostra |
 | :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
 | **SEA** | Scikit-Learn (Batch) | 3,06 µs | 4,20 µs | 6,50 µs | 326.797 am/s | 22,4 KB | 1.024 KB / 129,5 MB | $\approx 318$ FLOPs |
@@ -352,6 +358,12 @@ Para certificar o comportamento determinístico em **ambiente embarcado emulado 
 ---
 
 #### 3.6.3 Métricas de Performance, Latência e Recursos em Hardware Emulado (QEMU ESP32 @ 240 MHz)
+
+> [!NOTE]
+> **Definição e Medição das Colunas de Latência no ESP32:**
+> - **Ciclo Test-Then-Train:** Cada medição cobre o tempo total para predição (`predict`) + treino incremental (`learn_one`) daquela amostra.
+> - **Base de Cronometria:** A latência é apurada diretamente no firmware em **ciclos de clock** através da instrução de registrador `esp_cpu_get_cycle_count()` do núcleo Xtensa. Em seguida, é convertida para microssegundos ($\mu\text{s}$) com base na frequência nominal de 240 MHz ($\text{Latência}(\mu\text{s}) = \text{ciclos} / 240$).
+> - **Latência Média vs Cauda ($p_{95}, p_{99}$):** A latência média reflete a velocidade de cruzeiro do modelo nas folhas $O(1)$. Os percentis $p_{95}$ e $p_{99}$ capturam o custo adicional momentâneo ocorrido a cada 200 amostras (`grace_period`), momento em que o microcontrolador realiza a varredura estatística do *Hoeffding Bound* para testar possíveis divisões de nós.
 
 | Dataset | Tarefa | Latência Média | Latência $p_{95}$ | Latência $p_{99}$ | Throughput (Vazão) | Model Footprint | Consumo RAM (SRAM / Heap) | FLOPs / Amostra |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
