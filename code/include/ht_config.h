@@ -17,9 +17,9 @@
 /* Versioning (Semantic Versioning 2.0.0: MAJOR.MINOR.PATCH)                  */
 /* ========================================================================== */
 #define HT_VERSION_MAJOR    0U
-#define HT_VERSION_MINOR    1U
+#define HT_VERSION_MINOR    2U
 #define HT_VERSION_PATCH    0U
-#define HT_VERSION_STRING   "0.1.0"
+#define HT_VERSION_STRING   "0.2.0"
 
 /**
  * @brief Compile-time macro to check against a minimum library version.
