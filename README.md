@@ -17,6 +17,9 @@ A biblioteca unifica **4 variantes de árvores de decisão em streaming** dentro
 
 ### Destaques Técnicos:
 - **Aprendizado Incremental *Test-Then-Train*:** Aprende amostra por amostra (`ht_tree_learn_one` / `ht_tree_learn_one_reg`) em tempo $O(\text{profundidade} \times F)$, sem reter o dataset na memória.
+- **Micro-Pipelines de Pré-Processamento Zero-Malloc (`libht_prep`, v0.2.0):** Módulos determinísticos para normalização online Z-Score/Min-Max (`ht_scaler_t`), filtro mediano de Hampel com janela deslizante MAD ($3\sigma$) para rejeição de ruído de sensores industriais (`ht_filter_hampel_t`), codificador Space-Saving (`ht_encoder_freq_t`) e quantizador Ben-Haim & Tom-Tov (`ht_quantizer_bh_t`), integráveis transparentemente via `ht_tree_set_prep_pipeline`.
+- **Observadores Numéricos Paramétricos e Não-Paramétricos:** Welford Gaussiano (`HT_OBS_GAUSSIAN`) e Histograma Dinâmico de Ben-Haim & Tom-Tov (`HT_OBS_HISTOGRAM`) para distribuições multimodais.
+- **Normalização SGD Híbrida nas Folhas:** Padronização online com fator de credibilidade $\alpha = \frac{N_{\text{slots}}}{N_{\text{slots}} + 10.0}$ para estabilização dos regressores lineares em variáveis multiescala com 0.0 KB de heap.
 - **Atributos Mistos e Valores Ausentes (`NaN`):** Suporte nativo a colunas numéricas (`HT_FEAT_NUMERIC`) e categóricas (`HT_FEAT_CATEGORICAL`), roteando leituras ausentes (`NAN` ou categoria `< 0`) pelo filho mais populoso com custo zero de RAM.
 - **Reciclagem Determinística (*Slab/Pool Allocators*):** Indexação 100% baseada em `uint16_t` (sem ponteiros) e desativação automática de folhas menos promissoras (*Promise Deactivation*) quando o pool atinge o limite.
 - **Serialização Binária Direta (`ht_tree_save` / `ht_tree_load`):** Exporta checkpoints completos de treino ou imagens enxutas somente-inferência ($28\text{ B}$ por nó em `float32`) prontas para Flash/EEPROM.
@@ -43,6 +46,7 @@ make bench-drift
 make bench-regression
 make bench-triple
 make bench-main
+make bench-prep
 
 # Executa a suíte de emulação ESP32 (Hardware-in-the-Loop via QEMU)
 make bench-esp32

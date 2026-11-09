@@ -36,12 +36,14 @@ Além das páginas desta Wiki, o repositório principal mantém notas matemátic
 - [`docs/05_sklearn_architecture.md`](../docs/05_sklearn_architecture.md) — Mapeamento de estruturas contíguas sem ponteiros inspirado em `sklearn/tree`.
 - [`docs/06_implementation_plan.md`](../docs/06_implementation_plan.md) — Plano de implementação completo concluído (Fases 0 a 4).
 - [`docs/07_regression_trees_fimtdd.md`](../docs/07_regression_trees_fimtdd.md) — Árvores de regressão incremental (`FIMT-DD` / `VFDT-R` e `HAT-R`), variância paralela de Chan e folhas lineares com SGD.
+- [`docs/08_data_preprocessing_and_nonparametric.md`](../docs/08_data_preprocessing_and_nonparametric.md) — Micro-pipelines embarcados zero-malloc (`libht_prep`), Hampel MAD, Ben-Haim & Tom-Tov e normalização SGD híbrida.
 
 ### Relatórios de Benchmark e Paridade (`benchmarks/`)
 - [`benchmarks/benchmark_report.md`](../benchmarks/benchmark_report.md) — Paridade de Classificação Estacionária (`VFDT` C11 vs River vs Scikit-Learn).
 - [`benchmarks/triple_benchmark_report.md`](../benchmarks/triple_benchmark_report.md) — Benchmark Triplo no dataset MNIST com *profiling* de RAM e Heap.
 - [`benchmarks/drift_benchmark_report.md`](../benchmarks/drift_benchmark_report.md) — Adaptação a *Concept Drift* (`HAT` C11 vs River `HAT`).
 - [`benchmarks/regression_benchmark_report.md`](../benchmarks/regression_benchmark_report.md) — Regressão Contínua e Drift (`VFDT-R` / `HAT-R` vs River `HTR` / `HATR` vs Scikit-Learn).
+- [`benchmarks/prep_benchmark_report.md`](../benchmarks/prep_benchmark_report.md) — Micro-pipelines de pré-processamento (`libht_prep`), normalização Z-score SGD e observador de histograma vs River.
 
 ---
 

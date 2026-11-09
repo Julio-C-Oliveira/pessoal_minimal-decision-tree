@@ -32,7 +32,9 @@ $$\epsilon = \sqrt{\frac{R^2 \ln(1/\delta)}{2n}}$$
    - **No Aprendizado da Folha:** Atualiza normalmente a estatística do alvo na folha e os observadores dos demais atributos válidos, ignorando apenas o observador do atributo ausente.
 
 4. **Representação de Atributos ($O(1)$ por Atributo):**
-   - **Numéricos (Classificação):** Aproximação Gaussiana incremental via **Algoritmo de Welford** (`count`, `mean`, `M2`, `min`, `max` por classe), avaliando $k$ pontos candidatos (10 bins entre `min` e `max`) na hora de testar o split.
+   - **Numéricos (Classificação):**
+     - *Paramétrico Gaussiano (`HT_OBS_GAUSSIAN`):* Aproximação incremental via **Algoritmo de Welford** (`count`, `mean`, `M2`, `min`, `max` por classe), avaliando 10 pontos candidatos entre `min` e `max` no split.
+     - *Não-Paramétrico de Histograma (`HT_OBS_HISTOGRAM`, v0.2.0):* Baseado em **Ben-Haim & Tom-Tov**, mantém até 8 centróides dinâmicos que se fundem deterministicamente quando cheios, estimando probabilidades via interpolação trapezoidal. Compartilha exatamente os mesmos $80\text{ B}$ (em `float32`) via `union ht_feature_obs_t`.
    - **Numéricos (Regressão):** Quantização dinâmica em **5 slots ordenados** combinados via **Fórmulas Paralelas de Chan** (`ht_var_combine` / `ht_var_subtract`), ocupando exatamente os mesmos $80\text{ B}$ em `float32`.
    - **Categóricos Nominais:** Tabela de frequência ou estatísticas de variância limitada pela cardinalidade máxima configurada (`HT_MAX_CATEGORIES`).
 
@@ -505,7 +507,8 @@ flowchart LR
 | **Observadores de Atributos** | [`ht_observer.h`](../code/include/ht_observer.h) | [`ht_observer.c`](../code/src/ht_observer.c) | Welford Gaussiano (`ht_gaussian_*`), matriz nominal (`ht_categorical_*`), variância paralela de Chan (`ht_var_*`) e 5 slots de regressão (`ht_reg_*`). |
 | **Critérios de Split & Bound** | [`ht_criterion.h`](../code/include/ht_criterion.h) | [`ht_criterion.c`](../code/src/ht_criterion.c) | *Gini Impurity*, *Information Gain*, *Variance Reduction*, *Hoeffding Bound* e seleção estável dos 2 melhores candidatos (`ht_split_candidate_t`). |
 | **Concept Drift (ADWIN & HAT)** | [`ht_drift.h`](../code/include/ht_drift.h) | [`ht_drift.c`](../code/src/ht_drift.c) | Histograma exponencial ADWIN2 (`ht_adwin_t`), pool de detectores, filtro unilateral de erro e testes estatísticos de troca/poda (Hoeffding e Welch Z-test). |
-| **Árvore de Decisão (Core API)** | [`ht_tree.h`](../code/include/ht_tree.h) | [`ht_tree.c`](../code/src/ht_tree.c) | Inicialização, roteamento iterativo, predição (MC/NB/NBA e Mean/Model SGD/Adaptive), ciclo `learn_one`, desativação por `Promise` e `save`/`load`. |
+| **Árvore de Decisão (Core API)** | [`ht_tree.h`](../code/include/ht_tree.h) | [`ht_tree.c`](../code/src/ht_tree.c) | Inicialização, roteamento iterativo, predição (MC/NB/NBA e Mean/Model SGD/Adaptive), ciclo `learn_one`, desativação por `Promise`, pipeline anexo e `save`/`load`. |
+| **Micro-Pipelines de Pré-Processamento** | [`ht_prep.h`](../code/include/ht_prep.h) | [`ht_prep.c`](../code/src/ht_prep.c) | Normalização Z-score/Min-Max (`ht_scaler_t`), filtro Hampel MAD (`ht_filter_hampel_t`), codificador Space-Saving (`ht_encoder_freq_t`) e quantizador Ben-Haim (`ht_quantizer_bh_t`). |
 
 ### 10.2 Fontes e Referências no Repositório (`references/`)
 
