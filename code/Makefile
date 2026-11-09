@@ -21,7 +21,7 @@ TEST_RUNNER = $(BUILD_DIR)/test_runner
 
 VERSION ?= $(shell cat ../VERSION 2>/dev/null || cat VERSION 2>/dev/null || echo "0.1.0")
 
-.PHONY: all lib test clean bench bench-triple bench-drift bench-regression bench-memory bench-main bench-esp32 directories version
+.PHONY: all lib test clean bench bench-triple bench-drift bench-regression bench-memory bench-main bench-prep bench-esp32 directories version
 
 version:
 	@echo "Minimal Decision Tree (libht) version $(VERSION)"
@@ -185,6 +185,16 @@ bench-main: $(BENCH_RUNNER) $(BENCH_RUNNER_8) $(BENCH_RUNNER_4) $(BENCH_MAIN_RUN
 			--bin-main-tier4 $(BENCH_RUNNER_4_MAIN) \
 			--data-dir ../main_benchmark/data \
 			--report ../main_benchmark/main_benchmark_report.md; \
+	else \
+		echo "Error: Python 3 with river not found!"; exit 1; \
+	fi
+
+bench-prep: $(BENCH_RUNNER) $(BENCH_RUNNER_DOUBLE)
+	@echo "Executing Preprocessing & Non-Parametric Benchmark: C11 vs River (Task 6.6)..."
+	@if [ -x "$(PYTHON)" ]; then \
+		$(PYTHON) ../benchmarks/compare_prep.py --bin-float $(BENCH_RUNNER) --bin-double $(BENCH_RUNNER_DOUBLE) --data-dir ../benchmarks/data --report ../benchmarks/prep_benchmark_report.md; \
+	elif command -v python3 >/dev/null 2>&1; then \
+		python3 ../benchmarks/compare_prep.py --bin-float $(BENCH_RUNNER) --bin-double $(BENCH_RUNNER_DOUBLE) --data-dir ../benchmarks/data --report ../benchmarks/prep_benchmark_report.md; \
 	else \
 		echo "Error: Python 3 with river not found!"; exit 1; \
 	fi

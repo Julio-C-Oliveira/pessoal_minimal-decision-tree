@@ -15,6 +15,7 @@
 #define _POSIX_C_SOURCE 200809L
 
 #include "ht_tree.h"
+#include "ht_prep.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -48,6 +49,7 @@ typedef struct {
 /* Static memory allocations (BSS) - zero malloc in runtime */
 static ht_tree_t tree_instance;
 static ht_adwin_pool_t adwin_pool;
+static ht_prep_pipeline_t prep_pipeline_instance;
 static bench_checkpoint_t checkpoints[MAX_CHECKPOINTS];
 static size_t num_checkpoints = 0;
 static uint8_t test_predictions[MAX_TEST_SAMPLES];
@@ -139,6 +141,11 @@ int main(int argc, char *argv[]) {
     uint16_t drift_window_threshold = 300;
     double switch_significance = 0.05;
     double adwin_delta = 0.002;
+    ht_numeric_obs_type_t numeric_obs_type = HT_OBS_GAUSSIAN;
+    bool leaf_sgd_normalize = false;
+    bool use_prep_pipeline = false;
+    bool prep_hampel_all = false;
+    bool prep_scaler_all = false;
 
     for (int i = 2; i < argc; ++i) {
         if (strcmp(argv[i], "--task") == 0 && i + 1 < argc) {
@@ -198,6 +205,21 @@ int main(int argc, char *argv[]) {
             switch_significance = atof(argv[++i]);
         } else if (strcmp(argv[i], "--adwin-delta") == 0 && i + 1 < argc) {
             adwin_delta = atof(argv[++i]);
+        } else if (strcmp(argv[i], "--obs") == 0 && i + 1 < argc) {
+            const char *obs_str = argv[++i];
+            if (strcmp(obs_str, "hist") == 0 || strcmp(obs_str, "histogram") == 0) {
+                numeric_obs_type = HT_OBS_HISTOGRAM;
+            } else {
+                numeric_obs_type = HT_OBS_GAUSSIAN;
+            }
+        } else if (strcmp(argv[i], "--leaf-normalize") == 0) {
+            leaf_sgd_normalize = true;
+        } else if (strcmp(argv[i], "--prep-hampel") == 0) {
+            use_prep_pipeline = true;
+            prep_hampel_all = true;
+        } else if (strcmp(argv[i], "--prep-scaler") == 0) {
+            use_prep_pipeline = true;
+            prep_scaler_all = true;
         } else {
             fprintf(stderr, "Unknown option: %s\n", argv[i]);
             print_usage(argv[0]);
@@ -324,6 +346,8 @@ int main(int argc, char *argv[]) {
     params.min_branch_fraction = (ht_float_t)0.01;
     params.max_share_to_split = (ht_float_t)0.99;
     params.merit_preprune = true;
+    params.numeric_obs_type = numeric_obs_type;
+    params.leaf_sgd_normalize = leaf_sgd_normalize;
 
     ht_status_t init_status;
     if (enable_hat) {
@@ -341,6 +365,26 @@ int main(int argc, char *argv[]) {
         fprintf(stderr, "Error: Failed to initialize Hoeffding Tree: %d\n", init_status);
         fclose(fp);
         return 1;
+    }
+
+    if (use_prep_pipeline) {
+        ht_prep_pipeline_init(&prep_pipeline_instance, (uint8_t)n_features, feat_types);
+        if (prep_hampel_all) {
+            for (uint8_t f = 0; f < n_features; ++f) {
+                if (feat_types[f] == HT_FEAT_NUMERIC) {
+                    ht_hampel_set_enabled(&prep_pipeline_instance.hampel, f, true);
+                }
+            }
+            ht_hampel_set_threshold(&prep_pipeline_instance.hampel, (ht_float_t)3.0);
+        }
+        if (prep_scaler_all) {
+            for (uint8_t f = 0; f < n_features; ++f) {
+                if (feat_types[f] == HT_FEAT_NUMERIC) {
+                    ht_scaler_set_mode(&prep_pipeline_instance.scaler, f, HT_SCALER_STANDARD);
+                }
+            }
+        }
+        ht_tree_set_prep_pipeline(&tree_instance, &prep_pipeline_instance);
     }
 
     const char *mode_str = (sizeof(ht_float_t) == 8) ? "float64 (double)" : "float32 (single)";
