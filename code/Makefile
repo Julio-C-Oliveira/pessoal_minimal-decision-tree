@@ -21,7 +21,7 @@ TEST_RUNNER = $(BUILD_DIR)/test_runner
 
 VERSION ?= $(shell cat ../VERSION 2>/dev/null || cat VERSION 2>/dev/null || echo "0.1.0")
 
-.PHONY: all lib test clean bench bench-triple bench-drift bench-regression bench-memory bench-main bench-esp32 directories version
+.PHONY: all lib test clean bench bench-triple bench-drift bench-regression bench-memory bench-main bench-esp32 bench-tune directories version
 
 version:
 	@echo "Minimal Decision Tree (libht) version $(VERSION)"
@@ -187,6 +187,24 @@ bench-main: $(BENCH_RUNNER) $(BENCH_RUNNER_8) $(BENCH_RUNNER_4) $(BENCH_MAIN_RUN
 			--report ../main_benchmark/main_benchmark_report.md; \
 	else \
 		echo "Error: Python 3 with river not found!"; exit 1; \
+	fi
+
+bench-tune: $(BENCH_RUNNER)
+	@echo "Executing Hyperparameter Tuning & Sensitivity Benchmark..."
+	@if [ -x "$(PYTHON)" ]; then \
+		$(PYTHON) ../main_benchmark/tune_hyperparams.py \
+			--data-dir ../main_benchmark/data \
+			--report ../main_benchmark/hyperparam_report.md \
+			--json ../main_benchmark/hyperparam_results.json \
+			$(TUNE_ARGS); \
+	elif command -v python3 >/dev/null 2>&1; then \
+		python3 ../main_benchmark/tune_hyperparams.py \
+			--data-dir ../main_benchmark/data \
+			--report ../main_benchmark/hyperparam_report.md \
+			--json ../main_benchmark/hyperparam_results.json \
+			$(TUNE_ARGS); \
+	else \
+		echo "Error: Python 3 not found!"; exit 1; \
 	fi
 
 bench-esp32:
