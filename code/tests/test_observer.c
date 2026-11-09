@@ -871,6 +871,77 @@ static void test_reg_observers_in_leaf_stats_pool(void) {
 }
 
 /* ========================================================================= */
+/* --- Level 1 & 2: Histogram Non-Parametric Observer Tests ---------------- */
+/* ========================================================================= */
+
+static void test_hist_obs_basic_and_merging(void) {
+    ht_hist_obs_t obs;
+    ht_hist_init(&obs);
+
+    /* Insert 4 distinct values */
+    ht_hist_update(&obs, 0, (ht_float_t)10.0, (ht_float_t)1.0);
+    ht_hist_update(&obs, 0, (ht_float_t)20.0, (ht_float_t)1.0);
+    ht_hist_update(&obs, 0, (ht_float_t)30.0, (ht_float_t)1.0);
+    ht_hist_update(&obs, 0, (ht_float_t)40.0, (ht_float_t)1.0);
+
+    HT_ASSERT_FLOAT_NEAR(obs.bins[0].center, (ht_float_t)10.0, 1e-5);
+    HT_ASSERT_FLOAT_NEAR(obs.bins[1].center, (ht_float_t)20.0, 1e-5);
+    HT_ASSERT_FLOAT_NEAR(obs.bins[2].center, (ht_float_t)30.0, 1e-5);
+    HT_ASSERT_FLOAT_NEAR(obs.bins[3].center, (ht_float_t)40.0, 1e-5);
+
+    /* Insert 5th value 11.0: distance between 10.0 and 11.0 is 1.0 (minimum).
+     * Bins 10.0 and 11.0 merge into (10.0*1 + 11.0*1)/2 = 10.5 with count = 2.0 */
+    ht_hist_update(&obs, 0, (ht_float_t)11.0, (ht_float_t)1.0);
+
+    HT_ASSERT_FLOAT_NEAR(obs.bins[0].center, (ht_float_t)10.5, 1e-4);
+    HT_ASSERT_FLOAT_NEAR(obs.bins[0].counts[0], (ht_float_t)2.0, 1e-5);
+    HT_ASSERT_FLOAT_NEAR(obs.bins[1].center, (ht_float_t)20.0, 1e-4);
+    HT_ASSERT_FLOAT_NEAR(obs.bins[2].center, (ht_float_t)30.0, 1e-4);
+    HT_ASSERT_FLOAT_NEAR(obs.bins[3].center, (ht_float_t)40.0, 1e-4);
+
+    /* Total class 0 weight must be 5.0 */
+    ht_float_t total = (ht_float_t)0.0;
+    for (uint8_t i = 0; i < HT_HIST_MAX_BINS; ++i) {
+        total += obs.bins[i].counts[0];
+    }
+    HT_ASSERT_FLOAT_NEAR(total, (ht_float_t)5.0, 1e-5);
+}
+
+static void test_hist_obs_split_dists_and_proba(void) {
+    ht_hist_obs_t obs;
+    ht_hist_init(&obs);
+
+    /* Class 0 at low values: 1.0, 2.0 */
+    ht_hist_update(&obs, 0, (ht_float_t)1.0, (ht_float_t)1.0);
+    ht_hist_update(&obs, 0, (ht_float_t)2.0, (ht_float_t)1.0);
+
+    /* Class 1 at high values: 10.0, 11.0 */
+    ht_hist_update(&obs, 1, (ht_float_t)10.0, (ht_float_t)1.0);
+    ht_hist_update(&obs, 1, (ht_float_t)11.0, (ht_float_t)1.0);
+
+    ht_float_t splits[HT_GAUSSIAN_SPLITS];
+    uint8_t n_splits = ht_hist_split_suggestions(&obs, 2, splits);
+    HT_ASSERT(n_splits >= 1);
+
+    /* Evaluate binary split at threshold 5.0 (between clusters 1..2 and 10..11) */
+    ht_float_t lhs[HT_MAX_CLASSES];
+    ht_float_t rhs[HT_MAX_CLASSES];
+    ht_hist_binary_split_dists(&obs, 2, (ht_float_t)5.0, lhs, rhs);
+
+    /* Class 0 all on left, Class 1 all on right */
+    HT_ASSERT_FLOAT_NEAR(lhs[0], (ht_float_t)2.0, 1e-4);
+    HT_ASSERT_FLOAT_NEAR(lhs[1], (ht_float_t)0.0, 1e-4);
+    HT_ASSERT_FLOAT_NEAR(rhs[0], (ht_float_t)0.0, 1e-4);
+    HT_ASSERT_FLOAT_NEAR(rhs[1], (ht_float_t)2.0, 1e-4);
+
+    /* Conditional probabilities */
+    ht_float_t p0 = ht_hist_cond_proba(&obs, 0, (ht_float_t)1.5);
+    ht_float_t p1 = ht_hist_cond_proba(&obs, 1, (ht_float_t)1.5);
+    HT_ASSERT(p0 > (ht_float_t)0.0);
+    HT_ASSERT_FLOAT_EQ(p1, (ht_float_t)0.0);
+}
+
+/* ========================================================================= */
 /* --- Test Suite Runner --------------------------------------------------- */
 /* ========================================================================= */
 
@@ -886,6 +957,10 @@ void test_observer_run(void) {
     HT_RUN_TEST(test_gaussian_pdf_and_log_pdf);
     HT_RUN_TEST(test_gaussian_split_suggestions);
     HT_RUN_TEST(test_gaussian_binary_split_dists);
+
+    /* Nível 1: Histogram Non-Parametric Observer */
+    HT_RUN_TEST(test_hist_obs_basic_and_merging);
+    HT_RUN_TEST(test_hist_obs_split_dists_and_proba);
 
     /* Nível 1: Categorical Nominal & Candidates */
     HT_RUN_TEST(test_categorical_basic_and_proba);
