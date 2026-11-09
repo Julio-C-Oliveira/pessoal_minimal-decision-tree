@@ -217,6 +217,220 @@ void ht_gaussian_binary_split_dists(const ht_gaussian_obs_t obs[HT_MAX_CLASSES],
 }
 
 /* ========================================================================= */
+/* --- Histogram Numeric Observer Implementation (Ben-Haim & Tom-Tov) ------ */
+/* ========================================================================= */
+
+static uint8_t ht_hist_active_bins(const ht_hist_obs_t *obs) {
+    uint8_t count = 0;
+    for (uint8_t i = 0; i < HT_HIST_MAX_BINS; ++i) {
+        ht_float_t total = (ht_float_t)0.0;
+        for (uint8_t c = 0; c < HT_MAX_CLASSES; ++c) {
+            total += obs->bins[i].counts[c];
+        }
+        if (total > (ht_float_t)0.0) {
+            count++;
+        } else {
+            break;
+        }
+    }
+    return count;
+}
+
+void ht_hist_init(ht_hist_obs_t *obs) {
+    if (obs != NULL) {
+        memset(obs, 0, sizeof(*obs));
+    }
+}
+
+void ht_hist_update(ht_hist_obs_t *obs, uint8_t class_idx, ht_float_t val, ht_float_t weight) {
+    if (obs == NULL || class_idx >= HT_MAX_CLASSES || HT_ISNAN(val) || weight <= (ht_float_t)0.0) {
+        return;
+    }
+
+    uint8_t n_bins = ht_hist_active_bins(obs);
+
+    /* Check if an existing bin has the same center */
+    for (uint8_t i = 0; i < n_bins; ++i) {
+        if (HT_FABS(obs->bins[i].center - val) <= (ht_float_t)1e-9) {
+            obs->bins[i].counts[class_idx] += weight;
+            return;
+        }
+    }
+
+    if (n_bins < HT_HIST_MAX_BINS) {
+        uint8_t ins_idx = n_bins;
+        for (uint8_t i = 0; i < n_bins; ++i) {
+            if (val < obs->bins[i].center) {
+                ins_idx = i;
+                break;
+            }
+        }
+        for (int32_t j = (int32_t)n_bins - 1; j >= (int32_t)ins_idx; --j) {
+            obs->bins[j + 1] = obs->bins[j];
+        }
+        obs->bins[ins_idx].center = val;
+        memset(obs->bins[ins_idx].counts, 0, sizeof(obs->bins[ins_idx].counts));
+        obs->bins[ins_idx].counts[class_idx] = weight;
+    } else {
+        ht_hist_bin_t temp[HT_HIST_MAX_BINS + 1U];
+        uint8_t ins_idx = HT_HIST_MAX_BINS;
+        for (uint8_t i = 0; i < HT_HIST_MAX_BINS; ++i) {
+            if (val < obs->bins[i].center) {
+                ins_idx = i;
+                break;
+            }
+        }
+        for (uint8_t i = 0; i < ins_idx; ++i) {
+            temp[i] = obs->bins[i];
+        }
+        temp[ins_idx].center = val;
+        memset(temp[ins_idx].counts, 0, sizeof(temp[ins_idx].counts));
+        temp[ins_idx].counts[class_idx] = weight;
+        for (uint8_t i = ins_idx; i < HT_HIST_MAX_BINS; ++i) {
+            temp[i + 1U] = obs->bins[i];
+        }
+
+        uint8_t min_idx = 0;
+        ht_float_t min_dist = temp[1].center - temp[0].center;
+        for (uint8_t i = 1; i < HT_HIST_MAX_BINS; ++i) {
+            ht_float_t d = temp[i + 1U].center - temp[i].center;
+            if (d < min_dist) {
+                min_dist = d;
+                min_idx = i;
+            }
+        }
+
+        ht_float_t w0 = (ht_float_t)0.0;
+        ht_float_t w1 = (ht_float_t)0.0;
+        for (uint8_t c = 0; c < HT_MAX_CLASSES; ++c) {
+            w0 += temp[min_idx].counts[c];
+            w1 += temp[min_idx + 1U].counts[c];
+        }
+        ht_float_t w_comb = w0 + w1;
+        ht_float_t p_comb = (temp[min_idx].center * w0 + temp[min_idx + 1U].center * w1) /
+                            ((w_comb > (ht_float_t)1e-12) ? w_comb : (ht_float_t)1.0);
+
+        for (uint8_t i = 0; i < min_idx; ++i) {
+            obs->bins[i] = temp[i];
+        }
+        obs->bins[min_idx].center = p_comb;
+        for (uint8_t c = 0; c < HT_MAX_CLASSES; ++c) {
+            obs->bins[min_idx].counts[c] = temp[min_idx].counts[c] + temp[min_idx + 1U].counts[c];
+        }
+        for (uint8_t i = min_idx + 1U; i < HT_HIST_MAX_BINS; ++i) {
+            obs->bins[i] = temp[i + 1U];
+        }
+    }
+}
+
+ht_float_t ht_hist_cond_proba(const ht_hist_obs_t *obs, uint8_t class_idx, ht_float_t val) {
+    if (obs == NULL || class_idx >= HT_MAX_CLASSES || HT_ISNAN(val)) {
+        return (ht_float_t)0.0;
+    }
+
+    uint8_t n_bins = ht_hist_active_bins(obs);
+    if (n_bins == 0) return (ht_float_t)0.0;
+
+    ht_float_t total_c = (ht_float_t)0.0;
+    for (uint8_t i = 0; i < n_bins; ++i) {
+        total_c += obs->bins[i].counts[class_idx];
+    }
+    if (total_c <= (ht_float_t)0.0) return (ht_float_t)0.0;
+
+    if (n_bins == 1U) {
+        ht_float_t diff = HT_FABS(val - obs->bins[0].center);
+        return (diff <= (ht_float_t)1.0) ? (obs->bins[0].counts[class_idx] / total_c) : (ht_float_t)0.0;
+    }
+
+    ht_float_t min_p = obs->bins[0].center;
+    ht_float_t max_p = obs->bins[n_bins - 1U].center;
+    ht_float_t span = max_p - min_p;
+    if (span <= (ht_float_t)1e-9) {
+        return (obs->bins[0].counts[class_idx] / total_c);
+    }
+
+    if (val <= min_p) {
+        ht_float_t d = obs->bins[1].center - obs->bins[0].center;
+        return (obs->bins[0].counts[class_idx] / total_c) / ((d > (ht_float_t)1e-6) ? d : (ht_float_t)1.0);
+    }
+    if (val >= max_p) {
+        ht_float_t d = obs->bins[n_bins - 1U].center - obs->bins[n_bins - 2U].center;
+        return (obs->bins[n_bins - 1U].counts[class_idx] / total_c) / ((d > (ht_float_t)1e-6) ? d : (ht_float_t)1.0);
+    }
+
+    uint8_t seg = 0;
+    for (uint8_t i = 0; i < n_bins - 1U; ++i) {
+        if (val >= obs->bins[i].center && val <= obs->bins[i + 1U].center) {
+            seg = i;
+            break;
+        }
+    }
+
+    ht_float_t d_seg = obs->bins[seg + 1U].center - obs->bins[seg].center;
+    if (d_seg <= (ht_float_t)1e-9) d_seg = (ht_float_t)1e-6;
+    ht_float_t alpha = (val - obs->bins[seg].center) / d_seg;
+    ht_float_t dens0 = (obs->bins[seg].counts[class_idx] / total_c) / d_seg;
+    ht_float_t dens1 = (obs->bins[seg + 1U].counts[class_idx] / total_c) / d_seg;
+    return (1.0f - alpha) * dens0 + alpha * dens1;
+}
+
+ht_float_t ht_hist_cond_log_proba(const ht_hist_obs_t *obs, uint8_t class_idx, ht_float_t val) {
+    ht_float_t p = ht_hist_cond_proba(obs, class_idx, val);
+    if (p <= (ht_float_t)0.0) {
+        return -HT_INFINITY;
+    }
+    return HT_LOG(p);
+}
+
+uint8_t ht_hist_split_suggestions(const ht_hist_obs_t *obs, uint8_t n_classes, ht_float_t splits_out[HT_GAUSSIAN_SPLITS]) {
+    (void)n_classes;
+    if (obs == NULL || splits_out == NULL) return 0;
+    uint8_t n_bins = ht_hist_active_bins(obs);
+    if (n_bins < 2U) return 0;
+
+    uint8_t count = 0;
+    for (uint8_t i = 0; i < n_bins - 1U && count < HT_GAUSSIAN_SPLITS; ++i) {
+        ht_float_t mid = (obs->bins[i].center + obs->bins[i + 1U].center) * (ht_float_t)0.5;
+        splits_out[count++] = mid;
+    }
+    return count;
+}
+
+void ht_hist_binary_split_dists(const ht_hist_obs_t *obs,
+                                uint8_t n_classes,
+                                ht_float_t split_val,
+                                ht_float_t lhs_dist[HT_MAX_CLASSES],
+                                ht_float_t rhs_dist[HT_MAX_CLASSES])
+{
+    if (lhs_dist) {
+        for (uint8_t c = 0; c < HT_MAX_CLASSES; ++c) lhs_dist[c] = (ht_float_t)0.0;
+    }
+    if (rhs_dist) {
+        for (uint8_t c = 0; c < HT_MAX_CLASSES; ++c) rhs_dist[c] = (ht_float_t)0.0;
+    }
+    if (!obs || !lhs_dist || !rhs_dist) return;
+
+    uint8_t n_bins = ht_hist_active_bins(obs);
+    if (n_bins == 0) return;
+
+    uint8_t max_c = (n_classes < HT_MAX_CLASSES) ? n_classes : (uint8_t)HT_MAX_CLASSES;
+
+    for (uint8_t c = 0; c < max_c; ++c) {
+        ht_float_t left_w = (ht_float_t)0.0;
+        ht_float_t right_w = (ht_float_t)0.0;
+        for (uint8_t i = 0; i < n_bins; ++i) {
+            if (obs->bins[i].center <= split_val) {
+                left_w += obs->bins[i].counts[c];
+            } else {
+                right_w += obs->bins[i].counts[c];
+            }
+        }
+        lhs_dist[c] = left_w;
+        rhs_dist[c] = right_w;
+    }
+}
+
+/* ========================================================================= */
 /* --- Categorical Nominal Observer Implementation ------------------------- */
 /* ========================================================================= */
 

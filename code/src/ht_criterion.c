@@ -298,16 +298,60 @@ void ht_evaluate_categorical_observer(const ht_categorical_obs_t *obs,
     }
 }
 
-void ht_find_best_split_candidates(const ht_leaf_stats_t *stats,
-                                   const ht_float_t pre_dist[HT_MAX_CLASSES],
-                                   const ht_feature_type_t feature_types[HT_MAX_FEATURES],
-                                   uint8_t n_features,
-                                   uint8_t n_classes,
-                                   const ht_criterion_vtable_t *crit,
-                                   ht_float_t min_branch_frac,
-                                   bool merit_preprune,
-                                   ht_split_candidate_t *out_best,
-                                   ht_split_candidate_t *out_second_best)
+void ht_evaluate_hist_observer(const ht_hist_obs_t *obs,
+                               const ht_float_t pre_dist[HT_MAX_CLASSES],
+                               uint8_t n_classes,
+                               uint8_t feature_idx,
+                               const ht_criterion_vtable_t *crit,
+                               ht_float_t min_branch_frac,
+                               ht_split_candidate_t *out_best)
+{
+    if (out_best == NULL) {
+        return;
+    }
+    ht_split_candidate_init(out_best);
+    out_best->is_categorical = 0;
+
+    if (obs == NULL || pre_dist == NULL || crit == NULL || crit->merit_of_split == NULL ||
+        n_classes == 0 || n_classes > HT_MAX_CLASSES) {
+        return;
+    }
+
+    ht_float_t splits[HT_GAUSSIAN_SPLITS];
+    uint8_t n_splits = ht_hist_split_suggestions(obs, n_classes, splits);
+    if (n_splits == 0) {
+        return;
+    }
+
+    for (uint8_t i = 0; i < n_splits; i++) {
+        ht_float_t lhs[HT_MAX_CLASSES];
+        ht_float_t rhs[HT_MAX_CLASSES];
+        ht_hist_binary_split_dists(obs, n_classes, splits[i], lhs, rhs);
+
+        ht_float_t merit = crit->merit_of_split(pre_dist, lhs, rhs, n_classes, min_branch_frac);
+        if (merit > out_best->merit) {
+            out_best->merit = merit;
+            out_best->feature_idx = feature_idx;
+            out_best->split_val.threshold = splits[i];
+            for (uint8_t c = 0; c < HT_MAX_CLASSES; c++) {
+                out_best->lhs_dist[c] = lhs[c];
+                out_best->rhs_dist[c] = rhs[c];
+            }
+        }
+    }
+}
+
+void ht_find_best_split_candidates_ext(const ht_leaf_stats_t *stats,
+                                       const ht_float_t pre_dist[HT_MAX_CLASSES],
+                                       const ht_feature_type_t feature_types[HT_MAX_FEATURES],
+                                       uint8_t n_features,
+                                       uint8_t n_classes,
+                                       const ht_criterion_vtable_t *crit,
+                                       ht_float_t min_branch_frac,
+                                       bool merit_preprune,
+                                       ht_numeric_obs_type_t obs_type,
+                                       ht_split_candidate_t *out_best,
+                                       ht_split_candidate_t *out_second_best)
 {
     if (out_best != NULL) {
         ht_split_candidate_init(out_best);
@@ -337,9 +381,15 @@ void ht_find_best_split_candidates(const ht_leaf_stats_t *stats,
     for (uint8_t f = 0; f < n_features; f++) {
         ht_split_candidate_t cand;
         if (feature_types[f] == HT_FEAT_NUMERIC) {
-            ht_evaluate_numeric_observer(stats->observers[f].num,
-                                         pre_dist, n_classes, f,
-                                         crit, min_branch_frac, &cand);
+            if (obs_type == HT_OBS_HISTOGRAM) {
+                ht_evaluate_hist_observer(&stats->observers[f].hist,
+                                          pre_dist, n_classes, f,
+                                          crit, min_branch_frac, &cand);
+            } else {
+                ht_evaluate_numeric_observer(stats->observers[f].num,
+                                             pre_dist, n_classes, f,
+                                             crit, min_branch_frac, &cand);
+            }
         } else {
             ht_evaluate_categorical_observer(&stats->observers[f].cat,
                                              pre_dist, n_classes, f,
@@ -368,6 +418,22 @@ void ht_find_best_split_candidates(const ht_leaf_stats_t *stats,
     if (count >= 2) {
         *out_second_best = suggestions[count - 2];
     }
+}
+
+void ht_find_best_split_candidates(const ht_leaf_stats_t *stats,
+                                   const ht_float_t pre_dist[HT_MAX_CLASSES],
+                                   const ht_feature_type_t feature_types[HT_MAX_FEATURES],
+                                   uint8_t n_features,
+                                   uint8_t n_classes,
+                                   const ht_criterion_vtable_t *crit,
+                                   ht_float_t min_branch_frac,
+                                   bool merit_preprune,
+                                   ht_split_candidate_t *out_best,
+                                   ht_split_candidate_t *out_second_best)
+{
+    ht_find_best_split_candidates_ext(stats, pre_dist, feature_types, n_features, n_classes,
+                                      crit, min_branch_frac, merit_preprune,
+                                      HT_OBS_GAUSSIAN, out_best, out_second_best);
 }
 
 bool ht_should_split(const ht_split_candidate_t *best,

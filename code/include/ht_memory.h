@@ -112,12 +112,32 @@ typedef struct {
 } ht_categorical_obs_t;
 
 /**
+ * @brief Multi-class Ben-Haim & Tom-Tov dynamic histogram bin.
+ *
+ * Exact size: (1 + 4) * 4 = 20 bytes in float32 / (1 + 4) * 8 = 40 bytes in float64.
+ */
+typedef struct {
+    ht_float_t center;
+    ht_float_t counts[HT_MAX_CLASSES];
+} ht_hist_bin_t;
+
+/**
+ * @brief Non-parametric dynamic histogram observer for classification.
+ *
+ * Exact size: 4 * 20 = 80 bytes in float32 / 4 * 40 = 160 bytes in float64.
+ */
+typedef struct {
+    ht_hist_bin_t bins[HT_HIST_MAX_BINS];
+} ht_hist_obs_t;
+
+/**
  * @brief Unified feature observer representation (no vtable).
  *
- * Exactly 80 bytes in float32 and 160 bytes in float64 across all 4 modes.
+ * Exactly 80 bytes in float32 and 160 bytes in float64 across all 5 modes.
  */
 typedef union {
     ht_gaussian_obs_t        num[HT_MAX_CLASSES];
+    ht_hist_obs_t            hist;
     ht_categorical_obs_t     cat;
     ht_reg_numeric_obs_t     reg_num;
     ht_reg_categorical_obs_t reg_cat;
@@ -170,6 +190,8 @@ _Static_assert(sizeof(ht_var_stat_t) == 12, "ht_var_stat_t must be exactly 12 by
 _Static_assert(sizeof(ht_reg_num_slot_t) == 16, "ht_reg_num_slot_t must be exactly 16 bytes in float32 mode");
 _Static_assert(sizeof(ht_reg_numeric_obs_t) == 80, "ht_reg_numeric_obs_t must be exactly 80 bytes in float32 mode");
 _Static_assert(sizeof(ht_reg_categorical_obs_t) == 60, "ht_reg_categorical_obs_t must be exactly 60 bytes in float32 mode");
+_Static_assert(sizeof(ht_hist_bin_t) == 20, "ht_hist_bin_t must be exactly 20 bytes in float32 mode");
+_Static_assert(sizeof(ht_hist_obs_t) == 80, "ht_hist_obs_t must be exactly 80 bytes in float32 mode");
 _Static_assert(sizeof(ht_feature_obs_t) == 80, "ht_feature_obs_t must be 80 bytes in float32 mode");
 _Static_assert(sizeof(ht_leaf_stats_t) == 1360, "ht_leaf_stats_t must be exactly 1360 bytes in float32 mode");
 #else
@@ -180,6 +202,8 @@ _Static_assert(sizeof(ht_var_stat_t) == 24, "ht_var_stat_t must be exactly 24 by
 _Static_assert(sizeof(ht_reg_num_slot_t) == 32, "ht_reg_num_slot_t must be exactly 32 bytes in float64 mode");
 _Static_assert(sizeof(ht_reg_numeric_obs_t) == 160, "ht_reg_numeric_obs_t must be exactly 160 bytes in float64 mode");
 _Static_assert(sizeof(ht_reg_categorical_obs_t) == 120, "ht_reg_categorical_obs_t must be exactly 120 bytes in float64 mode");
+_Static_assert(sizeof(ht_hist_bin_t) == 40, "ht_hist_bin_t must be exactly 40 bytes in float64 mode");
+_Static_assert(sizeof(ht_hist_obs_t) == 160, "ht_hist_obs_t must be exactly 160 bytes in float64 mode");
 _Static_assert(sizeof(ht_feature_obs_t) == 160, "ht_feature_obs_t must be 160 bytes in float64 mode");
 _Static_assert(sizeof(ht_leaf_stats_t) == 2720, "ht_leaf_stats_t must be exactly 2720 bytes in float64 mode");
 #endif

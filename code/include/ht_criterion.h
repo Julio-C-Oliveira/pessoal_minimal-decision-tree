@@ -178,6 +178,17 @@ void ht_evaluate_categorical_observer(const ht_categorical_obs_t *obs,
                                       ht_split_candidate_t *out_best);
 
 /**
+ * @brief Evaluates non-parametric dynamic histogram observer to find best numeric split.
+ */
+void ht_evaluate_hist_observer(const ht_hist_obs_t *obs,
+                               const ht_float_t pre_dist[HT_MAX_CLASSES],
+                               uint8_t n_classes,
+                               uint8_t feature_idx,
+                               const ht_criterion_vtable_t *crit,
+                               ht_float_t min_branch_frac,
+                               ht_split_candidate_t *out_best);
+
+/**
  * @brief Evaluates all feature observers in an active leaf and returns top 2 split candidates.
  *
  * Matches River's leaf.best_split_suggestions():
@@ -207,6 +218,21 @@ void ht_find_best_split_candidates(const ht_leaf_stats_t *stats,
                                    bool merit_preprune,
                                    ht_split_candidate_t *out_best,
                                    ht_split_candidate_t *out_second_best);
+
+/**
+ * @brief Extended candidate evaluation supporting configurable numeric observer type.
+ */
+void ht_find_best_split_candidates_ext(const ht_leaf_stats_t *stats,
+                                       const ht_float_t pre_dist[HT_MAX_CLASSES],
+                                       const ht_feature_type_t feature_types[HT_MAX_FEATURES],
+                                       uint8_t n_features,
+                                       uint8_t n_classes,
+                                       const ht_criterion_vtable_t *crit,
+                                       ht_float_t min_branch_frac,
+                                       bool merit_preprune,
+                                       ht_numeric_obs_type_t obs_type,
+                                       ht_split_candidate_t *out_best,
+                                       ht_split_candidate_t *out_second_best);
 
 /**
  * @brief Decides whether to perform a split based on Hoeffding bound and tie threshold.

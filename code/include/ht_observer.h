@@ -182,6 +182,53 @@ void ht_gaussian_binary_split_dists(const ht_gaussian_obs_t obs[HT_MAX_CLASSES],
                                     ht_float_t rhs_dist[HT_MAX_CLASSES]);
 
 /* ========================================================================= */
+/* --- Histogram Numeric Observer API (Ben-Haim & Tom-Tov) ----------------- */
+/* ========================================================================= */
+
+/**
+ * @brief Initializes a dynamic histogram observer to zero state.
+ */
+void ht_hist_init(ht_hist_obs_t *obs);
+
+/**
+ * @brief Incremental update of dynamic histogram observer with centroid merging.
+ */
+void ht_hist_update(ht_hist_obs_t *obs,
+                    uint8_t class_idx,
+                    ht_float_t val,
+                    ht_float_t weight);
+
+/**
+ * @brief Evaluates conditional probability P(x | c) using density interpolation.
+ */
+ht_float_t ht_hist_cond_proba(const ht_hist_obs_t *obs,
+                             uint8_t class_idx,
+                             ht_float_t val);
+
+/**
+ * @brief Evaluates conditional log probability ln(P(x | c)).
+ */
+ht_float_t ht_hist_cond_log_proba(const ht_hist_obs_t *obs,
+                                 uint8_t class_idx,
+                                 ht_float_t val);
+
+/**
+ * @brief Generates suggested split points as midpoints between adjacent histogram bins.
+ */
+uint8_t ht_hist_split_suggestions(const ht_hist_obs_t *obs,
+                                  uint8_t n_classes,
+                                  ht_float_t splits_out[HT_GAUSSIAN_SPLITS]);
+
+/**
+ * @brief Estimates post-split class distributions via trapezoidal integration.
+ */
+void ht_hist_binary_split_dists(const ht_hist_obs_t *obs,
+                                uint8_t n_classes,
+                                ht_float_t split_val,
+                                ht_float_t lhs_dist[HT_MAX_CLASSES],
+                                ht_float_t rhs_dist[HT_MAX_CLASSES]);
+
+/* ========================================================================= */
 /* --- Categorical Nominal Observer API (One-vs-Rest) ---------------------- */
 /* ========================================================================= */
 
