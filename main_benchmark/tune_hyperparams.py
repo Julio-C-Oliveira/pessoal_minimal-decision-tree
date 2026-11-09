@@ -525,25 +525,42 @@ def generate_markdown_report(
             f.write(f"- **Descrição:** {desc}\n")
             f.write(f"- **Total de Experimentos (Trials):** {len(trials)}\n\n")
 
-            # Group trials by engine
-            by_engine: Dict[str, List[Dict[str, Any]]] = {"c11": [], "river": [], "sklearn": []}
+            # Group trials by engine / tier
+            by_engine: Dict[str, List[Dict[str, Any]]] = {
+                "c11_global": [],
+                "c11_t8": [],
+                "river": [],
+                "sklearn": [],
+            }
             for t in trials:
                 eng = t.get("engine", "c11")
-                by_engine[eng].append(t)
+                if eng == "c11":
+                    by_engine["c11_global"].append(t)
+                    if t.get("params", {}).get("tier") == 8:
+                        by_engine["c11_t8"].append(t)
+                else:
+                    by_engine[eng].append(t)
 
             # Sort trials
             metric_sort_key = "holdout_acc" if task == "classification" else "holdout_mae"
             reverse_sort = True if task == "classification" else False
 
-            for eng in ["c11", "river", "sklearn"]:
-                by_engine[eng].sort(key=lambda x: x.get(metric_sort_key, 0.0 if reverse_sort else 1e9), reverse=reverse_sort)
+            for k in by_engine:
+                by_engine[k].sort(key=lambda x: x.get(metric_sort_key, 0.0 if reverse_sort else 1e9), reverse=reverse_sort)
+
+            engines_to_show = [
+                ("c11_global", "C11 libht (Global / T256)"),
+                ("c11_t8", "C11 libht (Tier 8)"),
+                ("river", "River"),
+                ("sklearn", "Scikit-Learn"),
+            ]
 
             # 1. Top Models Table per Engine
             f.write(f"### 1. Melhores Modelos por Competidor (Top 3)\n\n")
             if task == "classification":
                 f.write("| Engine | Rank | Configuração / Hiperparâmetros | Acurácia (%) | Prec. Macro (%) | Rec. Macro (%) | F1 Macro (%) | RAM (KB) | Latência (µs) |\n")
                 f.write("| :--- | :---: | :--- | :---: | :---: | :---: | :---: | :---: | :---: |\n")
-                for eng, label in [("c11", "C11 libht"), ("river", "River"), ("sklearn", "Scikit-Learn")]:
+                for eng, label in engines_to_show:
                     for rank, t in enumerate(by_engine[eng][:3], start=1):
                         p_str = ", ".join(f"`{k}={v}`" for k, v in t["params"].items())
                         f.write(
@@ -558,7 +575,7 @@ def generate_markdown_report(
             else:
                 f.write("| Engine | Rank | Configuração / Hiperparâmetros | MAE | RMSE | R² | RAM (KB) | Latência (µs) |\n")
                 f.write("| :--- | :---: | :--- | :---: | :---: | :---: | :---: | :---: |\n")
-                for eng, label in [("c11", "C11 libht"), ("river", "River"), ("sklearn", "Scikit-Learn")]:
+                for eng, label in engines_to_show:
                     for rank, t in enumerate(by_engine[eng][:3], start=1):
                         p_str = ", ".join(f"`{k}={v}`" for k, v in t["params"].items())
                         f.write(
@@ -577,7 +594,7 @@ def generate_markdown_report(
             if task == "classification":
                 f.write("| Engine | Configuração Chave | Acurácia (%) | F1 Macro (%) | RAM Intra-Treino | Latência por Amostra |\n")
                 f.write("| :--- | :--- | :---: | :---: | :---: | :---: |\n")
-                for eng, label in [("c11", "C11 libht"), ("river", "River"), ("sklearn", "Scikit-Learn")]:
+                for eng, label in engines_to_show:
                     if by_engine[eng]:
                         best_t = by_engine[eng][0]
                         cfg = f"`grace_period={best_t['params'].get('grace_period')}`, `delta={best_t['params'].get('delta')}`" if "grace_period" in best_t['params'] else f"`max_depth={best_t['params'].get('max_depth')}`"
@@ -589,7 +606,7 @@ def generate_markdown_report(
             else:
                 f.write("| Engine | Configuração Chave | MAE | R² | RAM Intra-Treino | Latência por Amostra |\n")
                 f.write("| :--- | :--- | :---: | :---: | :---: | :---: |\n")
-                for eng, label in [("c11", "C11 libht"), ("river", "River"), ("sklearn", "Scikit-Learn")]:
+                for eng, label in engines_to_show:
                     if by_engine[eng]:
                         best_t = by_engine[eng][0]
                         cfg = f"`grace_period={best_t['params'].get('grace_period')}`, `slots={best_t['params'].get('reg_num_slots')}`" if "grace_period" in best_t['params'] else f"`max_depth={best_t['params'].get('max_depth')}`"
