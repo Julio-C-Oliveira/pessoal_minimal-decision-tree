@@ -84,7 +84,8 @@ class Esp32Client:
                 continue
             # Filter out bootloader and IDF log noise lines
             if (
-                clean.startswith("===")
+                not clean
+                or clean.startswith("===")
                 or clean.startswith("ets ")
                 or clean.startswith("rst:")
                 or clean.startswith("configsip:")
@@ -95,6 +96,7 @@ class Esp32Client:
                 or clean.startswith("I (")
                 or clean.startswith("W (")
                 or clean.startswith("E (")
+                or clean.startswith("PONG")
             ):
                 continue
             return clean
@@ -132,6 +134,14 @@ class Esp32Client:
                                     if "=" in p:
                                         k, v = p.split("=", 1)
                                         res[k] = v
+                                self.sock.settimeout(0.05)
+                                try:
+                                    while True:
+                                        drain = self.sock.recv(4096)
+                                        if not drain:
+                                            break
+                                except Exception:
+                                    pass
                                 self.sock.settimeout(self.timeout)
                                 self.reader = self.sock.makefile("r", encoding="utf-8", errors="replace")
                                 self.writer = self.sock.makefile("w", encoding="utf-8", errors="replace")
@@ -162,9 +172,12 @@ class Esp32Client:
             f"types={types_str},leaf={leaf},grace={grace},delta={delta},tau={tau},hat={1 if hat else 0}"
         )
         self.send_line(cmd)
-        resp = self.read_line()
-        if not resp.startswith("OK_INIT"):
-            raise RuntimeError(f"Initialization failed: {resp}")
+        while True:
+            resp = self.read_line()
+            if resp.startswith("OK_INIT"):
+                break
+            if resp.startswith("ERR") or resp.startswith("FAIL"):
+                raise RuntimeError(f"Initialization failed: {resp}")
         parts = resp.split(",")
         meta = {"raw": resp}
         for p in parts[1:]:
@@ -629,9 +642,9 @@ def generate_markdown_report(results: List[Dict[str, Any]], report_path: str):
         md.append(
             f"| **{r.get('display_name', r['dataset'])}** | "
             f"{task_str} | "
-            f"**{mean_us:.2f} $\mu$s** | "
-            f"{p95_us:.2f} $\mu$s | "
-            f"{p99_us:.2f} $\mu$s | "
+            f"**{mean_us:.2f} $\\mu$s** | "
+            f"{p95_us:.2f} $\\mu$s | "
+            f"{p99_us:.2f} $\\mu$s | "
             f"**{throughput:,.0f} amostras/s** | "
             f"{footprint_str} | "
             f"{ram_str} | "

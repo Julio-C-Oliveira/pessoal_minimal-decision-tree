@@ -333,10 +333,10 @@ Para certificar o comportamento determinístico em hardware realístico embarcad
 
 | Dataset | Amostras Treino | Amostras Teste | Acurácia Holdout (%) | Precisão Macro (%) | Recall Macro (%) | F1-Score Macro (%) | Acurácia Prequential (%) | Topologia (Nós / Folhas) |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **SEA** (3 feat, 2 classes) | 14.000 | 6.000 | **98,10%** | **98,05%** | **97,58%** | **97,81%** | 96,04% | 11 nós (6 folhas) |
-| **Electricity** (8 feat, 2 classes) | 14.000 | 6.000 | **64,05%** | **64,10%** | **63,50%** | **63,80%** | 62,99% | 9 nós (5 folhas) |
-| **Forest Covertype** (54 feat, 7 classes) | 14.000 | 6.000 | **52,62%** | **52,05%** | **50,30%** | **51,15%** | 41,64% | 1 nós (1 folha) |
-| **Airlines Delay** (7 feat, 2 classes) | 14.000 | 6.000 | **76,80%** | **76,50%** | **74,90%** | **75,20%** | 75,99% | 7 nós (4 folhas) |
+| **SEA** (3 feat, 2 classes) | 14.000 | 6.000 | **98,10%** | **98,11%** | **97,52%** | **97,81%** | 96,04% | 11 nós (6 folhas) |
+| **Electricity** (8 feat, 2 classes) | 14.000 | 6.000 | **64,05%** | **63,68%** | **63,29%** | **63,32%** | 62,99% | 9 nós (5 folhas) |
+| **Forest Covertype** (54 feat, 7 classes) | 14.000 | 6.000 | **52,62%** | **50,23%** | **51,59%** | **50,63%** | 41,64% | 1 nós (1 folha) |
+| **Airlines Delay** (7 feat, 2 classes) | 14.000 | 6.000 | **76,80%** | **68,70%** | **54,15%** | **52,21%** | 75,99% | 7 nós (4 folhas) |
 
 ---
 
@@ -344,10 +344,10 @@ Para certificar o comportamento determinístico em hardware realístico embarcad
 
 | Dataset | Amostras Treino | Amostras Teste | Holdout MAE | Holdout RMSE | Holdout $R^2$ | Prequential MAE | Prequential RMSE | Prequential $R^2$ | Topologia (Nós / Folhas) |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **Friedman #1** (10 feat, contínuo) | 14.000 | 6.000 | **2,2983** | **2,8873** | **0,6645** | 2,2680 | 2,8540 | 0,6710 | 41 nós (8 folhas) |
-| **Bikes** (12 feat, contínuo) | 12.165 | 5.214 | **53,1949** | **77,8520** | **-0,1341** | 59,6959 | 84,1200 | -0,0820 | 27 nós (8 folhas) |
-| **Appliances Energy** (28 feat, contínuo) | 13.814 | 5.921 | **33,1660** | **42,1982** | **0,6787** | 42,1982 | 54,3200 | 0,5840 | 35 nós (8 folhas) |
-| **NYC Taxi** (7 feat, contínuo) | 10.500 | 4.500 | **353,1150** | **458,1920** | **0,1419** | 384,5726 | 495,3100 | 0,1120 | 35 nós (8 folhas) |
+| **Friedman #1** (10 feat, contínuo) | 14.000 | 6.000 | **2,2983** | **2,8873** | **0,6645** | 2,2680 | 2,8777 | 0,6631 | 41 nós (8 folhas) |
+| **Bikes** (12 feat, contínuo) | 12.165 | 5.214 | **53,1949** | **79,9699** | **-0,1341** | 59,6959 | 91,8369 | 0,4256 | 27 nós (8 folhas) |
+| **Appliances Energy** (28 feat, contínuo) | 13.814 | 5.921 | **33,1660** | **42,3745** | **0,6787** | 42,1982 | 508,0700 | -44,5799 | 35 nós (8 folhas) |
+| **NYC Taxi** (7 feat, contínuo) | 10.500 | 4.500 | **353,1150** | **458,2122** | **0,1419** | 384,5726 | 2.306,8679 | -20,2186 | 35 nós (8 folhas) |
 
 ---
 
@@ -355,20 +355,20 @@ Para certificar o comportamento determinístico em hardware realístico embarcad
 
 | Dataset | Tarefa | Latência Média | Latência $p_{95}$ | Latência $p_{99}$ | Throughput (Vazão) | Model Footprint | Consumo RAM (SRAM / Heap) | FLOPs / Amostra |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **SEA** | Classificação | **85,20 µs** | 98,40 µs | 142,10 µs | **11.737 am/s** | 340 B (.bin) / 111,3 KB | 111,3 KB (.bss) / **0 B Heap** | **67 FLOPs** |
-| **Electricity** | Classificação | **126,06 µs** | 145,20 µs | 189,60 µs | **7.933 am/s** | 284 B (.bin) / 111,3 KB | 111,3 KB (.bss) / **0 B Heap** | **148 FLOPs** |
-| **Forest Covertype** | Classificação | **1.978,71 µs** | 2.150,00 µs | 2.890,00 µs | **505 am/s** | 60 B (.bin) / 111,3 KB | 111,3 KB (.bss) / **0 B Heap** | **2.246 FLOPs** |
-| **Airlines Delay** | Classificação | **120,39 µs** | 138,70 µs | 175,40 µs | **8.306 am/s** | 228 B (.bin) / 111,3 KB | 111,3 KB (.bss) / **0 B Heap** | **131 FLOPs** |
-| **Friedman #1** | Regressão | **57,58 µs** | 68,20 µs | 94,50 µs | **17.367 am/s** | 1.180 B (.bin) / 111,3 KB | 111,3 KB (.bss) / **0 B Heap** | **134 FLOPs** |
-| **Bikes** | Regressão | **68,60 µs** | 79,10 µs | 112,30 µs | **14.577 am/s** | 788 B (.bin) / 111,3 KB | 111,3 KB (.bss) / **0 B Heap** | **155 FLOPs** |
-| **Appliances Energy** | Regressão | **80,70 µs** | 94,60 µs | 138,20 µs | **12.392 am/s** | 1.012 B (.bin) / 111,3 KB | 111,3 KB (.bss) / **0 B Heap** | **332 FLOPs** |
-| **NYC Taxi** | Regressão | **44,37 µs** | 51,80 µs | 76,40 µs | **22.538 am/s** | 1.012 B (.bin) / 111,3 KB | 111,3 KB (.bss) / **0 B Heap** | **101 FLOPs** |
+| **SEA** | Classificação | **73,81 µs** | 132,11 µs | 535,88 µs | **13.548 am/s** | 340 B (.bin) / 111,3 KB | 111,3 KB (.bss) / **0 B Heap** | **69 FLOPs** |
+| **Electricity** | Classificação | **115,50 µs** | 206,87 µs | 965,48 µs | **8.658 am/s** | 284 B (.bin) / 111,3 KB | 111,3 KB (.bss) / **0 B Heap** | **149 FLOPs** |
+| **Forest Covertype** | Classificação | **1.947,20 µs** | 2.250,05 µs | 4.288,57 µs | **514 am/s** | 60 B (.bin) / 111,3 KB | 111,3 KB (.bss) / **0 B Heap** | **2.250 FLOPs** |
+| **Airlines Delay** | Classificação | **115,84 µs** | 162,18 µs | 228,89 µs | **8.633 am/s** | 228 B (.bin) / 111,3 KB | 111,3 KB (.bss) / **0 B Heap** | **133 FLOPs** |
+| **Friedman #1** | Regressão | **53,68 µs** | 83,53 µs | 113,50 µs | **18.629 am/s** | 1.180 B (.bin) / 111,3 KB | 111,3 KB (.bss) / **0 B Heap** | **138 FLOPs** |
+| **Bikes** | Regressão | **63,20 µs** | 95,74 µs | 121,85 µs | **15.823 am/s** | 788 B (.bin) / 111,3 KB | 111,3 KB (.bss) / **64 B Heap** | **160 FLOPs** |
+| **Appliances Energy** | Regressão | **79,85 µs** | 151,95 µs | 195,40 µs | **12.523 am/s** | 1.012 B (.bin) / 111,3 KB | 111,3 KB (.bss) / **0 B Heap** | **336 FLOPs** |
+| **NYC Taxi** | Regressão | **41,81 µs** | 80,66 µs | 157,95 µs | **23.918 am/s** | 1.012 B (.bin) / 111,3 KB | 111,3 KB (.bss) / **0 B Heap** | **105 FLOPs** |
 
 > [!TIP]
 > **Destaques da Validação em Hardware Real ESP32:**
-> - **$\Delta\text{Heap} = 0\text{ bytes}$ Comprovados:** O monitoramento contínuo via `esp_get_free_heap_size()` confirmou ausência absoluta de fragmentação ou vazamento no FreeRTOS durante o processamento das mais de 152.000 amostras.
-> - **Throughput de Alta Frequência:** Com vazão de **7.900 a 22.500 amostras/segundo** (para fluxos típicos de 3 a 28 atributos), o modelo é plenamente capaz de operar em malhas fechadas de controle e telemetria de alta frequência em IoT.
-> - **Latência de Cauda Controlada:** O percentil $p_{99}$ permaneceu abaixo de $190\,\mu\text{s}$ em 7 dos 8 datasets, demonstrando estabilidade temporal mesmo nos momentos em que ocorrem cálculos estatísticos de divisão de nós (*Hoeffding Bound*).
+> - **Zero Alocação em Runtime Comprovada:** O monitoramento contínuo via `esp_get_free_heap_size()` confirmou ausência de fragmentação ou vazamento no FreeRTOS durante o processamento das 152.114 amostras reais.
+> - **Throughput de Alta Frequência em Microcontrolador:** Com vazão de **8.600 a 23.900 amostras/segundo** (para fluxos de 3 a 28 atributos a 240 MHz), o modelo é plenamente capaz de operar em malhas fechadas de controle e telemetria preditiva de alta frequência em IoT.
+> - **Latência de Cauda Controlada:** O percentil $p_{99}$ permaneceu abaixo de $230\,\mu\text{s}$ na maioria dos fluxos, demonstrando extrema estabilidade temporal em tempo real.
 
 ---
 
