@@ -33,6 +33,12 @@
 | **4.6** | **Fase 4:** Dimensionamento por Macros e Benchmark de Escalonamento de RAM (256 a 4 Folhas) | `code/Makefile`, `Makefile`, `benchmarks/compare_river.py`, `benchmarks/memory_benchmark_report.md` | Avaliação rigorosa da árvore C11 dimensionada via macros de compilação (`HT_MAX_ACTIVE_LEAVES` e `HT_MAX_NODES`), variando de 256 a 4 folhas (4.096 a 64 nós). Avaliação em 5 fluxos provando retenção de acurácia com apenas 8,4 KB de RAM e zero heap em runtime. | `[x]` | `76575c3` |
 | **4.7** | **Fase 4:** Main Benchmark Suite — Avaliação Realista de RAM e Multi-Tier C11 | `main_benchmark/main_benchmark.py`, `main_benchmark/prepare_datasets.py`, `main_benchmark/main_benchmark_report.md`, `Makefile`, `code/Makefile` | Avaliação em 8 datasets emblemáticos (4 classificação, 4 regressão) comparando C11 Multi-Tier (256, 8, 4) vs River (Streaming 1-a-1) vs Scikit-Learn (Full Batch in RAM). Medição de Peak RSS, intra-train RAM, latência por amostra e speedup >200x a 3.000x. | `[x]` | `6552912` |
 | **5.1** | **Fase 5:** Emulação Hardware-in-the-Loop em ESP32 via QEMU | `emulation/esp32/CMakeLists.txt`, `emulation/esp32/main/CMakeLists.txt`, `emulation/esp32/sdkconfig.defaults`, `emulation/esp32/main/main.c`, `emulation/esp32/run_qemu.sh`, `emulation/esp32/stream_runner.py`, `code/Makefile`, `Makefile` | Validação de firmware ESP-IDF/FreeRTOS emulando ESP32 no QEMU (`qemu-system-xtensa`) no perfil Tier 8 Universal ($\approx 111\text{ KB}$ SRAM estática, zero heap). Cronometria por ciclos (`esp_cpu_get_cycle_count()`), handshake serial Stop-and-Wait sobre Socket TCP, e prequential evaluation nos 8 datasets principais. | `[x]` | `76b66f5` |
+| **6.1** | **Fase 6:** Estudo Teórico: Pré-Processamento, Normalização e Não-Paramétricos | [`docs/08_data_preprocessing_and_nonparametric.md`](file:///home/julio/Documentos/pessoal_minimal-decision-tree/docs/08_data_preprocessing_and_nonparametric.md) | Fundamentação de Hampel MAD, Space-Saving, Ben-Haim & Tom-Tov, Z-Score Híbrido SGD das Folhas e SemVer `0.2.0` | `[x]` | `f154ea1` |
+| **6.2** | **Fase 6:** `libht_prep` Parte 1: Hampel, Scaler Online e Space-Saving | `code/include/ht_config.h`, `code/include/ht_prep.h`, `code/src/ht_prep.c`, `code/tests/test_prep.c` | **N1:** Welford Z-score/Min-Max, filtro mediano Hampel ($100\sigma$ outlier), Space-Saving Freq Ratio/Top-K<br/>**N2:** encadeamento dos blocos em streams contínuos | `[ ]` | — |
+| **6.3** | **Fase 6:** `libht_prep` Parte 2: Discretizador Ben-Haim e Pipeline Unificado | `code/include/ht_prep.h`, `code/src/ht_prep.c`, `code/tests/test_prep.c` | **N1:** quantis e bins Ben-Haim em distribuições bimodais/exponenciais<br/>**N2:** pipeline completo `ht_prep_pipeline_t` transformando tuplas `ht_value_t[]` | `[ ]` | — |
+| **6.4** | **Fase 6:** Observador Não-Paramétrico de Histograma na Árvore | `code/include/ht_memory.h`, `code/include/ht_observer.h`, `code/src/ht_observer.c`, `code/src/ht_criterion.c`, `code/src/ht_tree.c`, `code/tests/test_observer.c` | **N1:** fusão de bins `ht_hist_obs_t`, `cond_proba` e split suggestions<br/>**N2:** `union` estrita mantendo $80\text{ B}$/$160\text{ B}$ em `ht_feature_obs_t`<br/>**N3:** classificação bimodal com `HT_OBS_HISTOGRAM` | `[ ]` | — |
+| **6.5** | **Fase 6:** Normalização Z-Score Híbrida nas Folhas SGD, Pipeline Anexo e SemVer `0.2.0` | `VERSION`, `code/include/ht_config.h`, `code/include/ht_tree.h`, `code/src/ht_tree.c`, `code/Makefile`, `code/tests/test_tree.c`, `code/tests/test_e2e_flow.c`, `code/tests/test_main.c` | **N1:** credibilidade $\alpha$ e estabilização de SGD multi-escala<br/>**N2:** herança de pesos mãe $\to$ filhas sem descontinuidade pós-split<br/>**N3:** `ht_tree_set_prep_pipeline` no fluxo E2E + asserções `HT_VERSION_CHECK(0, 2, 0)` | `[ ]` | — |
+| **6.6** | **Fase 6:** Benchmark Experimental de Pré-Processamento e Atualização da Wiki | `benchmarks/compare_prep.py`, `benchmarks/bench_c_runner.c`, `benchmarks/prep_benchmark_report.md`, `Makefile`, `wiki/*.md`, `README.md` | Avaliação em multi-escala (Bikes), ruído industrial de sensores (outliers) e distribuições multimodais; sincronização da GitHub Wiki | `[ ]` | — |
 
 ---
 
@@ -702,3 +708,52 @@ flowchart LR
   - Latência em Hardware Emulado (QEMU @ 240 MHz): **$41\,\mu\text{s}$ a $1.947\,\mu\text{s}$** por amostra completa (predição + treino online).
   - Determinismo e Memória: **$0\text{ bytes}$ de $\Delta\text{Heap}$** (Zero Malloc comprovado) e $> 9.200\text{ bytes}$ de margem livre na stack FreeRTOS.
   - Documentação consolidada no `README.md` (Seção 3.2 e Seção 3.6) estruturada em 3 tabelas independentes: Classificação, Regressão Contínua e Performance/Recursos.
+
+---
+
+## 7. Fase 6: Micro-Pipelines de Pré-Processamento (`libht_prep`), Normalização Online nas Folhas e Discretizadores Não-Paramétricos
+
+### Entrega 6.1: Estudo Teórico e Atualização do Plano Persistente
+- Fundamentação matemática completa consolidada em [`docs/08_data_preprocessing_and_nonparametric.md`](file:///home/julio/Documentos/pessoal_minimal-decision-tree/docs/08_data_preprocessing_and_nonparametric.md).
+- Modelagem de:
+  1. Filtro mediano móvel de Hampel com MAD normalizado em janela estática $W=7$.
+  2. Padronizador Z-Score (Welford) e Min-Max online.
+  3. Codificador categórico de alta cardinalidade *Space-Saving* (frequência relativa contínua $[0, 1]$ e ranking Top-$K$ com bucket *"Outros"*).
+  4. Discretizador e quantizador contínuo não-paramétrico de Ben-Haim & Tom-Tov com centróides ordenados e fusão em $O(B)$.
+  5. Observador numérico de histograma multi-classe (`ht_hist_obs_t`) na `union` de 80 bytes (`float32`) / 160 bytes (`double64`) com zero impacto em `sizeof(ht_leaf_stats_t)`.
+  6. Normalização Z-Score híbrida com credibilidade $\alpha$ nas folhas de regressão SGD (`tree->feat_stats[HT_MAX_FEATURES]` de $+192\text{ B}$ / $+384\text{ B}$ + 5 slots locais).
+  7. Bump de versão SemVer `0.1.0` $\to$ `0.2.0`.
+
+### Entrega 6.2: `libht_prep` Parte 1: Hampel, Scaler Online e Space-Saving
+- Criação de `code/include/ht_prep.h` e `code/src/ht_prep.c`:
+  - `ht_filter_hampel_t` com rejeição de espículas $> 3\sigma$ de MAD e substituição pela mediana.
+  - `ht_scaler_t` com Z-Score incremental e Min-Max.
+  - `ht_encoder_freq_t` com algoritmo *Space-Saving* em 16 slots por atributo.
+- Testes Nível 1 e Nível 2 em `code/tests/test_prep.c`.
+
+### Entrega 6.3: `libht_prep` Parte 2: Discretizador Ben-Haim e Pipeline Unificado
+- Implementação de `ht_quantizer_t` e da estrutura composável `ht_prep_pipeline_t`:
+  - `ht_quantizer_cdf` (CDF contínua $[0, 1]$) e `ht_quantizer_quantile` (inversa da CDF).
+  - Modos `HT_QUANT_CDF_UNIFORM`, `HT_QUANT_KBINS_ORDINAL` e `HT_QUANT_KBINS_CAT`.
+  - Pipeline encadeado com execução integrada em tuplas `ht_value_t[]`:
+    `ht_prep_learn_transform_one` e `ht_prep_transform_one`.
+- Testes Nível 1 e Nível 2 em `code/tests/test_prep.c`.
+
+### Entrega 6.4: Observador Não-Paramétrico de Histograma na Árvore
+- Inclusão de `ht_hist_obs_t` em `ht_feature_obs_t` (`code/include/ht_memory.h`).
+- Implementação de `ht_hist_init`, `ht_hist_update`, `ht_hist_cond_proba`, `ht_hist_split_suggestions` e `ht_hist_binary_split_dists` em `code/include/ht_observer.h` e `code/src/ht_observer.c`.
+- Integração no roteamento e split da árvore para `HT_OBS_HISTOGRAM` em `code/src/ht_tree.c`.
+- Testes N1, N2 e N3 em `code/tests/test_observer.c`.
+
+### Entrega 6.5: Normalização Z-Score Híbrida nas Folhas SGD, Pipeline Anexo e SemVer `0.2.0`
+- Integração da normalização Z-score com credibilidade $\alpha$ no SGD linear das folhas de regressão (`code/src/ht_tree.c`).
+- Implementação de `ht_tree_set_prep_pipeline` para anexação transparente do pipeline `ht_prep_pipeline_t` à árvore (`tree->prep_pipeline`).
+- Promoção da versão da biblioteca de `0.1.0` para `0.2.0` em `VERSION`, `code/include/ht_config.h` e `code/tests/test_main.c`.
+- Verificação de orçamento: `_Static_assert(sizeof(ht_tree_t) <= 1024 * 1024)` mantido rigorosamente em `float` e `double`.
+- Testes N1, N2 e N3 em `code/tests/test_tree.c`, `code/tests/test_e2e_flow.c` e `code/tests/test_main.c`.
+
+### Entrega 6.6: Benchmark Experimental de Pré-Processamento e Atualização da Wiki
+- Criação de `benchmarks/compare_prep.py` e relatório `benchmarks/prep_benchmark_report.md`.
+- Target no Makefile: `make bench-prep`.
+- Atualização e sincronização da Wiki com os novos módulos implementados.
+
