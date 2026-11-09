@@ -14,6 +14,7 @@
 
 #include "test_harness.h"
 #include "ht_tree.h"
+#include "ht_prep.h"
 #include <string.h>
 
 /* ========================================================================= */
@@ -896,6 +897,108 @@ static void test_tree_hat_reg_alternate_tree_switch_and_prune(void) {
     HT_ASSERT_EQ(ht_tree_free_subtree(&tree, tree.root_idx), HT_OK);
 }
 
+static void test_tree_leaf_sgd_hybrid_normalization(void) {
+    ht_config_params_t params;
+    ht_default_reg_params(&params, 2);
+    params.leaf_prediction = HT_LEAF_MODEL;
+    params.learning_rate = (ht_float_t)0.05;
+    params.l2_regularization = (ht_float_t)1e-4;
+    params.leaf_sgd_normalize = true;
+    params.grace_period = 500U;
+
+    ht_tree_t tree;
+    HT_ASSERT_EQ(ht_tree_init(&tree, &params), HT_OK);
+
+    ht_value_t x[HT_MAX_FEATURES];
+    memset(x, 0, sizeof(x));
+
+    /* Features at vastly different scales:
+     * x[0] in [0, 1]
+     * x[1] in [0, 1000]
+     * Target y = 5.0 * x[0] + 0.002 * x[1] + 3.0 */
+    for (int i = 0; i < 400; ++i) {
+        ht_float_t v0 = (ht_float_t)(i % 10) * (ht_float_t)0.1;
+        ht_float_t v1 = (ht_float_t)((i * 37) % 1000);
+        ht_float_t y = (ht_float_t)5.0 * v0 + (ht_float_t)0.002 * v1 + (ht_float_t)3.0;
+
+        x[0].num = v0;
+        x[1].num = v1;
+        HT_ASSERT_EQ(ht_tree_learn_one_reg(&tree, x, y, (ht_float_t)1.0), HT_OK);
+    }
+
+    /* Test prediction at unseen vector */
+    x[0].num = (ht_float_t)0.5;
+    x[1].num = (ht_float_t)500.0;
+    /* Expected y = 5.0 * 0.5 + 0.002 * 500 + 3.0 = 2.5 + 1.0 + 3.0 = 6.5 */
+    ht_float_t pred = ht_tree_predict_reg(&tree, x);
+    HT_ASSERT_FLOAT_NEAR(pred, (ht_float_t)6.5, (ht_float_t)1.5);
+
+    /* Verify weights are stable and bounded */
+    uint16_t s_idx = tree.memory.node_pool[tree.root_idx].stats_idx;
+    HT_ASSERT(tree.memory.stats_pool[s_idx].reg_weights[0] < (ht_float_t)100.0);
+    HT_ASSERT(tree.memory.stats_pool[s_idx].reg_weights[0] > (ht_float_t)-100.0);
+    HT_ASSERT(tree.memory.stats_pool[s_idx].reg_weights[1] < (ht_float_t)100.0);
+    HT_ASSERT(tree.memory.stats_pool[s_idx].reg_weights[1] > (ht_float_t)-100.0);
+}
+
+static void test_tree_attached_prep_pipeline(void) {
+    ht_config_params_t params;
+    ht_default_params(&params, 2, 2);
+    params.grace_period = 50U;
+
+    ht_tree_t tree;
+    HT_ASSERT_EQ(ht_tree_init(&tree, &params), HT_OK);
+
+    /* Set up a preprocessing pipeline with Hampel filter on feature 0 */
+    ht_feature_type_t types[HT_MAX_FEATURES];
+    memset(types, 0, sizeof(types));
+    types[0] = HT_FEAT_NUMERIC;
+    types[1] = HT_FEAT_NUMERIC;
+
+    ht_prep_pipeline_t pipe;
+    ht_prep_pipeline_init(&pipe, 2, types);
+    ht_hampel_set_enabled(&pipe.hampel, 0, true);
+    ht_hampel_set_threshold(&pipe.hampel, (ht_float_t)3.0);
+
+    /* Attach pipeline to tree */
+    HT_ASSERT_EQ(ht_tree_set_prep_pipeline(&tree, &pipe), HT_OK);
+    HT_ASSERT(tree.prep_pipeline == &pipe);
+
+    ht_value_t x[HT_MAX_FEATURES];
+    memset(x, 0, sizeof(x));
+
+    /* Train with cluster 0 around (1, 1) and cluster 1 around (10, 10),
+     * injecting occasional sensor spikes (e.g. 100000.0) */
+    for (int i = 0; i < 200; ++i) {
+        uint8_t c = (i % 2 == 0) ? 0 : 1;
+        ht_float_t base_v = (c == 0) ? (ht_float_t)1.0 : (ht_float_t)10.0;
+        ht_float_t noise = (ht_float_t)((i % 5) - 2) * (ht_float_t)0.1;
+
+        x[0].num = base_v + noise;
+        x[1].num = base_v + noise;
+
+        /* Inject spike every 25 samples */
+        if (i > 10 && i % 25 == 0) {
+            x[0].num = (ht_float_t)100000.0;
+        }
+
+        HT_ASSERT_EQ(ht_tree_learn_one(&tree, x, c, (ht_float_t)1.0), HT_OK);
+    }
+
+    /* Test prediction: with spike injected at query time, Hampel replaces it with median */
+    x[0].num = (ht_float_t)1.1;
+    x[1].num = (ht_float_t)1.0;
+    HT_ASSERT_EQ(ht_tree_predict(&tree, x), 0);
+
+    x[0].num = (ht_float_t)10.2;
+    x[1].num = (ht_float_t)9.9;
+    HT_ASSERT_EQ(ht_tree_predict(&tree, x), 1);
+
+    /* Detach pipeline */
+    HT_ASSERT_EQ(ht_tree_set_prep_pipeline(&tree, NULL), HT_OK);
+    HT_ASSERT(tree.prep_pipeline == NULL);
+}
+
 /* ========================================================================= */
 /* --- Test Runner Entry Point --------------------------------------------- */
 /* ========================================================================= */
@@ -928,4 +1031,8 @@ void test_tree_run(void) {
     HT_RUN_TEST(test_tree_reg_leaf_deactivation_by_depth);
     HT_RUN_TEST(test_tree_reg_serialization_roundtrip);
     HT_RUN_TEST(test_tree_hat_reg_alternate_tree_switch_and_prune);
+
+    /* Nível 2: Micro-Pipeline & Normalização SGD Híbrida */
+    HT_RUN_TEST(test_tree_leaf_sgd_hybrid_normalization);
+    HT_RUN_TEST(test_tree_attached_prep_pipeline);
 }
