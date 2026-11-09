@@ -710,8 +710,8 @@ flowchart LR
   - `stream_runner.py`: Driver Python que se conecta à porta TCP do QEMU, executa o handshake contra o firmware com controle de fluxo por janela deslizante (*sliding window* para eliminação de penalidade de roundtrip) e injeta datasets CSVs (avulsos via `--csv` ou a suíte completa de 8 datasets via `--suite main`), calculando métricas segregadas de classificação (Acurácia, Precisão Macro, Recall Macro, F1-Score Macro), regressão (MAE, RMSE, $R^2$), e performance/recursos (latência média, latência de cauda $p_{95}/p_{99}$, vazão em amostras/s, model footprint, consumo de SRAM/heap e FLOPs/amostra), gerando [`emulation/esp32/esp32_emulation_report.md`](file:///home/julio/Documentos/pessoal_minimal-decision-tree/emulation/esp32/esp32_emulation_report.md).
 - **Resultados Validados na Suíte Completa (até 20.000 Amostras por Dataset):**
   - Execução validada em mais de 152.000 amostras na ESP32 emulada (14.000 treino / 6.000 teste por dataset, ou 100% dos dados para fluxos menores que 20k).
-  - Acurácia Holdout: **98.10%** no SEA, **76.80%** no Airlines, **64.05%** no Electricity, **52.62%** no Covertype.
-  - Regressão com Crescimento de Árvore: **$R^2 = 0.6645$** (41 nós) no Friedman #1 e **$R^2 = 0.6787$** (35 nós) no Appliances Energy.
-  - Latência em Hardware Emulado (QEMU @ 240 MHz): **$41\,\mu\text{s}$ a $1.947\,\mu\text{s}$** por amostra completa (predição + treino online).
+  - Acurácia Holdout: **99.02%** no SEA, **76.53%** no Airlines, **64.20%** no Electricity, **66.43%** no Covertype (salto de +13.81% com hiperparâmetros ótimos).
+  - Regressão com Crescimento de Árvore: **$R^2 = 0.6854$** (43 nós) no Friedman #1, **$R^2 = 0.7431$** (51 nós) no Appliances Energy, **$R^2 = 0.3932$** (39 nós) no Bikes e **$R^2 = 0.2345$** (61 nós) no NYC Taxi.
+  - Latência em Hardware Emulado (QEMU @ 240 MHz): **$46,8\,\mu\text{s}$ a $690,5\,\mu\text{s}$** por amostra completa (predição + treino online), com vazão de até **21.368 amostras/s**.
   - Determinismo e Memória: **$0\text{ bytes}$ de $\Delta\text{Heap}$** (Zero Malloc comprovado) e $> 9.200\text{ bytes}$ de margem livre na stack FreeRTOS.
   - Documentação consolidada no `README.md` (Seção 3.2 e Seção 3.6) estruturada em 3 tabelas independentes: Classificação, Regressão Contínua e Performance/Recursos.
