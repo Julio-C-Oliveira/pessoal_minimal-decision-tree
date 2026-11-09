@@ -110,8 +110,32 @@ typedef float ht_float_t;
 #define HT_MAX_ADWIN_DETECTORS 128U
 #endif
 
+#ifndef HT_HAMPEL_WINDOW_SIZE
+#define HT_HAMPEL_WINDOW_SIZE    7U
+#endif
+
+#ifndef HT_PREP_MAX_CENTROIDS
+#define HT_PREP_MAX_CENTROIDS    16U
+#endif
+
+#ifndef HT_PREP_MAX_CAT_SLOTS
+#define HT_PREP_MAX_CAT_SLOTS    16U
+#endif
+
+#ifndef HT_HIST_MAX_BINS
+#define HT_HIST_MAX_BINS         4U
+#endif
+
 #define HT_INVALID_IDX       ((uint16_t)0xFFFFU)
 #define HT_NO_FEATURE        ((uint8_t)0xFFU)
+
+/**
+ * @brief Numeric attribute observer strategy for classification leaves.
+ */
+typedef enum {
+    HT_OBS_GAUSSIAN  = 0, /**< Parametric Welford Gaussian observer (default) */
+    HT_OBS_HISTOGRAM = 1  /**< Non-parametric Ben-Haim & Tom-Tov dynamic histogram */
+} ht_numeric_obs_type_t;
 
 /**
  * @brief Machine learning task type: Classification or Continuous Regression.
