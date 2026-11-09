@@ -557,7 +557,7 @@ def generate_markdown_report(
                         )
             else:
                 f.write("| Engine | Rank | Configuração / Hiperparâmetros | MAE | RMSE | R² | RAM (KB) | Latência (µs) |\n")
-                f.write("| :--- | :---: | :--- | :---: | :---: | :---: | :---: |\n")
+                f.write("| :--- | :---: | :--- | :---: | :---: | :---: | :---: | :---: |\n")
                 for eng, label in [("c11", "C11 libht"), ("river", "River"), ("sklearn", "Scikit-Learn")]:
                     for rank, t in enumerate(by_engine[eng][:3], start=1):
                         p_str = ", ".join(f"`{k}={v}`" for k, v in t["params"].items())
@@ -774,7 +774,16 @@ def main():
     parser.add_argument("--grid", action="store_true", help="Perform full exhaustive grid search.")
     parser.add_argument("--seed", type=int, default=42, help="Random seed for sampling reproducibility.")
     parser.add_argument("--jobs", "-j", type=int, default=1, help="Parallel workers count (default: 1 sequential).")
+    parser.add_argument("--render-only", action="store_true", help="Re-generate markdown report from existing json results file.")
     args = parser.parse_args()
+
+    if args.render_only:
+        print(f"Loading existing results from {args.json}...")
+        with open(args.json, "r", encoding="utf-8") as f:
+            all_results = json.load(f)
+        generate_markdown_report(all_results, args.report)
+        print(f"Markdown report re-generated successfully: {args.report}")
+        return
 
     selected_ds = [s.strip().lower() for s in args.dataset.split(",") if s.strip()]
     selected_eng = [e.strip().lower() for e in args.engine.split(",") if e.strip()]

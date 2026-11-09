@@ -164,7 +164,7 @@ Configurações não-dominadas que maximizam acurácia / minimizam erro consumin
 ### 1. Melhores Modelos por Competidor (Top 3)
 
 | Engine | Rank | Configuração / Hiperparâmetros | MAE | RMSE | R² | RAM (KB) | Latência (µs) |
-| :--- | :---: | :--- | :---: | :---: | :---: | :---: |
+| :--- | :---: | :--- | :---: | :---: | :---: | :---: | :---: |
 | C11 libht | #1 | `grace_period=400`, `delta=0.01`, `tau=0.05`, `tier=256`, `leaf_prediction=adaptive`, `reg_num_slots=32` | 1.6516 | 2.1126 | 0.8204 | 854.2 KB | 1.18 µs |
 | C11 libht | #2 | `grace_period=400`, `delta=0.01`, `tau=0.1`, `tier=256`, `leaf_prediction=adaptive`, `reg_num_slots=32` | 1.6516 | 2.1126 | 0.8204 | 854.2 KB | 1.35 µs |
 | C11 libht | #3 | `grace_period=400`, `delta=0.01`, `tau=0.15`, `tier=256`, `leaf_prediction=adaptive`, `reg_num_slots=32` | 1.6516 | 2.1126 | 0.8204 | 854.2 KB | 1.38 µs |
@@ -202,7 +202,7 @@ Configurações não-dominadas que maximizam acurácia / minimizam erro consumin
 ### 1. Melhores Modelos por Competidor (Top 3)
 
 | Engine | Rank | Configuração / Hiperparâmetros | MAE | RMSE | R² | RAM (KB) | Latência (µs) |
-| :--- | :---: | :--- | :---: | :---: | :---: | :---: |
+| :--- | :---: | :--- | :---: | :---: | :---: | :---: | :---: |
 | C11 libht | #1 | `grace_period=50`, `delta=0.001`, `tau=0.15`, `tier=256`, `leaf_prediction=mean`, `reg_num_slots=16` | 18.0747 | 30.8053 | 0.8317 | 875.6 KB | 1.08 µs |
 | C11 libht | #2 | `grace_period=50`, `delta=0.0001`, `tau=0.15`, `tier=256`, `leaf_prediction=mean`, `reg_num_slots=16` | 18.3003 | 30.4755 | 0.8353 | 875.6 KB | 1.40 µs |
 | C11 libht | #3 | `grace_period=100`, `delta=0.01`, `tau=0.15`, `tier=256`, `leaf_prediction=mean`, `reg_num_slots=16` | 18.3316 | 31.1738 | 0.8277 | 875.6 KB | 0.96 µs |
@@ -240,7 +240,7 @@ Configurações não-dominadas que maximizam acurácia / minimizam erro consumin
 ### 1. Melhores Modelos por Competidor (Top 3)
 
 | Engine | Rank | Configuração / Hiperparâmetros | MAE | RMSE | R² | RAM (KB) | Latência (µs) |
-| :--- | :---: | :--- | :---: | :---: | :---: | :---: |
+| :--- | :---: | :--- | :---: | :---: | :---: | :---: | :---: |
 | C11 libht | #1 | `grace_period=100`, `delta=0.001`, `tau=0.01`, `tier=256`, `leaf_prediction=adaptive`, `reg_num_slots=16` | 26.1549 | 32.8932 | 0.8064 | 713.1 KB | 2.01 µs |
 | C11 libht | #2 | `grace_period=100`, `delta=0.001`, `tau=0.01`, `tier=256`, `leaf_prediction=mean`, `reg_num_slots=16` | 26.1549 | 32.8932 | 0.8064 | 713.1 KB | 1.45 µs |
 | C11 libht | #3 | `grace_period=100`, `delta=0.001`, `tau=0.05`, `tier=256`, `leaf_prediction=adaptive`, `reg_num_slots=16` | 26.1549 | 32.8932 | 0.8064 | 713.1 KB | 2.15 µs |
@@ -278,7 +278,7 @@ Configurações não-dominadas que maximizam acurácia / minimizam erro consumin
 ### 1. Melhores Modelos por Competidor (Top 3)
 
 | Engine | Rank | Configuração / Hiperparâmetros | MAE | RMSE | R² | RAM (KB) | Latência (µs) |
-| :--- | :---: | :--- | :---: | :---: | :---: | :---: |
+| :--- | :---: | :--- | :---: | :---: | :---: | :---: | :---: |
 | C11 libht | #1 | `grace_period=100`, `delta=0.0001`, `tau=0.01`, `tier=256`, `leaf_prediction=adaptive`, `reg_num_slots=8` | 293.0380 | 388.8644 | 0.3820 | 624.7 KB | 0.69 µs |
 | C11 libht | #2 | `grace_period=100`, `delta=0.0001`, `tau=0.01`, `tier=256`, `leaf_prediction=mean`, `reg_num_slots=8` | 293.0380 | 388.8644 | 0.3820 | 624.7 KB | 0.44 µs |
 | C11 libht | #3 | `grace_period=100`, `delta=0.0001`, `tau=0.05`, `tier=256`, `leaf_prediction=adaptive`, `reg_num_slots=8` | 293.0380 | 388.8644 | 0.3820 | 624.7 KB | 0.80 µs |
