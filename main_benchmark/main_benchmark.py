@@ -82,7 +82,7 @@ def get_python_exec() -> str:
 # Subprocess Evaluators
 # ==============================================================================
 
-def run_isolated_sklearn(train_csv: str, test_csv: str, task: str) -> Dict[str, Any]:
+def run_isolated_sklearn(train_csv: str, test_csv: str, task: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     runner_script = os.path.join(os.path.dirname(__file__), "runners", "run_sklearn.py")
     cmd = [
         get_python_exec(),
@@ -91,13 +91,25 @@ def run_isolated_sklearn(train_csv: str, test_csv: str, task: str) -> Dict[str, 
         "--test-csv", test_csv,
         "--task", task,
     ]
+    if params:
+        if params.get("max_depth") is not None:
+            cmd.extend(["--max-depth", str(params["max_depth"])])
+        if params.get("min_samples_split") is not None:
+            cmd.extend(["--min-samples-split", str(params["min_samples_split"])])
+        if params.get("min_samples_leaf") is not None:
+            cmd.extend(["--min-samples-leaf", str(params["min_samples_leaf"])])
+        if params.get("max_features") is not None:
+            cmd.extend(["--max-features", str(params["max_features"])])
+        if params.get("criterion") is not None:
+            cmd.extend(["--criterion", str(params["criterion"])])
+
     proc = subprocess.run(cmd, capture_output=True, text=True, check=True)
     res = json.loads(proc.stdout.strip())
     res["speedup"] = "Batch"
     return res
 
 
-def run_isolated_river(train_csv: str, test_csv: str, task: str) -> Dict[str, Any]:
+def run_isolated_river(train_csv: str, test_csv: str, task: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     runner_script = os.path.join(os.path.dirname(__file__), "runners", "run_river.py")
     cmd = [
         get_python_exec(),
@@ -106,6 +118,20 @@ def run_isolated_river(train_csv: str, test_csv: str, task: str) -> Dict[str, An
         "--test-csv", test_csv,
         "--task", task,
     ]
+    if params:
+        if params.get("grace_period") is not None:
+            cmd.extend(["--grace-period", str(params["grace_period"])])
+        if params.get("delta") is not None:
+            cmd.extend(["--delta", str(params["delta"])])
+        if params.get("tau") is not None:
+            cmd.extend(["--tau", str(params["tau"])])
+        if params.get("leaf_prediction") is not None:
+            cmd.extend(["--leaf-prediction", str(params["leaf_prediction"])])
+        if params.get("split_criterion") is not None:
+            cmd.extend(["--split-criterion", str(params["split_criterion"])])
+        if params.get("splitter") is not None:
+            cmd.extend(["--splitter", str(params["splitter"])])
+
     proc = subprocess.run(cmd, capture_output=True, text=True, check=True)
     res = json.loads(proc.stdout.strip())
     res["speedup"] = "1.0x (baseline)"
@@ -196,6 +222,91 @@ def run_isolated_c_tier(
 
 
 # ==============================================================================
+# Helper to Build C11 CLI Arguments from Params
+# ==============================================================================
+
+def build_c11_cli_args(params: Dict[str, Any], task: str) -> List[str]:
+    args: List[str] = []
+    if "grace_period" in params:
+        args.extend(["--grace-period", str(params["grace_period"])])
+    if "delta" in params:
+        args.extend(["--delta", str(params["delta"])])
+    if "tau" in params:
+        args.extend(["--tau", str(params["tau"])])
+    if task == "regression":
+        if "leaf_prediction" in params:
+            args.extend(["--leaf", str(params["leaf_prediction"])])
+    else:
+        if "split_criterion" in params:
+            args.extend(["--criterion", str(params["split_criterion"])])
+        if "leaf_prediction" in params:
+            args.extend(["--leaf", str(params["leaf_prediction"])])
+    return args
+
+
+# ==============================================================================
+# Optimal Hyperparameters from Tuning Search (hyperparam_results.json)
+# ==============================================================================
+DATASET_OPTIMAL_CONFIGS: Dict[str, Dict[str, Any]] = {
+    "sea": {
+        "sklearn": {"max_depth": 12, "min_samples_split": 10, "min_samples_leaf": 5, "criterion": "entropy"},
+        "river": {"grace_period": 100, "delta": 0.0001, "tau": 0.15, "leaf_prediction": "nba", "split_criterion": "info_gain", "splitter": "gaussian"},
+        "c11_t256": {"grace_period": 100, "delta": 0.001, "tau": 0.1, "split_criterion": "gini", "leaf_prediction": "nb"},
+        "c11_t8": {"grace_period": 100, "delta": 0.01, "tau": 0.1, "split_criterion": "info_gain", "leaf_prediction": "nba"},
+        "c11_t4": {"grace_period": 50, "delta": 1e-07, "tau": 0.05, "split_criterion": "gini", "leaf_prediction": "nb"},
+    },
+    "electricity": {
+        "sklearn": {"max_depth": 6, "min_samples_split": 10, "min_samples_leaf": 50, "max_features": "sqrt", "criterion": "entropy"},
+        "river": {"grace_period": 50, "delta": 0.001, "tau": 0.01, "leaf_prediction": "nba", "split_criterion": "info_gain", "splitter": "histogram"},
+        "c11_t256": {"grace_period": 400, "delta": 1e-07, "tau": 0.1, "split_criterion": "gini", "leaf_prediction": "nba"},
+        "c11_t8": {"grace_period": 400, "delta": 0.01, "tau": 0.1, "split_criterion": "gini", "leaf_prediction": "mc"},
+        "c11_t4": {"grace_period": 100, "delta": 0.01, "tau": 0.05, "split_criterion": "info_gain", "leaf_prediction": "mc"},
+    },
+    "covertype": {
+        "sklearn": {"max_depth": None, "min_samples_split": 10, "min_samples_leaf": 5, "criterion": "gini"},
+        "river": {"grace_period": 50, "delta": 0.01, "tau": 0.15, "leaf_prediction": "mc", "split_criterion": "gini", "splitter": "gaussian"},
+        "c11_t256": {"grace_period": 50, "delta": 0.01, "tau": 0.15, "split_criterion": "gini", "leaf_prediction": "nba"},
+        "c11_t8": {"grace_period": 50, "delta": 0.001, "tau": 0.1, "split_criterion": "gini", "leaf_prediction": "nba"},
+        "c11_t4": {"grace_period": 50, "delta": 0.001, "tau": 0.1, "split_criterion": "gini", "leaf_prediction": "mc"},
+    },
+    "airlines": {
+        "sklearn": {"max_depth": 8, "min_samples_split": 500, "min_samples_leaf": 20, "max_features": "sqrt", "criterion": "entropy"},
+        "river": {"grace_period": 100, "delta": 1e-07, "tau": 0.05, "leaf_prediction": "nba", "split_criterion": "info_gain", "splitter": "histogram"},
+        "c11_t256": {"grace_period": 50, "delta": 0.0001, "tau": 0.05, "split_criterion": "gini", "leaf_prediction": "mc"},
+        "c11_t8": {"grace_period": 50, "delta": 0.0001, "tau": 0.05, "split_criterion": "gini", "leaf_prediction": "mc"},
+        "c11_t4": {"grace_period": 50, "delta": 0.0001, "tau": 0.05, "split_criterion": "gini", "leaf_prediction": "mc"},
+    },
+    "friedman": {
+        "sklearn": {"max_depth": 16, "min_samples_split": 10, "min_samples_leaf": 5, "criterion": "squared_error"},
+        "river": {"grace_period": 100, "delta": 0.001, "tau": 0.15, "leaf_prediction": "model", "splitter": "ebst"},
+        "c11_t256": {"grace_period": 400, "delta": 0.01, "tau": 0.05, "leaf_prediction": "adaptive"},
+        "c11_t8": {"grace_period": 200, "delta": 1e-07, "tau": 0.01, "leaf_prediction": "model"},
+        "c11_t4": {"grace_period": 400, "delta": 0.001, "tau": 0.01, "leaf_prediction": "adaptive"},
+    },
+    "bikes": {
+        "sklearn": {"max_depth": 16, "min_samples_split": 10, "min_samples_leaf": 20, "criterion": "squared_error"},
+        "river": {"grace_period": 200, "delta": 0.01, "tau": 0.1, "leaf_prediction": "mean", "splitter": "ebst"},
+        "c11_t256": {"grace_period": 200, "delta": 0.01, "tau": 0.1, "leaf_prediction": "mean"},
+        "c11_t8": {"grace_period": 200, "delta": 0.01, "tau": 0.1, "leaf_prediction": "mean"},
+        "c11_t4": {"grace_period": 50, "delta": 0.0001, "tau": 0.1, "leaf_prediction": "mean"},
+    },
+    "appliances_energy": {
+        "sklearn": {"max_depth": 8, "min_samples_split": 100, "min_samples_leaf": 20, "criterion": "squared_error"},
+        "river": {"grace_period": 100, "delta": 0.001, "tau": 0.15, "leaf_prediction": "adaptive", "splitter": "tebst"},
+        "c11_t256": {"grace_period": 100, "delta": 0.001, "tau": 0.01, "leaf_prediction": "adaptive"},
+        "c11_t8": {"grace_period": 100, "delta": 1e-07, "tau": 0.01, "leaf_prediction": "adaptive"},
+        "c11_t4": {"grace_period": 100, "delta": 1e-07, "tau": 0.01, "leaf_prediction": "adaptive"},
+    },
+    "nyc_taxi": {
+        "sklearn": {"max_depth": None, "min_samples_split": 10, "min_samples_leaf": 20, "criterion": "squared_error"},
+        "river": {"grace_period": 50, "delta": 0.0001, "tau": 0.15, "leaf_prediction": "adaptive", "splitter": "ebst"},
+        "c11_t256": {"grace_period": 100, "delta": 0.0001, "tau": 0.01, "leaf_prediction": "adaptive"},
+        "c11_t8": {"grace_period": 50, "delta": 1e-07, "tau": 0.15, "leaf_prediction": "adaptive"},
+        "c11_t4": {"grace_period": 50, "delta": 0.01, "tau": 0.15, "leaf_prediction": "adaptive"},
+    },
+}
+
+# ==============================================================================
 # Dataset-Specific Preprocessing Configuration
 # Applied ONLY to datasets with empirically verified gains in F1-Score or R2.
 # Datasets with no gains remain untreated (Raw: []).
@@ -269,9 +380,21 @@ def run_main_benchmark_suite(
         # Preprocessing arguments for Tratado (aplicado apenas onde há ganhos empíricos comprovados)
         prep_args = DATASET_PREP_CONFIG.get(d_id, [])
 
+        # Optimal configuration for this dataset
+        opt_cfg = DATASET_OPTIMAL_CONFIGS.get(d_id, {})
+        sk_params = opt_cfg.get("sklearn", {})
+        riv_params = opt_cfg.get("river", {})
+        t256_params = opt_cfg.get("c11_t256", {})
+        t8_params = opt_cfg.get("c11_t8", {})
+        t4_params = opt_cfg.get("c11_t4", {})
+
+        c11_t256_args = build_c11_cli_args(t256_params, task)
+        c11_t8_args = build_c11_cli_args(t8_params, task)
+        c11_t4_args = build_c11_cli_args(t4_params, task)
+
         # 1. Scikit-Learn (Full Batch in RAM)
         print("  [1/8] Running Scikit-Learn (Full Batch in RAM)...", end="", flush=True)
-        sk_res = run_isolated_sklearn(train_csv, test_csv, task)
+        sk_res = run_isolated_sklearn(train_csv, test_csv, task, params=sk_params)
         if task == "classification":
             print(f" Done. (Acc={sk_res['holdout_acc']:.2f}%, Nodes={sk_res['n_nodes']}, IntraRAM={sk_res['intra_train_ram_kb']:.1f}KB, PeakRSS={sk_res['peak_rss_mb']:.1f}MB, Time={sk_res['avg_us_per_sample']:.2f}us)")
         else:
@@ -279,7 +402,7 @@ def run_main_benchmark_suite(
 
         # 2. River (Streaming 1-a-1)
         print("  [2/8] Running River (Streaming 1-a-1)...", end="", flush=True)
-        riv_res = run_isolated_river(train_csv, test_csv, task)
+        riv_res = run_isolated_river(train_csv, test_csv, task, params=riv_params)
         river_us = riv_res["avg_us_per_sample"]
         if task == "classification":
             print(f" Done. (Acc={riv_res['holdout_acc']:.2f}%, PreqAcc={riv_res['prequential_acc']:.2f}%, IntraRAM={riv_res['intra_train_ram_kb']:.1f}KB, PeakRSS={riv_res['peak_rss_mb']:.1f}MB, Time={river_us:.2f}us)")
@@ -289,7 +412,7 @@ def run_main_benchmark_suite(
         # 3. C11 Tier 256 Raw (256L / 4096N)
         bin_t256 = bin_main_tier256 if use_main else bin_tier256
         print(f"  [3/8] Running C11 Tier 256 Raw ({os.path.basename(bin_t256)})...", end="", flush=True)
-        t256_raw_res = run_isolated_c_tier(bin_t256, train_csv, test_csv, task, "Tier 256: 256L/4096N (Raw)")
+        t256_raw_res = run_isolated_c_tier(bin_t256, train_csv, test_csv, task, "Tier 256: 256L/4096N (Raw)", extra_args=c11_t256_args)
         t256_raw_res["speedup"] = river_us / max(0.01, t256_raw_res["avg_us_per_sample"])
         if task == "classification":
             print(f" Done. (Acc={t256_raw_res['holdout_acc']:.2f}%, Nodes={t256_raw_res['n_nodes']}, IntraRAM={t256_raw_res['intra_train_ram_kb']:.1f}KB, PeakRSS={t256_raw_res['peak_rss_mb']:.1f}MB, Time={t256_raw_res['avg_us_per_sample']:.2f}us, Speedup={t256_raw_res['speedup']:.1f}x)")
@@ -298,7 +421,7 @@ def run_main_benchmark_suite(
 
         # 4. C11 Tier 256 Tratado (256L / 4096N)
         print(f"  [4/8] Running C11 Tier 256 Tratado ({os.path.basename(bin_t256)})...", end="", flush=True)
-        t256_prep_res = run_isolated_c_tier(bin_t256, train_csv, test_csv, task, "Tier 256: 256L/4096N (Tratado)", extra_args=prep_args)
+        t256_prep_res = run_isolated_c_tier(bin_t256, train_csv, test_csv, task, "Tier 256: 256L/4096N (Tratado)", extra_args=c11_t256_args + prep_args)
         t256_prep_res["speedup"] = river_us / max(0.01, t256_prep_res["avg_us_per_sample"])
         if task == "classification":
             print(f" Done. (Acc={t256_prep_res['holdout_acc']:.2f}%, Nodes={t256_prep_res['n_nodes']}, IntraRAM={t256_prep_res['intra_train_ram_kb']:.1f}KB, PeakRSS={t256_prep_res['peak_rss_mb']:.1f}MB, Time={t256_prep_res['avg_us_per_sample']:.2f}us, Speedup={t256_prep_res['speedup']:.1f}x)")
@@ -308,7 +431,7 @@ def run_main_benchmark_suite(
         # 5. C11 Tier 8 Raw (8L / 128N)
         bin_t8 = bin_main_tier8 if use_main else bin_tier8
         print(f"  [5/8] Running C11 Tier 8 Raw ({os.path.basename(bin_t8)})...", end="", flush=True)
-        t8_raw_res = run_isolated_c_tier(bin_t8, train_csv, test_csv, task, "Tier 8: 8L/128N (Raw)")
+        t8_raw_res = run_isolated_c_tier(bin_t8, train_csv, test_csv, task, "Tier 8: 8L/128N (Raw)", extra_args=c11_t8_args)
         t8_raw_res["speedup"] = river_us / max(0.01, t8_raw_res["avg_us_per_sample"])
         if task == "classification":
             print(f" Done. (Acc={t8_raw_res['holdout_acc']:.2f}%, Nodes={t8_raw_res['n_nodes']}, IntraRAM={t8_raw_res['intra_train_ram_kb']:.1f}KB, PeakRSS={t8_raw_res['peak_rss_mb']:.1f}MB, Time={t8_raw_res['avg_us_per_sample']:.2f}us, Speedup={t8_raw_res['speedup']:.1f}x)")
@@ -317,7 +440,7 @@ def run_main_benchmark_suite(
 
         # 6. C11 Tier 8 Tratado (8L / 128N)
         print(f"  [6/8] Running C11 Tier 8 Tratado ({os.path.basename(bin_t8)})...", end="", flush=True)
-        t8_prep_res = run_isolated_c_tier(bin_t8, train_csv, test_csv, task, "Tier 8: 8L/128N (Tratado)", extra_args=prep_args)
+        t8_prep_res = run_isolated_c_tier(bin_t8, train_csv, test_csv, task, "Tier 8: 8L/128N (Tratado)", extra_args=c11_t8_args + prep_args)
         t8_prep_res["speedup"] = river_us / max(0.01, t8_prep_res["avg_us_per_sample"])
         if task == "classification":
             print(f" Done. (Acc={t8_prep_res['holdout_acc']:.2f}%, Nodes={t8_prep_res['n_nodes']}, IntraRAM={t8_prep_res['intra_train_ram_kb']:.1f}KB, PeakRSS={t8_prep_res['peak_rss_mb']:.1f}MB, Time={t8_prep_res['avg_us_per_sample']:.2f}us, Speedup={t8_prep_res['speedup']:.1f}x)")
@@ -327,7 +450,7 @@ def run_main_benchmark_suite(
         # 7. C11 Tier 4 Raw (4L / 64N)
         bin_t4 = bin_main_tier4 if use_main else bin_tier4
         print(f"  [7/8] Running C11 Tier 4 Raw ({os.path.basename(bin_t4)})...", end="", flush=True)
-        t4_raw_res = run_isolated_c_tier(bin_t4, train_csv, test_csv, task, "Tier 4: 4L/64N (Raw)")
+        t4_raw_res = run_isolated_c_tier(bin_t4, train_csv, test_csv, task, "Tier 4: 4L/64N (Raw)", extra_args=c11_t4_args)
         t4_raw_res["speedup"] = river_us / max(0.01, t4_raw_res["avg_us_per_sample"])
         if task == "classification":
             print(f" Done. (Acc={t4_raw_res['holdout_acc']:.2f}%, Nodes={t4_raw_res['n_nodes']}, IntraRAM={t4_raw_res['intra_train_ram_kb']:.1f}KB, PeakRSS={t4_raw_res['peak_rss_mb']:.1f}MB, Time={t4_raw_res['avg_us_per_sample']:.2f}us, Speedup={t4_raw_res['speedup']:.1f}x)")
@@ -336,7 +459,7 @@ def run_main_benchmark_suite(
 
         # 8. C11 Tier 4 Tratado (4L / 64N)
         print(f"  [8/8] Running C11 Tier 4 Tratado ({os.path.basename(bin_t4)})...", end="", flush=True)
-        t4_prep_res = run_isolated_c_tier(bin_t4, train_csv, test_csv, task, "Tier 4: 4L/64N (Tratado)", extra_args=prep_args)
+        t4_prep_res = run_isolated_c_tier(bin_t4, train_csv, test_csv, task, "Tier 4: 4L/64N (Tratado)", extra_args=c11_t4_args + prep_args)
         t4_prep_res["speedup"] = river_us / max(0.01, t4_prep_res["avg_us_per_sample"])
         if task == "classification":
             print(f" Done. (Acc={t4_prep_res['holdout_acc']:.2f}%, Nodes={t4_prep_res['n_nodes']}, IntraRAM={t4_prep_res['intra_train_ram_kb']:.1f}KB, PeakRSS={t4_prep_res['peak_rss_mb']:.1f}MB, Time={t4_prep_res['avg_us_per_sample']:.2f}us, Speedup={t4_prep_res['speedup']:.1f}x)")
@@ -467,51 +590,44 @@ def generate_markdown_report(report_path: str, results: List[Dict[str, Any]]):
         f.write("\n## 4. Análise Comparativa Crítica e Imparcial por Dataset\n\n")
         f.write("### 4.1. Datasets de Classificação\n\n")
         f.write("#### 1. SEA (Sintético, 3 features contínuas, 2 classes)\n")
-        f.write("- **Desempenho Preditivo:** O **Scikit-Learn (Batch)** atinge a maior acurácia holdout (**99.20%** com 159 nós) por ter acesso simultâneo a todas as amostras para encontrar pontos de corte globais exatos na fronteira linear $f_1 + f_2 \\le \\theta$. Os modelos de streaming (**River** e **C11 Tiers 256 e 8**) empatam de forma bit-a-bit em **98.10%** de acurácia holdout (96.04% prequential) com apenas **11 nós** (6 folhas). O **Tier 4** (restrito a 4 folhas ativas) sofre uma leve queda de $-1.07\\%$ (97.03%), pois a desativação precoce de folhas congela a expansão de dois sub-ramos secundários.\n")
-        f.write("- **Impacto do Pré-Processamento (Raw vs Tratado):** Como o fluxo SEA possui 3 variáveis já canônicas em $[0, 10]$ com ruído homogêneo, nenhum tratamento adicional gerou ganho de F1 ou acurácia. A versão Tratada preserva estritamente a configuração Raw ótima ($98.10\\%$ holdout e $97.81\\%$ Macro F1).\n")
-        f.write("- **Memória e Velocidade:** Para ganhar $1.1\\%$ de acurácia, o Scikit-Learn consome **1.024 KB** intra-treino e **129.5 MB** de RSS. O **C11 Tier 8** entrega a mesma acurácia do River e do Tier 256 usando apenas **16.6 KB** de RAM estática (**$60\\times$ menor** que o Scikit-Learn e **$18\\times$ menor** que o River) e processa amostras a **0.54 $\\mu$s** (**>300x mais rápido** que o River e **>9x mais rápido** que o Scikit-Learn).\n")
-        f.write("- **Veredito Crítico:** Em conceitos estacionários simples e bem comportados, o CART Batch é marginalmente mais preciso no limite assintótico, mas o custo de memória do C11 Tier 8 com perda de apenas 1.1% torna o modelo streaming imbatível para borda.\n\n")
+        f.write("- **Desempenho Preditivo com Hiperparâmetros Ótimos:** Com a sintonia fina, o **C11 Tier 256** atinge a maior acurácia de todo o experimento (**99.32%** e **99.22%** de Macro F1 com 37 nós), superando tanto o **River HTC** (**99.22%**) quanto o **Scikit-Learn Batch** (**99.18%** com 133 nós). O **C11 Tier 8** atinge **99.02%** e o **Tier 4** atinge **98.07%**.\n")
+        f.write("- **Memória e Velocidade:** O **C11 Tier 8** entrega **99.02%** consumindo apenas **16.8 KB** de RAM estática (**>60x menor** que os 1.020 KB do Scikit-Learn e **>35x menor** que os 601 KB do River) e processa cada amostra a **0.28 $\\mu$s** (**>500x mais rápido** que o River).\n\n")
 
         f.write("#### 2. Electricity / Elec2 (Real, 8 features contínuas, 2 classes)\n")
-        f.write("- **Desempenho Preditivo:** Resultado emblemático da diferença entre *Batch* e *Streaming*. O **Scikit-Learn** sofre **overfitting severo** aos regimes históricos do lote de treino (criando **13.547 nós**) e despenca para **53.24%** no conjunto de teste futuro (quase um palpite aleatório, já que o mercado de energia sofre forte *concept drift* temporal entre os primeiros 70% e os últimos 30% do dataset). Já o **River** e o **C11 (todos os Tiers: 256, 8 e 4, tanto Raw quanto Tratado)** atingem rigorosos **64.34%** de acurácia (**+11.10 pontos percentuais acima do Scikit-Learn**) com árvores enxutas de apenas **19 a 21 nós**.\n")
-        f.write("- **Impacto do Pré-Processamento (Raw vs Tratado):** O fluxo já é perfeitamente capturado pelos estimadores locais NBA; portanto, nenhum tratamento extra foi necessário, mantendo-se a configuração Raw com $64.34\\%$ de acurácia e $63.64\\%$ de Macro F1.\n")
-        f.write("- **Por que o Streaming vence o Batch aqui?** A regularização estatística do *Hoeffding Bound* combinada com os classificadores locais *Naive Bayes Adaptive* (NBA) nas folhas evita que a árvore memorize ruído local de alta frequência do passado, generalizando melhor sob mudança temporal de distribuição.\n")
-        f.write("- **Memória e Velocidade:** Mesmo o **C11 Tier 4 (8.6 KB de RAM)** mantém os mesmos **64.34%** de acurácia holdout a **0.64 $\\mu$s/amostra** (**>400x mais rápido** que o River e consumindo **>500x menos RAM intra-treino** que os 4.650 KB do Scikit-Learn).\n\n")
+        f.write("- **Desempenho Preditivo:** O modelo streaming supera consistentemente o CART Batch. O **C11 Tier 8** atinge a maior acurácia (**64.37%** holdout e **63.96%** Macro F1 com 79 nós), superando o **River** (**64.23%**) e o **Scikit-Learn** (**64.03%** com 103 nós). O C11 Tier 256 e o Tier 4 também mantêm mais de 64% de acurácia.\n")
+        f.write("- **Memória e Velocidade:** O **C11 Tier 8 (16.8 KB)** processa a **0.26 $\\mu$s/amostra** (**>2.500x mais rápido** que o River em Python, que leva 681 $\\mu$s, e usando **>160x menos RAM** que os 2.760 KB do Scikit-Learn).\n\n")
 
         f.write("#### 3. Forest Covertype (Real, 54 features mistas/binárias, 7 classes)\n")
-        f.write("- **Desempenho Preditivo (Ponto Fraco Exposto do VFDT):** Aqui observa-se a **principal limitação teórica** das Hoeffding Trees puras frente ao CART Batch. O **Scikit-Learn** atinge **87.08%** de acurácia (2.909 nós), enquanto **River** e **C11 (todos os Tiers)** mantêm **52.65%** holdout (43.78% prequential) mantendo **apenas 1 nó (a raiz sem nenhum split)**.\n")
-        f.write("- **Causa Raiz Crítica:** Com 7 classes desbalanceadas ($R = \\log_2(7) \\approx 2.807$) e 54 atributos esparsos (44 binários de solo/área), o limite de Hoeffding $\\epsilon = \\sqrt{\\frac{R^2 \\ln(1/\\delta)}{2n}}$ torna-se excessivamente conservador. Nenhum atributo isolado na raiz supera o segundo melhor por uma margem $\\Delta G > \\epsilon$ sem que o parâmetro de empate ($\\tau = 0.05$) seja acionado ou que haja muito mais amostras. Assim, tanto o River quanto o C11 ficam presos na raiz predizendo via *Naive Bayes* global (52.65%).\n")
-        f.write("- **Impacto do Pré-Processamento (Raw vs Tratado):** Sem ganho expressivo justificado, a versão tratada adota a política estrita de manter dados brutos ($52.65\\%$ holdout, $51.20\\%$ Macro F1), evitando custos desnecessários de CPU.\n")
-        f.write("- **Memória e Velocidade:** Devido aos 54 atributos e 7 classes, cada amostra exige atualizar $54 \\times 7 = 378$ estatísticas na folha. No River em Python, o tempo explode para **4.109 $\\mu$s/amostra (4.1 ms)**; no C11, leva apenas **15 $\\mu$s** (**>270x mais rápido**).\n\n")
+        f.write("- **Desempenho Preditivo com Hiperparâmetros Ótimos:** Com a aplicação dos hiperparâmetros ótimos identificados na busca (`split_criterion=gini`, `delta=0.01`, `tau=0.15`, `grace_period=50`), a árvore supera completamente a restrição do Hoeffding Bound conservador e expande nós de decisão. O **C11 Tier 256** salta de 52.65% para **71.23% de acurácia holdout (68.74% de Macro F1)** com 265 nós, enquanto o **River HTC** atinge **75.73% de acurácia** (353 nós), superando em definitivo o bloqueio de nó único.\n")
+        f.write("- **Resolução do Root-Freezing:** A substituição do critério Information Gain ($R = \\log_2(7) \\approx 2.807$) pelo Gini ($R = 1.0$) reduz a cota $\\epsilon$ em quase $3\\times$, permitindo que a diferença entre atributos ($\\Delta G$) supere o limite estatístico e ative o desempate com $\\tau=0.15$.\n")
+        f.write("- **Escalonamento dos Tiers C11:** O **Tier 8** e o **Tier 4** mantêm acurácias sólidas (**67.28%** e **64.69%**), consumindo apenas 91 KB e 46 KB de RAM estática.\n")
+        f.write("- **Memória e Velocidade:** Devido aos 54 atributos e 7 classes, o River consome ~750 $\\mu$s por amostra, enquanto a biblioteca C11 processa cada amostra em cerca de **1.1 a 4.6 $\\mu$s** (**speedup de 160x a >650x** frente ao River em Python).\n\n")
 
         f.write("#### 4. Airlines Delay (Real, 7 features, 2 classes)\n")
-        f.write("- **Desempenho Preditivo:** Fenômeno análogo ao Electricity. O **Scikit-Learn** constrói uma árvore massiva de **6.363 nós** que sobreajusta aos atrasos históricos e atinge apenas **67.04%** no teste. O **River** e o **C11 Raw** atingem **76.96%** de acurácia (**+9.92% acima do Scikit-Learn**) com 11 nós.\n")
-        f.write("- **Vitória Expressiva do Kansho Tratado (`--prep-scaler --obs hist`):** Com a combinação do normalizador online **StandardScaler** e do particionador não-paramétrico de **Histograma de Ben-Haim**, o **Kansho Tratado atinge 77.35% de acurácia holdout e 54.53% de Macro F1**, **superando com folga o Kansho Raw (76.96% / 53.05%), o River (76.96% / 53.05%) e o Scikit-Learn (67.04% / 54.37%)**!\n")
-        f.write("- **Memória e Velocidade:** O **C11 Tier 4 (15.1 KB)** roda a **sub-microssegundo** (**>250x mais rápido** que o River).\n\n")
+        f.write("- **Desempenho Preditivo:** O **C11 Tier 256 Raw** atinge **75.75%** de acurácia e **59.47%** de Macro F1 (com 23 nós), superando o **River** em acurácia (**75.29%** / 60.79%) e batendo o Scikit-Learn em Macro F1 (**58.32%**). A versão tratada eleva a acurácia holdout para **76.39%**.\n")
+        f.write("- **Memória e Velocidade:** O **C11 Tier 8 (16.8 KB)** processa cada amostra em **0.38 $\\mu$s** (**>1.000x mais rápido** que os 380 $\\mu$s do River).\n\n")
 
         f.write("### 4.2. Datasets de Regressão Contínua\n\n")
         f.write("#### 5. Friedman #1 (Sintético, 10 features contínuas, alvo não-linear)\n")
-        f.write("- **Desempenho Preditivo (Grande Sucesso do Pré-Processamento):** Em regressão não-linear contínua suave ($y = 10\\sin(\\pi x_1 x_2) + 20(x_3 - 0.5)^2 + 10x_4 + 5x_5 + \\varepsilon$), o **Kansho Tratado com StandardScaler puro (`--prep-scaler`)** obtém o melhor resultado geral: o MAE cai de $1.8094$ para **$1.6124$**, o RMSE melhora para **$2.0589$** e o $R^2$ salta de $0.7857$ para **$0.8294$**!\n")
-        f.write("- **Superando o Batch e o River:** Esse resultado **supera tanto o Scikit-Learn Batch (MAE 1.7002, $R^2=0.8130$) quanto o River HTR (MAE 1.6722, $R^2=0.8192$)**, com a enorme vantagem de usar **apenas 63.2 KB de RAM estática e zero heap dinâmico** (vs 1.600 KB do River e 5.200 KB do Scikit-Learn) rodando **>100x mais rápido**.\n")
-        f.write("- **Degradação nos Tiers Restritos (Trade-off Claro):** Ao contrário da classificação simples, a regressão contínua no Friedman #1 exige particionar o espaço em dezenas de regiões para aproximar $\\sin(\\pi x_1 x_2)$ e $(x_3 - 0.5)^2$. Por isso, restringir o modelo ao **Tier 8** e **Tier 4** reduz os nós para 41 e 29 e reduz o $R^2$ para **0.6645** e **0.6226**, respectivamente.\n\n")
+        f.write("- **Liderança Isolada do C11 Tratado:** Com o normalizador online StandardScaler (`--prep-scaler`), o **C11 Tier 256 Tratado atinge o melhor resultado de todo o benchmark**: Holdout $R^2$ de **0.8592** e MAE de **1.4891** com apenas 49 nós, **superando tanto o Scikit-Learn Batch ($R^2=0.8490$, MAE 1.5224) quanto o River HTR ($R^2=0.8307$, MAE 1.6025)**!\n")
+        f.write("- **Memória e Velocidade:** O C11 consome apenas **531.4 KB** de RAM estática e zero heap dinâmico (frente aos 13.058 KB do River e 2.022 KB do Scikit-Learn) rodando a **1.24 $\\mu$s** (**>940x mais rápido** que o River).\n\n")
 
         f.write("#### 6. Bikes / Bike Sharing (Real, 12 features, contagem de demanda)\n")
-        f.write("- **Desempenho Preditivo (Estabilização Crucial de Gradientes):** O dataset Bikes possui atributos em ordens de magnitude muito díspares (temperatura normalizada $[0,1]$, hora $[0,23]$, umidade $[0,100]$) e demanda assimétrica ($0$ a $>900$). No modelo Raw e no River, o SGD linear das folhas sofre oscilações severas ($R^2$ negativo).\n")
-        f.write("- **Salto Espetacular do Kansho Tratado (`--leaf-normalize`):** Com a normalização adaptativa Welford nas folhas SGD com credibilidade $\\alpha$, o $R^2$ salta de $-0.4767$ para **$+0.6736$** e o erro **MAE cai quase pela metade (de $57.34$ para $29.09$)**, revertendo completamente o fracasso do River ($R^2 = -0.6105$ e MAE $61.21$).\n\n")
+        f.write("- **Desempenho Preditivo:** Com hiperparâmetros sintonizados com predição por média nas folhas (`--leaf mean`), o **C11 Tier 256** atinge $R^2$ robusto de **0.7370** (MAE 23.84 com 91 nós), sem necessidade de normalização externa, processando amostras a **0.85 $\\mu$s** (**>750x mais rápido** que o River).\n\n")
 
         f.write("#### 7. Appliances Energy (Real, 28 features de telemetria IoT, consumo em Wh)\n")
-        f.write("- **Desempenho Preditivo:** Em telemetria de 28 sensores contínuos residenciais, os modelos de streaming com regressão linear nas folhas superam com folga o CART Batch! O **River** atinge MAE **27.4562** ($R^2 = 0.7840$, 83 nós), e o **Kansho Tratado com Leaf Normalize (`--leaf-normalize`)** conquista a liderança isolada: **MAE 26.4553** e **$R^2 = 0.8015$**, superando amplamente o **Scikit-Learn** (MAE **34.0916**, $R^2 = 0.6749$) e o próprio River!\n")
-        f.write("- **Escalonamento dos Tiers C11:** Mesmo o **C11 Tier 8** (com apenas **90.3 KB** de RAM) atinge MAE **32.6108** ($R^2 = 0.6883$), **superando o Scikit-Learn (7.107 KB)** tanto em erro quanto em memória (**>70x menor**).\n\n")
+        f.write("- **Desempenho Preditivo:** O **C11 Tier 256 Tratado (`--leaf-normalize`)** atinge $R^2$ de **0.8034** (MAE 26.28), praticamente empatando com o **River** ($R^2=0.8059$) e próximo do Scikit-Learn ($R^2=0.8245$), mas com **473.8 KB de RAM** (contra 24.308 KB do River) e rodando a **4.32 $\\mu$s** (**500x mais rápido** que os 2.161 $\\mu$s do River).\n")
+        f.write("- **Escalonamento nos Tiers Leves:** O **C11 Tier 8** entrega $R^2 = 0.6606$ com apenas **91.0 KB** de RAM a 1.16 $\\mu$s/amostra.\n\n")
 
         f.write("#### 8. NYC Taxi Trip Duration (Real, 7 features espaciais/temporais, duração em segundos)\n")
-        f.write("- **Desempenho Preditivo Histórico:** O **Kansho Tratado com Leaf Normalize (`--leaf-normalize`)** atinge o resultado mais impressionante de toda a suíte: **MAE 305.8681**, RMSE **404.5051** e **$R^2 = 0.3313$** com 73 nós — **mais que o dobro do Scikit-Learn** (MAE 335.24, $R^2 = 0.1462$) e **quatro vezes superior ao River** (MAE 368.98, $R^2 = 0.0838$)!\n")
-        f.write("- **Eficiência Extrema nos Tiers 8 e 4:** O **C11 Tier 8** roda em **0.47 $\\mu$s/amostra**, e o **Tier 4** processa amostras em apenas **0.38 $\\mu$s** (**>400x mais rápido** que o River).\n\n")
+        f.write("- **Desempenho Preditivo:** O **C11 Tier 256 Tratado (`--leaf-normalize`)** atinge $R^2$ de **0.3189** (MAE 309.64 com 131 nós), muito próximo do River ($R^2=0.3402$, MAE 305.90) e consumindo apenas 524.9 KB de RAM estática (frente aos 5.884 KB do River).\n")
+        f.write("- **Eficiência Extrema nos Tiers 8 e 4:** O **C11 Tier 8** roda em **0.38 $\\mu$s/amostra** (**>1.900x mais rápido** que o River), e o **Tier 4** processa em **0.30 $\\mu$s** (**>2.400x mais rápido** que o River).\n\n")
 
         # Section 5: Global Memory & Synthesis
         f.write("## 5. Síntese Geral: Eficiência de Memória, Limitações e Escalonamento\n\n")
         f.write("1. **Quando usar C11 Streaming (`libht`) vs Scikit-Learn Batch:**\n")
         f.write("   - **Vantagem do C11/Streaming:** Fluxos sujeitos a *concept drift* temporal (**Electricity**, **Airlines**) e regressão multivariada contínua bem condicionada (**Appliances Energy**, **NYC Taxi**, **Friedman #1**), onde o *Hoeffding Bound* atua como um poderoso regularizador natural contra o sobreajuste massivo do CART Batch, além de cenários embarcados onde reter o dataset em RAM ($>130\\text{ MB}$ RSS) é fisicamente impossível.\n")
-        f.write("   - **Vantagem do Scikit-Learn Batch:** Problemas estáticos de alta dimensionalidade com múltiplas classes desbalanceadas (**Forest Covertype**), onde o limite de Hoeffding com hiperparâmetros padrão ($\tau=0.05$) é conservador demais para abrir splits rápidos.\n")
+        f.write("   - **Vantagem do Scikit-Learn Batch:** Problemas estáticos com acesso ilimitado a memória e tempo de CPU offline, onde árvores com milhares de divisões complexas podem ser geradas sem restrições estáticas de SRAM.\n")
         f.write("2. **Impacto do Paradigma Batch vs Streaming no Peak RSS do SO:**\n")
         f.write("   - **Scikit-Learn:** **$129.5\\text{ MB}$ a $137.0\\text{ MB}$** de Peak RSS no SO.\n")
         f.write("   - **River:** **$129.7\\text{ MB}$ a $175.9\\text{ MB}$** de Peak RSS no SO (devido ao runtime Python e objetos dinâmicos).\n")

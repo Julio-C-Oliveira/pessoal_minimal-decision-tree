@@ -30,127 +30,120 @@ Este documento consolida a avaliação experimental dos **8 datasets emblemátic
 
 | Dataset | Modelo / Tier | Holdout Acc (%) | Macro F1 (%) | Prequential Acc (%) | Total Nós | RAM Intra-Treino (Mod+Heap) | RSS Treino (MB) | RSS Teste (MB) | RSS Total (MB) | Tempo/amostra ($\mu$s) | Speedup vs River |
 | :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **SEA** (3 feat) | Scikit-Learn (CART Batch) | 99.20% | 99.08% | N/A | 159 | 1023.9 KB | 129.9 MB | 129.9 MB | 129.9 MB | 3.06 $\mu$s | Batch |
-| **SEA** (3 feat) | River HTC (Streaming) | 98.10% | 97.81% | 96.04% | 11 | 313.9 KB | 129.9 MB | 130.0 MB | 130.0 MB | 166.39 $\mu$s | 1.0x (baseline) |
-| **SEA** (3 feat) | **C11 Tier 256 (Raw)** | **98.10%** | 97.81% | 96.04% | 11 | 524.9 KB | 3.2 MB | 3.3 MB | **3.3 MB** | 0.54 $\mu$s | **307.0x** |
-| **SEA** (3 feat) | **C11 Tier 256 (Tratado)** | **98.10%** | 97.81% | 96.04% | 11 | 524.9 KB | 3.2 MB | 3.3 MB | **3.3 MB** | 0.55 $\mu$s | **304.7x** |
-| **SEA** (3 feat) | **C11 Tier 8 (Raw)** | **98.10%** | 97.81% | 96.04% | 11 | 16.8 KB | 2.8 MB | 2.9 MB | **2.9 MB** | 0.55 $\mu$s | **303.1x** |
-| **SEA** (3 feat) | **C11 Tier 8 (Tratado)** | **98.10%** | 97.81% | 96.04% | 11 | 16.8 KB | 2.8 MB | 2.9 MB | **2.9 MB** | 0.69 $\mu$s | **242.6x** |
-| **SEA** (3 feat) | **C11 Tier 4 (Raw)** | **97.03%** | 96.54% | 95.66% | 11 | 8.6 KB | 2.7 MB | 2.8 MB | **2.8 MB** | 0.47 $\mu$s | **356.3x** |
-| **SEA** (3 feat) | **C11 Tier 4 (Tratado)** | **97.03%** | 96.54% | 95.66% | 11 | 8.6 KB | 2.7 MB | 2.8 MB | **2.8 MB** | 0.46 $\mu$s | **358.6x** |
-| **Electricity** (8 feat) | Scikit-Learn (CART Batch) | 53.24% | 52.91% | N/A | 13547 | 4650.9 KB | 133.0 MB | 133.0 MB | 133.0 MB | 27.98 $\mu$s | Batch |
-| **Electricity** (8 feat) | River HTC (Streaming) | 64.34% | 63.64% | 64.21% | 21 | 787.1 KB | 130.3 MB | 130.5 MB | 130.5 MB | 241.96 $\mu$s | 1.0x (baseline) |
-| **Electricity** (8 feat) | **C11 Tier 256 (Raw)** | **64.34%** | 63.64% | 64.21% | 21 | 524.9 KB | 3.2 MB | 3.3 MB | **3.3 MB** | 0.79 $\mu$s | **304.7x** |
-| **Electricity** (8 feat) | **C11 Tier 256 (Tratado)** | **64.34%** | 63.64% | 64.21% | 21 | 524.9 KB | 3.2 MB | 3.3 MB | **3.3 MB** | 1.05 $\mu$s | **229.8x** |
-| **Electricity** (8 feat) | **C11 Tier 8 (Raw)** | **64.34%** | 63.64% | 64.21% | 21 | 16.8 KB | 2.8 MB | 2.9 MB | **2.9 MB** | 0.82 $\mu$s | **293.3x** |
-| **Electricity** (8 feat) | **C11 Tier 8 (Tratado)** | **64.34%** | 63.64% | 64.21% | 21 | 16.8 KB | 2.8 MB | 2.8 MB | **2.8 MB** | 0.93 $\mu$s | **259.1x** |
-| **Electricity** (8 feat) | **C11 Tier 4 (Raw)** | **64.34%** | 63.64% | 64.25% | 19 | 8.6 KB | 2.8 MB | 2.8 MB | **2.8 MB** | 0.74 $\mu$s | **325.6x** |
-| **Electricity** (8 feat) | **C11 Tier 4 (Tratado)** | **64.34%** | 63.64% | 64.25% | 19 | 8.6 KB | 2.7 MB | 2.8 MB | **2.8 MB** | 0.66 $\mu$s | **368.3x** |
-| **Forest Covertype** (54 feat) | Scikit-Learn (CART Batch) | 87.08% | 85.66% | N/A | 2909 | 8467.9 KB | 134.3 MB | 135.9 MB | 135.9 MB | 33.53 $\mu$s | Batch |
-| **Forest Covertype** (54 feat) | River HTC (Streaming) | 52.65% | 51.20% | 43.79% | 1 | 1449.0 KB | 131.3 MB | 131.4 MB | 131.4 MB | 3980.79 $\mu$s | 1.0x (baseline) |
-| **Forest Covertype** (54 feat) | **C11 Tier 256 (Raw)** | **52.65%** | 51.20% | 43.78% | 1 | 473.8 KB | 3.2 MB | 3.3 MB | **3.3 MB** | 15.81 $\mu$s | **251.8x** |
-| **Forest Covertype** (54 feat) | **C11 Tier 256 (Tratado)** | **52.65%** | 51.20% | 43.78% | 1 | 473.8 KB | 3.2 MB | 3.3 MB | **3.3 MB** | 15.48 $\mu$s | **257.2x** |
-| **Forest Covertype** (54 feat) | **C11 Tier 8 (Raw)** | **52.65%** | 51.20% | 43.78% | 1 | 91.0 KB | 2.8 MB | 2.9 MB | **2.9 MB** | 16.67 $\mu$s | **238.8x** |
-| **Forest Covertype** (54 feat) | **C11 Tier 8 (Tratado)** | **52.65%** | 51.20% | 43.78% | 1 | 91.0 KB | 2.8 MB | 2.9 MB | **2.9 MB** | 17.61 $\mu$s | **226.0x** |
-| **Forest Covertype** (54 feat) | **C11 Tier 4 (Raw)** | **52.65%** | 51.20% | 43.78% | 1 | 46.1 KB | 2.8 MB | 2.9 MB | **2.9 MB** | 16.55 $\mu$s | **240.5x** |
-| **Forest Covertype** (54 feat) | **C11 Tier 4 (Tratado)** | **52.65%** | 51.20% | 43.78% | 1 | 46.1 KB | 2.8 MB | 2.9 MB | **2.9 MB** | 15.56 $\mu$s | **255.8x** |
-| **Airlines** (7 feat) | Scikit-Learn (CART Batch) | 67.04% | 54.37% | N/A | 6363 | 2391.8 KB | 130.8 MB | 130.8 MB | 130.8 MB | 12.65 $\mu$s | Batch |
-| **Airlines** (7 feat) | River HTC (Streaming) | 76.96% | 53.05% | 76.14% | 11 | 481.4 KB | 129.6 MB | 129.8 MB | 129.8 MB | 246.67 $\mu$s | 1.0x (baseline) |
-| **Airlines** (7 feat) | **C11 Tier 256 (Raw)** | **76.96%** | 53.05% | 76.09% | 11 | 524.9 KB | 3.2 MB | 3.3 MB | **3.3 MB** | 0.75 $\mu$s | **330.2x** |
-| **Airlines** (7 feat) | **C11 Tier 256 (Tratado)** | **77.35%** | 54.53% | 75.96% | 11 | 531.4 KB | 3.2 MB | 3.2 MB | **3.2 MB** | 2.04 $\mu$s | **120.9x** |
-| **Airlines** (7 feat) | **C11 Tier 8 (Raw)** | **76.96%** | 53.05% | 76.09% | 11 | 16.8 KB | 2.7 MB | 2.8 MB | **2.8 MB** | 0.84 $\mu$s | **293.3x** |
-| **Airlines** (7 feat) | **C11 Tier 8 (Tratado)** | **77.35%** | 54.53% | 75.96% | 11 | 23.3 KB | 2.7 MB | 2.8 MB | **2.8 MB** | 2.54 $\mu$s | **97.2x** |
-| **Airlines** (7 feat) | **C11 Tier 4 (Raw)** | **76.96%** | 53.05% | 76.10% | 11 | 8.6 KB | 2.8 MB | 2.8 MB | **2.8 MB** | 0.89 $\mu$s | **277.5x** |
-| **Airlines** (7 feat) | **C11 Tier 4 (Tratado)** | **77.35%** | 54.53% | 75.96% | 11 | 15.1 KB | 2.7 MB | 2.8 MB | **2.8 MB** | 2.15 $\mu$s | **114.7x** |
+| **SEA** (3 feat) | Scikit-Learn (CART Batch) | 99.18% | 99.06% | N/A | 133 | 1020.0 KB | 128.4 MB | 128.4 MB | 128.4 MB | 3.26 $\mu$s | Batch |
+| **SEA** (3 feat) | River HTC (Streaming) | 99.22% | 99.10% | 97.35% | 45 | 601.0 KB | 128.4 MB | 128.5 MB | 128.5 MB | 146.20 $\mu$s | 1.0x (baseline) |
+| **SEA** (3 feat) | **C11 Tier 256 (Raw)** | **99.32%** | 99.22% | 93.31% | 37 | 524.9 KB | 3.2 MB | 3.3 MB | **3.3 MB** | 0.39 $\mu$s | **377.8x** |
+| **SEA** (3 feat) | **C11 Tier 256 (Tratado)** | **99.32%** | 99.22% | 93.31% | 37 | 524.9 KB | 3.2 MB | 3.3 MB | **3.3 MB** | 0.64 $\mu$s | **230.2x** |
+| **SEA** (3 feat) | **C11 Tier 8 (Raw)** | **99.02%** | 98.87% | 97.30% | 43 | 16.8 KB | 2.8 MB | 2.9 MB | **2.9 MB** | 0.28 $\mu$s | **531.6x** |
+| **SEA** (3 feat) | **C11 Tier 8 (Tratado)** | **99.02%** | 98.87% | 97.30% | 43 | 16.8 KB | 2.8 MB | 2.9 MB | **2.9 MB** | 0.28 $\mu$s | **524.0x** |
+| **SEA** (3 feat) | **C11 Tier 4 (Raw)** | **98.07%** | 97.79% | 95.34% | 9 | 8.6 KB | 2.7 MB | 2.8 MB | **2.8 MB** | 0.36 $\mu$s | **403.9x** |
+| **SEA** (3 feat) | **C11 Tier 4 (Tratado)** | **98.07%** | 97.79% | 95.34% | 9 | 8.6 KB | 2.7 MB | 2.8 MB | **2.8 MB** | 0.37 $\mu$s | **397.3x** |
+| **Electricity** (8 feat) | Scikit-Learn (CART Batch) | 64.03% | 63.55% | N/A | 103 | 2760.1 KB | 129.9 MB | 129.9 MB | 129.9 MB | 3.65 $\mu$s | Batch |
+| **Electricity** (8 feat) | River HTC (Streaming) | 64.23% | 63.95% | 63.34% | 9 | 2093.2 KB | 134.6 MB | 134.6 MB | 134.6 MB | 681.51 $\mu$s | 1.0x (baseline) |
+| **Electricity** (8 feat) | **C11 Tier 256 (Raw)** | **64.04%** | 63.79% | 64.30% | 75 | 524.9 KB | 3.3 MB | 3.3 MB | **3.3 MB** | 0.75 $\mu$s | **911.1x** |
+| **Electricity** (8 feat) | **C11 Tier 256 (Tratado)** | **64.04%** | 63.79% | 64.30% | 75 | 524.9 KB | 3.2 MB | 3.3 MB | **3.3 MB** | 0.75 $\mu$s | **912.3x** |
+| **Electricity** (8 feat) | **C11 Tier 8 (Raw)** | **64.37%** | 63.96% | 64.57% | 79 | 16.8 KB | 2.7 MB | 2.8 MB | **2.8 MB** | 0.26 $\mu$s | **2581.5x** |
+| **Electricity** (8 feat) | **C11 Tier 8 (Tratado)** | **64.37%** | 63.96% | 64.57% | 79 | 16.8 KB | 2.8 MB | 2.9 MB | **2.9 MB** | 0.27 $\mu$s | **2562.0x** |
+| **Electricity** (8 feat) | **C11 Tier 4 (Raw)** | **64.26%** | 63.93% | 64.70% | 41 | 8.6 KB | 2.7 MB | 2.8 MB | **2.8 MB** | 0.27 $\mu$s | **2496.4x** |
+| **Electricity** (8 feat) | **C11 Tier 4 (Tratado)** | **64.26%** | 63.93% | 64.70% | 41 | 8.6 KB | 2.8 MB | 2.9 MB | **2.9 MB** | 0.28 $\mu$s | **2399.7x** |
+| **Forest Covertype** (54 feat) | Scikit-Learn (CART Batch) | 87.40% | 85.81% | N/A | 1803 | 8269.0 KB | 132.3 MB | 135.1 MB | 135.1 MB | 22.63 $\mu$s | Batch |
+| **Forest Covertype** (54 feat) | River HTC (Streaming) | 75.73% | 73.86% | 66.77% | 353 | 80696.8 KB | 236.4 MB | 236.4 MB | 236.4 MB | 749.57 $\mu$s | 1.0x (baseline) |
+| **Forest Covertype** (54 feat) | **C11 Tier 256 (Raw)** | **71.23%** | 68.74% | 60.00% | 265 | 473.8 KB | 3.2 MB | 3.3 MB | **3.3 MB** | 4.63 $\mu$s | **161.8x** |
+| **Forest Covertype** (54 feat) | **C11 Tier 256 (Tratado)** | **71.23%** | 68.74% | 60.00% | 265 | 473.8 KB | 3.2 MB | 3.3 MB | **3.3 MB** | 4.37 $\mu$s | **171.4x** |
+| **Forest Covertype** (54 feat) | **C11 Tier 8 (Raw)** | **67.28%** | 65.21% | 59.99% | 77 | 91.0 KB | 2.8 MB | 2.8 MB | **2.8 MB** | 4.39 $\mu$s | **170.8x** |
+| **Forest Covertype** (54 feat) | **C11 Tier 8 (Tratado)** | **67.28%** | 65.21% | 59.99% | 77 | 91.0 KB | 2.8 MB | 2.9 MB | **2.9 MB** | 4.37 $\mu$s | **171.7x** |
+| **Forest Covertype** (54 feat) | **C11 Tier 4 (Raw)** | **64.69%** | 62.42% | 58.09% | 47 | 46.1 KB | 2.8 MB | 2.8 MB | **2.8 MB** | 1.14 $\mu$s | **659.2x** |
+| **Forest Covertype** (54 feat) | **C11 Tier 4 (Tratado)** | **64.69%** | 62.42% | 58.09% | 47 | 46.1 KB | 2.7 MB | 2.8 MB | **2.8 MB** | 1.12 $\mu$s | **669.3x** |
+| **Airlines** (7 feat) | Scikit-Learn (CART Batch) | 77.11% | 58.32% | N/A | 123 | 1514.2 KB | 129.2 MB | 129.2 MB | 129.2 MB | 3.44 $\mu$s | Batch |
+| **Airlines** (7 feat) | River HTC (Streaming) | 75.29% | 60.79% | 75.66% | 15 | 1445.6 KB | 131.8 MB | 131.8 MB | 131.8 MB | 380.97 $\mu$s | 1.0x (baseline) |
+| **Airlines** (7 feat) | **C11 Tier 256 (Raw)** | **75.75%** | 59.47% | 75.85% | 23 | 524.9 KB | 3.1 MB | 3.2 MB | **3.2 MB** | 0.38 $\mu$s | **994.7x** |
+| **Airlines** (7 feat) | **C11 Tier 256 (Tratado)** | **76.39%** | 43.31% | 75.77% | 19 | 531.4 KB | 3.1 MB | 3.2 MB | **3.2 MB** | 1.10 $\mu$s | **345.7x** |
+| **Airlines** (7 feat) | **C11 Tier 8 (Raw)** | **75.75%** | 59.47% | 75.85% | 23 | 16.8 KB | 2.7 MB | 2.8 MB | **2.8 MB** | 0.38 $\mu$s | **1013.2x** |
+| **Airlines** (7 feat) | **C11 Tier 8 (Tratado)** | **76.39%** | 43.31% | 75.77% | 19 | 23.3 KB | 2.7 MB | 2.8 MB | **2.8 MB** | 1.07 $\mu$s | **356.7x** |
+| **Airlines** (7 feat) | **C11 Tier 4 (Raw)** | **75.75%** | 59.47% | 75.85% | 17 | 8.6 KB | 2.7 MB | 2.7 MB | **2.7 MB** | 0.32 $\mu$s | **1201.8x** |
+| **Airlines** (7 feat) | **C11 Tier 4 (Tratado)** | **76.39%** | 43.31% | 75.77% | 15 | 15.1 KB | 2.7 MB | 2.7 MB | **2.7 MB** | 0.92 $\mu$s | **414.1x** |
 
 ## 3. Resultados em Regressão Contínua (4 Datasets)
 
 | Dataset | Modelo / Tier | Holdout MAE | Holdout RMSE | Holdout $R^2$ | Prequential MAE | Total Nós | RAM Intra-Treino (Mod+Heap) | RSS Treino (MB) | RSS Teste (MB) | RSS Total (MB) | Tempo/amostra ($\mu$s) | Speedup vs River |
 | :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **Friedman #1** (10 feat) | Scikit-Learn (CART Batch) | 1.7002 | 2.1558 | 0.8130 | N/A | 27999 | 5204.9 KB | 131.8 MB | 131.8 MB | 131.8 MB | 16.36 $\mu$s | Batch |
-| **Friedman #1** (10 feat) | River HTR (Streaming) | 1.6722 | 2.1198 | 0.8192 | 1.8807 | 81 | 1600.5 KB | 133.4 MB | 133.7 MB | 133.7 MB | 210.70 $\mu$s | 1.0x (baseline) |
-| **Friedman #1** (10 feat) | **C11 Tier 256 (Raw)** | **1.8094** | 2.3078 | **0.7857** | 2.0536 | 71 | 524.9 KB | 3.2 MB | 3.3 MB | **3.3 MB** | 1.02 $\mu$s | **205.6x** |
-| **Friedman #1** (10 feat) | **C11 Tier 256 (Tratado)** | **1.6124** | 2.0589 | **0.8294** | 1.7659 | 81 | 531.4 KB | 3.2 MB | 3.3 MB | **3.3 MB** | 1.26 $\mu$s | **166.8x** |
-| **Friedman #1** (10 feat) | **C11 Tier 8 (Raw)** | **2.2983** | 2.8873 | **0.6645** | 2.2680 | 41 | 16.8 KB | 2.7 MB | 2.8 MB | **2.8 MB** | 0.69 $\mu$s | **305.4x** |
-| **Friedman #1** (10 feat) | **C11 Tier 8 (Tratado)** | **2.2397** | 2.8391 | **0.6756** | 2.1701 | 43 | 23.3 KB | 2.7 MB | 2.8 MB | **2.8 MB** | 0.91 $\mu$s | **230.5x** |
-| **Friedman #1** (10 feat) | **C11 Tier 4 (Raw)** | **2.4320** | 3.0625 | **0.6226** | 2.4384 | 29 | 8.6 KB | 2.7 MB | 2.8 MB | **2.8 MB** | 0.53 $\mu$s | **399.0x** |
-| **Friedman #1** (10 feat) | **C11 Tier 4 (Tratado)** | **2.4935** | 3.1356 | **0.6044** | 2.4269 | 33 | 15.1 KB | 2.7 MB | 2.8 MB | **2.8 MB** | 1.00 $\mu$s | **211.1x** |
-| **Bikes** (12 feat) | Scikit-Learn (CART Batch) | 14.9168 | 24.1478 | 0.8966 | N/A | 16471 | 3654.1 KB | 131.7 MB | 131.7 MB | 131.7 MB | 12.16 $\mu$s | Batch |
-| **Bikes** (12 feat) | River HTR (Streaming) | 61.2067 | 95.2940 | -0.6105 | 47.3939 | 21 | 462.2 KB | 130.1 MB | 130.4 MB | 130.4 MB | 184.32 $\mu$s | 1.0x (baseline) |
-| **Bikes** (12 feat) | **C11 Tier 256 (Raw)** | **57.3352** | 91.2508 | **-0.4767** | 38.8965 | 39 | 524.9 KB | 3.2 MB | 3.3 MB | **3.3 MB** | 1.11 $\mu$s | **165.3x** |
-| **Bikes** (12 feat) | **C11 Tier 256 (Tratado)** | **29.0866** | 42.8977 | **0.6736** | 34.2820 | 39 | 524.9 KB | 3.2 MB | 3.3 MB | **3.3 MB** | 3.59 $\mu$s | **51.4x** |
-| **Bikes** (12 feat) | **C11 Tier 8 (Raw)** | **51.3952** | 76.6325 | **-0.0415** | 55.5766 | 29 | 16.8 KB | 2.7 MB | 2.8 MB | **2.8 MB** | 0.74 $\mu$s | **249.4x** |
-| **Bikes** (12 feat) | **C11 Tier 8 (Tratado)** | **48.3834** | 71.3981 | **0.0960** | 53.3061 | 29 | 16.8 KB | 2.7 MB | 2.8 MB | **2.8 MB** | 1.96 $\mu$s | **94.0x** |
-| **Bikes** (12 feat) | **C11 Tier 4 (Raw)** | **54.0258** | 76.3011 | **-0.0325** | 67.6740 | 17 | 8.6 KB | 2.6 MB | 2.7 MB | **2.7 MB** | 0.73 $\mu$s | **251.5x** |
-| **Bikes** (12 feat) | **C11 Tier 4 (Tratado)** | **54.8221** | 76.6390 | **-0.0416** | 66.0582 | 17 | 8.6 KB | 2.7 MB | 2.8 MB | **2.8 MB** | 1.12 $\mu$s | **164.1x** |
-| **Appliances Energy** (28 feat) | Scikit-Learn (CART Batch) | 34.0916 | 42.6254 | 0.6749 | N/A | 27289 | 7107.0 KB | 133.1 MB | 133.1 MB | 133.1 MB | 40.12 $\mu$s | Batch |
-| **Appliances Energy** (28 feat) | River HTR (Streaming) | 27.4562 | 34.7493 | 0.7840 | 42.7167 | 83 | 13962.9 KB | 176.0 MB | 176.0 MB | 176.0 MB | 2567.98 $\mu$s | 1.0x (baseline) |
-| **Appliances Energy** (28 feat) | **C11 Tier 256 (Raw)** | **27.9995** | 35.4322 | **0.7754** | 39.6971 | 75 | 473.8 KB | 3.2 MB | 3.3 MB | **3.3 MB** | 2.21 $\mu$s | **1164.6x** |
-| **Appliances Energy** (28 feat) | **C11 Tier 256 (Tratado)** | **26.4553** | 33.3093 | **0.8015** | 35.2879 | 75 | 473.8 KB | 3.1 MB | 3.2 MB | **3.2 MB** | 5.17 $\mu$s | **497.0x** |
-| **Appliances Energy** (28 feat) | **C11 Tier 8 (Raw)** | **32.6108** | 41.7432 | **0.6883** | 42.1246 | 37 | 91.0 KB | 2.7 MB | 2.8 MB | **2.8 MB** | 1.48 $\mu$s | **1732.8x** |
-| **Appliances Energy** (28 feat) | **C11 Tier 8 (Tratado)** | **31.7746** | 40.8460 | **0.7015** | 38.4029 | 37 | 91.0 KB | 2.7 MB | 2.8 MB | **2.8 MB** | 3.88 $\mu$s | **661.2x** |
-| **Appliances Energy** (28 feat) | **C11 Tier 4 (Raw)** | **39.1557** | 49.3459 | **0.5644** | 46.8371 | 25 | 46.1 KB | 2.8 MB | 2.9 MB | **2.9 MB** | 0.96 $\mu$s | **2669.4x** |
-| **Appliances Energy** (28 feat) | **C11 Tier 4 (Tratado)** | **38.8542** | 49.0421 | **0.5697** | 43.4997 | 25 | 46.1 KB | 2.7 MB | 2.8 MB | **2.8 MB** | 2.07 $\mu$s | **1239.4x** |
-| **NYC Taxi** (7 feat) | Scikit-Learn (CART Batch) | 335.2392 | 457.0579 | 0.1462 | N/A | 20999 | 3737.8 KB | 131.8 MB | 131.8 MB | 131.8 MB | 11.75 $\mu$s | Batch |
-| **NYC Taxi** (7 feat) | River HTR (Streaming) | 368.9817 | 473.4696 | 0.0838 | 418.4077 | 61 | 689.4 KB | 130.9 MB | 131.0 MB | 131.0 MB | 168.74 $\mu$s | 1.0x (baseline) |
-| **NYC Taxi** (7 feat) | **C11 Tier 256 (Raw)** | **335.4714** | 438.3631 | **0.2146** | 378.1473 | 73 | 524.9 KB | 3.2 MB | 3.3 MB | **3.3 MB** | 0.80 $\mu$s | **212.0x** |
-| **NYC Taxi** (7 feat) | **C11 Tier 256 (Tratado)** | **305.8681** | 404.5051 | **0.3313** | 355.7280 | 73 | 524.9 KB | 3.2 MB | 3.3 MB | **3.3 MB** | 1.88 $\mu$s | **90.0x** |
-| **NYC Taxi** (7 feat) | **C11 Tier 8 (Raw)** | **353.1252** | 458.2180 | **0.1419** | 384.5139 | 35 | 16.8 KB | 2.7 MB | 2.8 MB | **2.8 MB** | 0.48 $\mu$s | **350.8x** |
-| **NYC Taxi** (7 feat) | **C11 Tier 8 (Tratado)** | **346.5196** | 453.1226 | **0.1609** | 374.1710 | 35 | 16.8 KB | 2.7 MB | 2.8 MB | **2.8 MB** | 0.84 $\mu$s | **200.6x** |
-| **NYC Taxi** (7 feat) | **C11 Tier 4 (Raw)** | **355.3789** | 462.5071 | **0.1257** | 386.6339 | 25 | 8.6 KB | 2.7 MB | 2.8 MB | **2.8 MB** | 0.40 $\mu$s | **426.1x** |
-| **NYC Taxi** (7 feat) | **C11 Tier 4 (Tratado)** | **354.2561** | 460.0393 | **0.1350** | 381.1196 | 25 | 8.6 KB | 2.7 MB | 2.8 MB | **2.8 MB** | 0.66 $\mu$s | **255.3x** |
+| **Friedman #1** (10 feat) | Scikit-Learn (CART Batch) | 1.5224 | 1.9372 | 0.8490 | N/A | 4043 | 2022.9 KB | 128.4 MB | 128.8 MB | 128.8 MB | 12.24 $\mu$s | Batch |
+| **Friedman #1** (10 feat) | River HTR (Streaming) | 1.6025 | 2.0510 | 0.8307 | 1.8375 | 195 | 13058.2 KB | 165.6 MB | 165.6 MB | 165.6 MB | 1177.81 $\mu$s | 1.0x (baseline) |
+| **Friedman #1** (10 feat) | **C11 Tier 256 (Raw)** | **1.7954** | 2.3012 | **0.7869** | 2.0513 | 45 | 524.9 KB | 3.2 MB | 3.3 MB | **3.3 MB** | 0.98 $\mu$s | **1200.6x** |
+| **Friedman #1** (10 feat) | **C11 Tier 256 (Tratado)** | **1.4891** | 1.8708 | **0.8592** | 1.7464 | 49 | 531.4 KB | 3.2 MB | 3.3 MB | **3.3 MB** | 1.24 $\mu$s | **948.3x** |
+| **Friedman #1** (10 feat) | **C11 Tier 8 (Raw)** | **2.2983** | 2.8873 | **0.6645** | 2.2714 | 41 | 16.8 KB | 2.7 MB | 2.8 MB | **2.8 MB** | 0.67 $\mu$s | **1755.3x** |
+| **Friedman #1** (10 feat) | **C11 Tier 8 (Tratado)** | **2.2397** | 2.8391 | **0.6756** | 2.2023 | 43 | 23.3 KB | 2.7 MB | 2.8 MB | **2.8 MB** | 0.91 $\mu$s | **1290.0x** |
+| **Friedman #1** (10 feat) | **C11 Tier 4 (Raw)** | **2.3597** | 2.9975 | **0.6384** | 2.4084 | 23 | 8.6 KB | 2.6 MB | 2.8 MB | **2.8 MB** | 0.62 $\mu$s | **1890.5x** |
+| **Friedman #1** (10 feat) | **C11 Tier 4 (Tratado)** | **2.4470** | 3.1097 | **0.6109** | 2.3770 | 21 | 15.1 KB | 2.7 MB | 2.8 MB | **2.8 MB** | 0.83 $\mu$s | **1424.2x** |
+| **Bikes** (12 feat) | Scikit-Learn (CART Batch) | 11.8925 | 18.9923 | 0.9360 | N/A | 903 | 1586.1 KB | 128.0 MB | 128.3 MB | 128.3 MB | 7.34 $\mu$s | Batch |
+| **Bikes** (12 feat) | River HTR (Streaming) | 19.5187 | 30.2538 | 0.8377 | 44.0685 | 95 | 5469.8 KB | 143.3 MB | 143.3 MB | 143.3 MB | 643.94 $\mu$s | 1.0x (baseline) |
+| **Bikes** (12 feat) | **C11 Tier 256 (Raw)** | **23.8432** | 38.5121 | **0.7370** | 52.3525 | 91 | 524.9 KB | 3.2 MB | 3.3 MB | **3.3 MB** | 0.85 $\mu$s | **754.0x** |
+| **Bikes** (12 feat) | **C11 Tier 256 (Tratado)** | **23.8432** | 38.5121 | **0.7370** | 52.3525 | 91 | 524.9 KB | 3.1 MB | 3.2 MB | **3.2 MB** | 0.85 $\mu$s | **759.4x** |
+| **Bikes** (12 feat) | **C11 Tier 8 (Raw)** | **53.1761** | 78.1130 | **-0.0821** | 66.3029 | 41 | 16.8 KB | 2.7 MB | 2.8 MB | **2.8 MB** | 0.53 $\mu$s | **1217.3x** |
+| **Bikes** (12 feat) | **C11 Tier 8 (Tratado)** | **53.1761** | 78.1130 | **-0.0821** | 66.3029 | 41 | 16.8 KB | 2.7 MB | 2.8 MB | **2.8 MB** | 0.55 $\mu$s | **1166.6x** |
+| **Bikes** (12 feat) | **C11 Tier 4 (Raw)** | **55.6277** | 77.4070 | **-0.0626** | 67.6326 | 29 | 8.6 KB | 2.7 MB | 2.8 MB | **2.8 MB** | 0.33 $\mu$s | **1957.3x** |
+| **Bikes** (12 feat) | **C11 Tier 4 (Tratado)** | **55.6277** | 77.4070 | **-0.0626** | 67.6326 | 29 | 8.6 KB | 2.7 MB | 2.8 MB | **2.8 MB** | 0.33 $\mu$s | **1963.2x** |
+| **Appliances Energy** (28 feat) | Scikit-Learn (CART Batch) | 25.1176 | 31.3187 | 0.8245 | N/A | 237 | 3513.8 KB | 129.7 MB | 129.7 MB | 129.7 MB | 22.94 $\mu$s | Batch |
+| **Appliances Energy** (28 feat) | River HTR (Streaming) | 26.1249 | 32.9381 | 0.8059 | 38.7809 | 195 | 24308.9 KB | 199.4 MB | 199.4 MB | 199.4 MB | 2161.25 $\mu$s | 1.0x (baseline) |
+| **Appliances Energy** (28 feat) | **C11 Tier 256 (Raw)** | **26.7967** | 33.7368 | **0.7964** | 35.1409 | 135 | 473.8 KB | 3.1 MB | 3.2 MB | **3.2 MB** | 1.98 $\mu$s | **1092.6x** |
+| **Appliances Energy** (28 feat) | **C11 Tier 256 (Tratado)** | **26.2787** | 33.1529 | **0.8034** | 33.9853 | 135 | 473.8 KB | 3.1 MB | 3.2 MB | **3.2 MB** | 4.32 $\mu$s | **500.2x** |
+| **Appliances Energy** (28 feat) | **C11 Tier 8 (Raw)** | **34.2897** | 43.7501 | **0.6576** | 42.7340 | 45 | 91.0 KB | 2.8 MB | 2.9 MB | **2.9 MB** | 1.16 $\mu$s | **1859.9x** |
+| **Appliances Energy** (28 feat) | **C11 Tier 8 (Tratado)** | **34.2451** | 43.5548 | **0.6606** | 40.2181 | 45 | 91.0 KB | 2.8 MB | 2.9 MB | **2.9 MB** | 2.42 $\mu$s | **894.9x** |
+| **Appliances Energy** (28 feat) | **C11 Tier 4 (Raw)** | **38.3687** | 49.0520 | **0.5695** | 45.1789 | 31 | 46.1 KB | 2.7 MB | 2.8 MB | **2.8 MB** | 0.78 $\mu$s | **2763.7x** |
+| **Appliances Energy** (28 feat) | **C11 Tier 4 (Tratado)** | **38.3687** | 49.0520 | **0.5695** | 43.3148 | 31 | 46.1 KB | 2.7 MB | 2.8 MB | **2.8 MB** | 1.48 $\mu$s | **1458.3x** |
+| **NYC Taxi** (7 feat) | Scikit-Learn (CART Batch) | 291.6292 | 386.9605 | 0.3880 | N/A | 815 | 1056.8 KB | 127.4 MB | 127.5 MB | 127.5 MB | 9.55 $\mu$s | Batch |
+| **NYC Taxi** (7 feat) | River HTR (Streaming) | 305.9040 | 401.8045 | 0.3402 | 378.5648 | 269 | 5884.3 KB | 144.4 MB | 144.4 MB | 144.4 MB | 726.73 $\mu$s | 1.0x (baseline) |
+| **NYC Taxi** (7 feat) | **C11 Tier 256 (Raw)** | **323.8138** | 426.7398 | **0.2557** | 371.1462 | 131 | 524.9 KB | 3.2 MB | 3.3 MB | **3.3 MB** | 0.81 $\mu$s | **901.6x** |
+| **NYC Taxi** (7 feat) | **C11 Tier 256 (Tratado)** | **309.6411** | 408.2268 | **0.3189** | 347.5016 | 131 | 524.9 KB | 3.2 MB | 3.3 MB | **3.3 MB** | 1.56 $\mu$s | **465.3x** |
+| **NYC Taxi** (7 feat) | **C11 Tier 8 (Raw)** | **351.7029** | 457.7771 | **0.1435** | 384.2082 | 55 | 16.8 KB | 2.7 MB | 2.8 MB | **2.8 MB** | 0.38 $\mu$s | **1902.4x** |
+| **NYC Taxi** (7 feat) | **C11 Tier 8 (Tratado)** | **351.3998** | 457.0582 | **0.1462** | 380.3983 | 55 | 16.8 KB | 2.6 MB | 2.7 MB | **2.7 MB** | 0.56 $\mu$s | **1302.4x** |
+| **NYC Taxi** (7 feat) | **C11 Tier 4 (Raw)** | **367.5304** | 476.9913 | **0.0701** | 396.2221 | 35 | 8.6 KB | 2.6 MB | 2.7 MB | **2.7 MB** | 0.30 $\mu$s | **2438.7x** |
+| **NYC Taxi** (7 feat) | **C11 Tier 4 (Tratado)** | **366.6790** | 476.2300 | **0.0731** | 394.5024 | 35 | 8.6 KB | 2.7 MB | 2.8 MB | **2.8 MB** | 0.46 $\mu$s | **1569.6x** |
 
 ## 4. Análise Comparativa Crítica e Imparcial por Dataset
 
 ### 4.1. Datasets de Classificação
 
 #### 1. SEA (Sintético, 3 features contínuas, 2 classes)
-- **Desempenho Preditivo:** O **Scikit-Learn (Batch)** atinge a maior acurácia holdout (**99.20%** com 159 nós) por ter acesso simultâneo a todas as amostras para encontrar pontos de corte globais exatos na fronteira linear $f_1 + f_2 \le \theta$. Os modelos de streaming (**River** e **C11 Tiers 256 e 8**) empatam de forma bit-a-bit em **98.10%** de acurácia holdout (96.04% prequential) com apenas **11 nós** (6 folhas). O **Tier 4** (restrito a 4 folhas ativas) sofre uma leve queda de $-1.07\%$ (97.03%), pois a desativação precoce de folhas congela a expansão de dois sub-ramos secundários.
-- **Impacto do Pré-Processamento (Raw vs Tratado):** Como o fluxo SEA possui 3 variáveis já canônicas em $[0, 10]$ com ruído homogêneo, nenhum tratamento adicional gerou ganho de F1 ou acurácia. A versão Tratada preserva estritamente a configuração Raw ótima ($98.10\%$ holdout e $97.81\%$ Macro F1).
-- **Memória e Velocidade:** Para ganhar $1.1\%$ de acurácia, o Scikit-Learn consome **1.024 KB** intra-treino e **129.5 MB** de RSS. O **C11 Tier 8** entrega a mesma acurácia do River e do Tier 256 usando apenas **16.6 KB** de RAM estática (**$60\times$ menor** que o Scikit-Learn e **$18\times$ menor** que o River) e processa amostras a **0.54 $\mu$s** (**>300x mais rápido** que o River e **>9x mais rápido** que o Scikit-Learn).
-- **Veredito Crítico:** Em conceitos estacionários simples e bem comportados, o CART Batch é marginalmente mais preciso no limite assintótico, mas o custo de memória do C11 Tier 8 com perda de apenas 1.1% torna o modelo streaming imbatível para borda.
+- **Desempenho Preditivo com Hiperparâmetros Ótimos:** Com a sintonia fina, o **C11 Tier 256** atinge a maior acurácia de todo o experimento (**99.32%** e **99.22%** de Macro F1 com 37 nós), superando tanto o **River HTC** (**99.22%**) quanto o **Scikit-Learn Batch** (**99.18%** com 133 nós). O **C11 Tier 8** atinge **99.02%** e o **Tier 4** atinge **98.07%**.
+- **Memória e Velocidade:** O **C11 Tier 8** entrega **99.02%** consumindo apenas **16.8 KB** de RAM estática (**>60x menor** que os 1.020 KB do Scikit-Learn e **>35x menor** que os 601 KB do River) e processa cada amostra a **0.28 $\mu$s** (**>500x mais rápido** que o River).
 
 #### 2. Electricity / Elec2 (Real, 8 features contínuas, 2 classes)
-- **Desempenho Preditivo:** Resultado emblemático da diferença entre *Batch* e *Streaming*. O **Scikit-Learn** sofre **overfitting severo** aos regimes históricos do lote de treino (criando **13.547 nós**) e despenca para **53.24%** no conjunto de teste futuro (quase um palpite aleatório, já que o mercado de energia sofre forte *concept drift* temporal entre os primeiros 70% e os últimos 30% do dataset). Já o **River** e o **C11 (todos os Tiers: 256, 8 e 4, tanto Raw quanto Tratado)** atingem rigorosos **64.34%** de acurácia (**+11.10 pontos percentuais acima do Scikit-Learn**) com árvores enxutas de apenas **19 a 21 nós**.
-- **Impacto do Pré-Processamento (Raw vs Tratado):** O fluxo já é perfeitamente capturado pelos estimadores locais NBA; portanto, nenhum tratamento extra foi necessário, mantendo-se a configuração Raw com $64.34\%$ de acurácia e $63.64\%$ de Macro F1.
-- **Por que o Streaming vence o Batch aqui?** A regularização estatística do *Hoeffding Bound* combinada com os classificadores locais *Naive Bayes Adaptive* (NBA) nas folhas evita que a árvore memorize ruído local de alta frequência do passado, generalizando melhor sob mudança temporal de distribuição.
-- **Memória e Velocidade:** Mesmo o **C11 Tier 4 (8.6 KB de RAM)** mantém os mesmos **64.34%** de acurácia holdout a **0.64 $\mu$s/amostra** (**>400x mais rápido** que o River e consumindo **>500x menos RAM intra-treino** que os 4.650 KB do Scikit-Learn).
+- **Desempenho Preditivo:** O modelo streaming supera consistentemente o CART Batch. O **C11 Tier 8** atinge a maior acurácia (**64.37%** holdout e **63.96%** Macro F1 com 79 nós), superando o **River** (**64.23%**) e o **Scikit-Learn** (**64.03%** com 103 nós). O C11 Tier 256 e o Tier 4 também mantêm mais de 64% de acurácia.
+- **Memória e Velocidade:** O **C11 Tier 8 (16.8 KB)** processa a **0.26 $\mu$s/amostra** (**>2.500x mais rápido** que o River em Python, que leva 681 $\mu$s, e usando **>160x menos RAM** que os 2.760 KB do Scikit-Learn).
 
 #### 3. Forest Covertype (Real, 54 features mistas/binárias, 7 classes)
-- **Desempenho Preditivo (Ponto Fraco Exposto do VFDT):** Aqui observa-se a **principal limitação teórica** das Hoeffding Trees puras frente ao CART Batch. O **Scikit-Learn** atinge **87.08%** de acurácia (2.909 nós), enquanto **River** e **C11 (todos os Tiers)** mantêm **52.65%** holdout (43.78% prequential) mantendo **apenas 1 nó (a raiz sem nenhum split)**.
-- **Causa Raiz Crítica:** Com 7 classes desbalanceadas ($R = \log_2(7) \approx 2.807$) e 54 atributos esparsos (44 binários de solo/área), o limite de Hoeffding $\epsilon = \sqrt{\frac{R^2 \ln(1/\delta)}{2n}}$ torna-se excessivamente conservador. Nenhum atributo isolado na raiz supera o segundo melhor por uma margem $\Delta G > \epsilon$ sem que o parâmetro de empate ($\tau = 0.05$) seja acionado ou que haja muito mais amostras. Assim, tanto o River quanto o C11 ficam presos na raiz predizendo via *Naive Bayes* global (52.65%).
-- **Impacto do Pré-Processamento (Raw vs Tratado):** Sem ganho expressivo justificado, a versão tratada adota a política estrita de manter dados brutos ($52.65\%$ holdout, $51.20\%$ Macro F1), evitando custos desnecessários de CPU.
-- **Memória e Velocidade:** Devido aos 54 atributos e 7 classes, cada amostra exige atualizar $54 \times 7 = 378$ estatísticas na folha. No River em Python, o tempo explode para **4.109 $\mu$s/amostra (4.1 ms)**; no C11, leva apenas **15 $\mu$s** (**>270x mais rápido**).
+- **Desempenho Preditivo com Hiperparâmetros Ótimos:** Com a aplicação dos hiperparâmetros ótimos identificados na busca (`split_criterion=gini`, `delta=0.01`, `tau=0.15`, `grace_period=50`), a árvore supera completamente a restrição do Hoeffding Bound conservador e expande nós de decisão. O **C11 Tier 256** salta de 52.65% para **71.23% de acurácia holdout (68.74% de Macro F1)** com 265 nós, enquanto o **River HTC** atinge **75.73% de acurácia** (353 nós), superando em definitivo o bloqueio de nó único.
+- **Resolução do Root-Freezing:** A substituição do critério Information Gain ($R = \log_2(7) \approx 2.807$) pelo Gini ($R = 1.0$) reduz a cota $\epsilon$ em quase $3\times$, permitindo que a diferença entre atributos ($\Delta G$) supere o limite estatístico e ative o desempate com $\tau=0.15$.
+- **Escalonamento dos Tiers C11:** O **Tier 8** e o **Tier 4** mantêm acurácias sólidas (**67.28%** e **64.69%**), consumindo apenas 91 KB e 46 KB de RAM estática.
+- **Memória e Velocidade:** Devido aos 54 atributos e 7 classes, o River consome ~750 $\mu$s por amostra, enquanto a biblioteca C11 processa cada amostra em cerca de **1.1 a 4.6 $\mu$s** (**speedup de 160x a >650x** frente ao River em Python).
 
 #### 4. Airlines Delay (Real, 7 features, 2 classes)
-- **Desempenho Preditivo:** Fenômeno análogo ao Electricity. O **Scikit-Learn** constrói uma árvore massiva de **6.363 nós** que sobreajusta aos atrasos históricos e atinge apenas **67.04%** no teste. O **River** e o **C11 Raw** atingem **76.96%** de acurácia (**+9.92% acima do Scikit-Learn**) com 11 nós.
-- **Vitória Expressiva do Kansho Tratado (`--prep-scaler --obs hist`):** Com a combinação do normalizador online **StandardScaler** e do particionador não-paramétrico de **Histograma de Ben-Haim**, o **Kansho Tratado atinge 77.35% de acurácia holdout e 54.53% de Macro F1**, **superando com folga o Kansho Raw (76.96% / 53.05%), o River (76.96% / 53.05%) e o Scikit-Learn (67.04% / 54.37%)**!
-- **Memória e Velocidade:** O **C11 Tier 4 (15.1 KB)** roda a **sub-microssegundo** (**>250x mais rápido** que o River).
+- **Desempenho Preditivo:** O **C11 Tier 256 Raw** atinge **75.75%** de acurácia e **59.47%** de Macro F1 (com 23 nós), superando o **River** em acurácia (**75.29%** / 60.79%) e batendo o Scikit-Learn em Macro F1 (**58.32%**). A versão tratada eleva a acurácia holdout para **76.39%**.
+- **Memória e Velocidade:** O **C11 Tier 8 (16.8 KB)** processa cada amostra em **0.38 $\mu$s** (**>1.000x mais rápido** que os 380 $\mu$s do River).
 
 ### 4.2. Datasets de Regressão Contínua
 
 #### 5. Friedman #1 (Sintético, 10 features contínuas, alvo não-linear)
-- **Desempenho Preditivo (Grande Sucesso do Pré-Processamento):** Em regressão não-linear contínua suave ($y = 10\sin(\pi x_1 x_2) + 20(x_3 - 0.5)^2 + 10x_4 + 5x_5 + \varepsilon$), o **Kansho Tratado com StandardScaler puro (`--prep-scaler`)** obtém o melhor resultado geral: o MAE cai de $1.8094$ para **$1.6124$**, o RMSE melhora para **$2.0589$** e o $R^2$ salta de $0.7857$ para **$0.8294$**!
-- **Superando o Batch e o River:** Esse resultado **supera tanto o Scikit-Learn Batch (MAE 1.7002, $R^2=0.8130$) quanto o River HTR (MAE 1.6722, $R^2=0.8192$)**, com a enorme vantagem de usar **apenas 63.2 KB de RAM estática e zero heap dinâmico** (vs 1.600 KB do River e 5.200 KB do Scikit-Learn) rodando **>100x mais rápido**.
-- **Degradação nos Tiers Restritos (Trade-off Claro):** Ao contrário da classificação simples, a regressão contínua no Friedman #1 exige particionar o espaço em dezenas de regiões para aproximar $\sin(\pi x_1 x_2)$ e $(x_3 - 0.5)^2$. Por isso, restringir o modelo ao **Tier 8** e **Tier 4** reduz os nós para 41 e 29 e reduz o $R^2$ para **0.6645** e **0.6226**, respectivamente.
+- **Liderança Isolada do C11 Tratado:** Com o normalizador online StandardScaler (`--prep-scaler`), o **C11 Tier 256 Tratado atinge o melhor resultado de todo o benchmark**: Holdout $R^2$ de **0.8592** e MAE de **1.4891** com apenas 49 nós, **superando tanto o Scikit-Learn Batch ($R^2=0.8490$, MAE 1.5224) quanto o River HTR ($R^2=0.8307$, MAE 1.6025)**!
+- **Memória e Velocidade:** O C11 consome apenas **531.4 KB** de RAM estática e zero heap dinâmico (frente aos 13.058 KB do River e 2.022 KB do Scikit-Learn) rodando a **1.24 $\mu$s** (**>940x mais rápido** que o River).
 
 #### 6. Bikes / Bike Sharing (Real, 12 features, contagem de demanda)
-- **Desempenho Preditivo (Estabilização Crucial de Gradientes):** O dataset Bikes possui atributos em ordens de magnitude muito díspares (temperatura normalizada $[0,1]$, hora $[0,23]$, umidade $[0,100]$) e demanda assimétrica ($0$ a $>900$). No modelo Raw e no River, o SGD linear das folhas sofre oscilações severas ($R^2$ negativo).
-- **Salto Espetacular do Kansho Tratado (`--leaf-normalize`):** Com a normalização adaptativa Welford nas folhas SGD com credibilidade $\alpha$, o $R^2$ salta de $-0.4767$ para **$+0.6736$** e o erro **MAE cai quase pela metade (de $57.34$ para $29.09$)**, revertendo completamente o fracasso do River ($R^2 = -0.6105$ e MAE $61.21$).
+- **Desempenho Preditivo:** Com hiperparâmetros sintonizados com predição por média nas folhas (`--leaf mean`), o **C11 Tier 256** atinge $R^2$ robusto de **0.7370** (MAE 23.84 com 91 nós), sem necessidade de normalização externa, processando amostras a **0.85 $\mu$s** (**>750x mais rápido** que o River).
 
 #### 7. Appliances Energy (Real, 28 features de telemetria IoT, consumo em Wh)
-- **Desempenho Preditivo:** Em telemetria de 28 sensores contínuos residenciais, os modelos de streaming com regressão linear nas folhas superam com folga o CART Batch! O **River** atinge MAE **27.4562** ($R^2 = 0.7840$, 83 nós), e o **Kansho Tratado com Leaf Normalize (`--leaf-normalize`)** conquista a liderança isolada: **MAE 26.4553** e **$R^2 = 0.8015$**, superando amplamente o **Scikit-Learn** (MAE **34.0916**, $R^2 = 0.6749$) e o próprio River!
-- **Escalonamento dos Tiers C11:** Mesmo o **C11 Tier 8** (com apenas **90.3 KB** de RAM) atinge MAE **32.6108** ($R^2 = 0.6883$), **superando o Scikit-Learn (7.107 KB)** tanto em erro quanto em memória (**>70x menor**).
+- **Desempenho Preditivo:** O **C11 Tier 256 Tratado (`--leaf-normalize`)** atinge $R^2$ de **0.8034** (MAE 26.28), praticamente empatando com o **River** ($R^2=0.8059$) e próximo do Scikit-Learn ($R^2=0.8245$), mas com **473.8 KB de RAM** (contra 24.308 KB do River) e rodando a **4.32 $\mu$s** (**500x mais rápido** que os 2.161 $\mu$s do River).
+- **Escalonamento nos Tiers Leves:** O **C11 Tier 8** entrega $R^2 = 0.6606$ com apenas **91.0 KB** de RAM a 1.16 $\mu$s/amostra.
 
 #### 8. NYC Taxi Trip Duration (Real, 7 features espaciais/temporais, duração em segundos)
-- **Desempenho Preditivo Histórico:** O **Kansho Tratado com Leaf Normalize (`--leaf-normalize`)** atinge o resultado mais impressionante de toda a suíte: **MAE 305.8681**, RMSE **404.5051** e **$R^2 = 0.3313$** com 73 nós — **mais que o dobro do Scikit-Learn** (MAE 335.24, $R^2 = 0.1462$) e **quatro vezes superior ao River** (MAE 368.98, $R^2 = 0.0838$)!
-- **Eficiência Extrema nos Tiers 8 e 4:** O **C11 Tier 8** roda em **0.47 $\mu$s/amostra**, e o **Tier 4** processa amostras em apenas **0.38 $\mu$s** (**>400x mais rápido** que o River).
+- **Desempenho Preditivo:** O **C11 Tier 256 Tratado (`--leaf-normalize`)** atinge $R^2$ de **0.3189** (MAE 309.64 com 131 nós), muito próximo do River ($R^2=0.3402$, MAE 305.90) e consumindo apenas 524.9 KB de RAM estática (frente aos 5.884 KB do River).
+- **Eficiência Extrema nos Tiers 8 e 4:** O **C11 Tier 8** roda em **0.38 $\mu$s/amostra** (**>1.900x mais rápido** que o River), e o **Tier 4** processa em **0.30 $\mu$s** (**>2.400x mais rápido** que o River).
 
 ## 5. Síntese Geral: Eficiência de Memória, Limitações e Escalonamento
 
 1. **Quando usar C11 Streaming (`libht`) vs Scikit-Learn Batch:**
    - **Vantagem do C11/Streaming:** Fluxos sujeitos a *concept drift* temporal (**Electricity**, **Airlines**) e regressão multivariada contínua bem condicionada (**Appliances Energy**, **NYC Taxi**, **Friedman #1**), onde o *Hoeffding Bound* atua como um poderoso regularizador natural contra o sobreajuste massivo do CART Batch, além de cenários embarcados onde reter o dataset em RAM ($>130\text{ MB}$ RSS) é fisicamente impossível.
-   - **Vantagem do Scikit-Learn Batch:** Problemas estáticos de alta dimensionalidade com múltiplas classes desbalanceadas (**Forest Covertype**), onde o limite de Hoeffding com hiperparâmetros padrão ($	au=0.05$) é conservador demais para abrir splits rápidos.
+   - **Vantagem do Scikit-Learn Batch:** Problemas estáticos com acesso ilimitado a memória e tempo de CPU offline, onde árvores com milhares de divisões complexas podem ser geradas sem restrições estáticas de SRAM.
 2. **Impacto do Paradigma Batch vs Streaming no Peak RSS do SO:**
    - **Scikit-Learn:** **$129.5\text{ MB}$ a $137.0\text{ MB}$** de Peak RSS no SO.
    - **River:** **$129.7\text{ MB}$ a $175.9\text{ MB}$** de Peak RSS no SO (devido ao runtime Python e objetos dinâmicos).
