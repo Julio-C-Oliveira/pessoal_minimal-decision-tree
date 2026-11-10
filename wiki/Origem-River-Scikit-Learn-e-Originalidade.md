@@ -303,7 +303,7 @@ flowchart TD
 
 ## 7. Licenciamento e Conformidade de Direitos Autorais
 
-O **kansho** é distribuído sob a licença de código aberto permissiva **[BSD 3-Clause License](../LICENSE)** (`SPDX-License-Identifier: BSD-3-Clause`).
+O **kansho** é distribuído sob a licença de código aberto **[Mozilla Public License 2.0 (MPL 2.0)](../LICENSE)** (`SPDX-License-Identifier: MPL-2.0`).
 
 Em total conformidade com as boas práticas de engenharia de software e os termos legais das bibliotecas que serviram de estudo e inspiração, o arquivo de licença deste repositório preserva e reconhece integralmente os avisos de direitos autorais originais dos projetos de referência:
 - **River:** [BSD 3-Clause License](../references/river_tree/LICENSE), Copyright (c) 2020-presente, online-ml developers.
