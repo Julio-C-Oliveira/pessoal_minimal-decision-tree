@@ -90,6 +90,10 @@ static void print_usage(const char *prog_name) {
     fprintf(stderr, "  --drift-window-threshold <N>      Min observations before switch (default: 300)\n");
     fprintf(stderr, "  --switch-significance <S>         Switch significance alpha (default: 0.05)\n");
     fprintf(stderr, "  --adwin-delta <D>                 ADWIN detector delta (default: 0.002)\n");
+    fprintf(stderr, "  --obs <gaussian|hist|histogram>   Numeric split observer type (default: gaussian)\n");
+    fprintf(stderr, "  --leaf-normalize                  Enable SGD hybrid normalization in regression leaves\n");
+    fprintf(stderr, "  --prep-scaler                     Attach online StandardScaler to tree\n");
+    fprintf(stderr, "  --prep-hampel, --filter-hampel    Attach online Hampel filter to tree\n");
 }
 
 static long get_peak_rss_kb(void) {
@@ -214,7 +218,7 @@ int main(int argc, char *argv[]) {
             }
         } else if (strcmp(argv[i], "--leaf-normalize") == 0) {
             leaf_sgd_normalize = true;
-        } else if (strcmp(argv[i], "--prep-hampel") == 0) {
+        } else if (strcmp(argv[i], "--prep-hampel") == 0 || strcmp(argv[i], "--filter-hampel") == 0) {
             use_prep_pipeline = true;
             prep_hampel_all = true;
         } else if (strcmp(argv[i], "--prep-scaler") == 0) {
