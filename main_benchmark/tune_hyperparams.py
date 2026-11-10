@@ -61,6 +61,7 @@ TIER_MAP = {
     4: (4, 64),
     8: (8, 128),
     16: (16, 256),
+    40: (40, 1024),
     64: (64, 1024),
     128: (128, 2048),
     256: (256, 4096),
@@ -89,6 +90,39 @@ def resolve_executable(bin_name: str) -> str:
 # ==============================================================================
 # C11 On-Demand Binary Compilation & Cache
 # ==============================================================================
+
+def calculate_safe_capacity(tier: int, slots: int, is_high_dim: bool) -> Tuple[int, int]:
+    """
+    Computes exact safe leaf and node capacities, strictly enforcing the <= 1 MB SRAM
+    budget under any feature, class, or regression slot configuration before compilation.
+    """
+    max_features = 64 if is_high_dim else 16
+    max_classes = 8 if is_high_dim else 4
+
+    # Node size estimate: 28B in float32 for default; ~48B for 8 classes
+    node_size = (max_classes * 4) + 16
+
+    # Leaf stats size estimate:
+    # Observers: max_features * max(max_classes * 20, slots * 16, 80)
+    obs_size = max(max_classes * 20, slots * 16, 80)
+    leaf_size = 16 + (max_features * 4) + (max_features * obs_size)
+
+    leaves, nodes = TIER_MAP.get(tier, (tier, tier * 16))
+    if is_high_dim and tier > 16:
+        leaves = 40
+        nodes = 1024
+
+    # Memory pool size estimate (node_pool + stats_pool + free lists + state):
+    total_bytes = (nodes * (node_size + 2)) + (leaves * (leaf_size + 2)) + 64
+
+    # Safety clamp ensuring pool never exceeds 980 KB:
+    while total_bytes > (980 * 1024) and leaves > 4:
+        leaves = max(4, int(leaves * 0.8))
+        nodes = max(64, leaves * 16)
+        total_bytes = (nodes * (node_size + 2)) + (leaves * (leaf_size + 2)) + 64
+
+    return leaves, nodes
+
 
 def ensure_c11_binary(tier: int, slots: int, is_high_dim: bool) -> str:
     """
@@ -126,8 +160,7 @@ def ensure_c11_binary(tier: int, slots: int, is_high_dim: bool) -> str:
         if needs_compile:
             print(f"    [Compiling C11 binary: {bin_name}]...", end="", flush=True)
             
-            # Use TIER_MAP, default to 40/1024 for unknown tiers if necessary, or error
-            leaves, nodes = TIER_MAP.get(tier, (40, 1024))
+            leaves, nodes = calculate_safe_capacity(tier, slots, is_high_dim)
 
             macros = [
                 f"-DHT_MAX_ACTIVE_LEAVES={leaves}",
@@ -432,12 +465,14 @@ def run_trial_sklearn(
 # Hyperparameter Search Space Builders
 # ==============================================================================
 
-def get_c11_space(task: str) -> Dict[str, List[Any]]:
+def get_c11_space(task: str, is_high_dim: bool = False) -> Dict[str, List[Any]]:
+    # In dense datasets, max physical active leaves is 40 to guarantee <= 1 MB SRAM
+    tiers = [4, 8, 16, 40] if is_high_dim else [4, 8, 16, 64, 128, 256]
     space: Dict[str, List[Any]] = {
         "grace_period": [50, 100, 200, 400],
         "delta": [1e-2, 1e-3, 1e-4, 1e-7],
         "tau": [0.01, 0.05, 0.10, 0.15],
-        "tier": [4, 8, 16, 64, 128, 256],
+        "tier": tiers,
         "prep_scaler": [None, "standard"],
         "obs_splitter": ["gaussian", "histogram"],
         "filter_hampel": [False, True],
@@ -450,6 +485,169 @@ def get_c11_space(task: str) -> Dict[str, List[Any]]:
         space["reg_num_slots"] = [8, 16, 32]
         space["leaf_normalize"] = [False, True]
     return space
+
+
+def get_canonical_seeds(task: str, tier: int) -> List[Dict[str, Any]]:
+    """
+    Returns 4 proven canonical configurations guaranteed to be evaluated
+    in each tier, preventing stochastic omission of global/hardware optima.
+    """
+    if task == "classification":
+        return [
+            # Seed 1: Sweet-spot padrão (base ESP32 no SEA)
+            {
+                "tier": tier,
+                "grace_period": 100,
+                "delta": 0.01,
+                "tau": 0.10,
+                "split_criterion": "info_gain",
+                "leaf_prediction": "nba",
+                "prep_scaler": None,
+                "obs_splitter": "gaussian",
+                "filter_hampel": False,
+            },
+            # Seed 2: Multiclasse ágil (base Covertype / Airlines)
+            {
+                "tier": tier,
+                "grace_period": 50,
+                "delta": 0.001,
+                "tau": 0.10,
+                "split_criterion": "gini",
+                "leaf_prediction": "nba",
+                "prep_scaler": None,
+                "obs_splitter": "gaussian",
+                "filter_hampel": False,
+            },
+            # Seed 3: Alta evidência estatística com pré-processamento online
+            {
+                "tier": tier,
+                "grace_period": 200,
+                "delta": 1e-4,
+                "tau": 0.05,
+                "split_criterion": "info_gain",
+                "leaf_prediction": "nba",
+                "prep_scaler": "standard",
+                "obs_splitter": "histogram",
+                "filter_hampel": False,
+            },
+            # Seed 4: Conservador de baixa variância
+            {
+                "tier": tier,
+                "grace_period": 400,
+                "delta": 0.01,
+                "tau": 0.10,
+                "split_criterion": "gini",
+                "leaf_prediction": "mc",
+                "prep_scaler": None,
+                "obs_splitter": "gaussian",
+                "filter_hampel": False,
+            },
+        ]
+    else:
+        return [
+            # Seed 1: SGD Linear com Scaler (base Friedman)
+            {
+                "tier": tier,
+                "grace_period": 200,
+                "delta": 1e-7,
+                "tau": 0.01,
+                "leaf_prediction": "model",
+                "reg_num_slots": 16,
+                "leaf_normalize": False,
+                "prep_scaler": "standard",
+                "obs_splitter": "gaussian",
+                "filter_hampel": False,
+            },
+            # Seed 2: Adaptativo com Normalização Híbrida (base Appliances)
+            {
+                "tier": tier,
+                "grace_period": 100,
+                "delta": 1e-7,
+                "tau": 0.01,
+                "leaf_prediction": "adaptive",
+                "reg_num_slots": 16,
+                "leaf_normalize": True,
+                "prep_scaler": None,
+                "obs_splitter": "gaussian",
+                "filter_hampel": False,
+            },
+            # Seed 3: Média simples zero SGD (base Bikes)
+            {
+                "tier": tier,
+                "grace_period": 200,
+                "delta": 0.01,
+                "tau": 0.10,
+                "leaf_prediction": "mean",
+                "reg_num_slots": 8,
+                "leaf_normalize": False,
+                "prep_scaler": None,
+                "obs_splitter": "gaussian",
+                "filter_hampel": False,
+            },
+            # Seed 4: Alta resolução contínua (32 slots + Scaler + Histograma)
+            {
+                "tier": tier,
+                "grace_period": 100,
+                "delta": 1e-4,
+                "tau": 0.15,
+                "leaf_prediction": "adaptive",
+                "reg_num_slots": 32,
+                "leaf_normalize": True,
+                "prep_scaler": "standard",
+                "obs_splitter": "histogram",
+                "filter_hampel": False,
+            },
+        ]
+
+
+def sample_stratified_c11_space(
+    task: str,
+    is_high_dim: bool,
+    trials_per_tier: int,
+    seed: int = 42,
+) -> List[Dict[str, Any]]:
+    """
+    Samples configurations stratified per tier:
+    1. Injects the 4 canonical seeds for each tier.
+    2. Samples remaining (trials_per_tier - 4) exploratory configurations uniformly.
+    """
+    space = get_c11_space(task, is_high_dim)
+    tiers = space["tier"]
+    all_configs: List[Dict[str, Any]] = []
+    rng = random.Random(seed)
+    param_keys = [k for k in space.keys() if k != "tier"]
+
+    for tier in tiers:
+        tier_configs: List[Dict[str, Any]] = []
+        seen = set()
+
+        # 1. Inject canonical seeds
+        canonical_seeds = get_canonical_seeds(task, tier)
+        for seed_cfg in canonical_seeds:
+            cfg = dict(seed_cfg)
+            key_tuple = tuple((k, str(cfg[k])) for k in sorted(cfg.keys()))
+            if key_tuple not in seen:
+                seen.add(key_tuple)
+                tier_configs.append(cfg)
+                if len(tier_configs) >= trials_per_tier:
+                    break
+
+        # 2. Sample exploratory trials for this tier
+        max_attempts = trials_per_tier * 50
+        attempts = 0
+        while len(tier_configs) < trials_per_tier and attempts < max_attempts:
+            attempts += 1
+            cfg = {"tier": tier}
+            for k in param_keys:
+                cfg[k] = rng.choice(space[k])
+            key_tuple = tuple((k, str(cfg[k])) for k in sorted(cfg.keys()))
+            if key_tuple not in seen:
+                seen.add(key_tuple)
+                tier_configs.append(cfg)
+
+        all_configs.extend(tier_configs)
+
+    return all_configs
 
 
 def get_river_space(task: str) -> Dict[str, List[Any]]:
@@ -757,6 +955,7 @@ def run_tuning_suite(
     is_grid: bool,
     seed: int,
     jobs: int,
+    trials_per_tier: int = 30,
 ):
     # Pre-calculate total planned trials across datasets and engines
     active_datasets = [
@@ -764,13 +963,18 @@ def run_tuning_suite(
         if not selected_datasets or "all" in selected_datasets or d[0] in selected_datasets
     ]
     total_planned_trials = 0
-    for _, _, task, _, _ in active_datasets:
+    for _, _, task, _, is_high_dim in active_datasets:
+        if is_grid:
+            n_c11 = len(sample_hyperparameters(get_c11_space(task, is_high_dim), n_iter, is_grid, seed))
+        else:
+            n_c11 = len(sample_stratified_c11_space(task, is_high_dim, trials_per_tier, seed))
+
         if "c11" in selected_engines or "all" in selected_engines:
-            total_planned_trials += len(sample_hyperparameters(get_c11_space(task), n_iter, is_grid, seed))
+            total_planned_trials += n_c11
         if "river" in selected_engines or "all" in selected_engines:
-            total_planned_trials += len(sample_hyperparameters(get_river_space(task), n_iter, is_grid, seed))
+            total_planned_trials += len(sample_hyperparameters(get_river_space(task), n_c11, is_grid, seed))
         if "sklearn" in selected_engines or "all" in selected_engines:
-            total_planned_trials += len(sample_hyperparameters(get_sklearn_space(task), n_iter, is_grid, seed))
+            total_planned_trials += len(sample_hyperparameters(get_sklearn_space(task), n_c11, is_grid, seed))
 
     tracker = ProgressTracker(total_planned_trials)
 
@@ -778,7 +982,7 @@ def run_tuning_suite(
     print(" HYPERPARAMETER TUNING & SENSITIVITY ANALYSIS SUITE")
     print(f" Datasets:     {', '.join(selected_datasets)} ({len(active_datasets)} selecionados)")
     print(f" Engines:      {', '.join(selected_engines)}")
-    print(f" Mode:         {'Cartesian Grid Search' if is_grid else f'Random Search ({n_iter} iterations)'}")
+    print(f" Mode:         {'Cartesian Grid Search' if is_grid else f'Stratified Search ({trials_per_tier} trials/tier)'}")
     print(f" Parallelism:  {jobs} job(s) / núcleo(s)")
     print(f" Total Trials: {total_planned_trials} ensaios planejados")
     print(f" Report Dest:  {output_report}")
@@ -807,9 +1011,12 @@ def run_tuning_suite(
         dataset_trials: List[Dict[str, Any]] = []
 
         # 1. C11 libht
+        if is_grid:
+            c11_configs = sample_hyperparameters(get_c11_space(task, is_high_dim), n_iter, is_grid, seed)
+        else:
+            c11_configs = sample_stratified_c11_space(task, is_high_dim, trials_per_tier, seed)
+
         if "c11" in selected_engines or "all" in selected_engines:
-            c11_space = get_c11_space(task)
-            c11_configs = sample_hyperparameters(c11_space, n_iter, is_grid, seed)
             print(f"  [1/3] Iniciando C11 libht ({len(c11_configs)} ensaios, {jobs} workers)...")
             c11_trials = run_engine_trials(
                 "c11",
@@ -822,10 +1029,12 @@ def run_tuning_suite(
             )
             dataset_trials.extend(c11_trials)
 
+        n_engine_trials = len(c11_configs)
+
         # 2. River
         if "river" in selected_engines or "all" in selected_engines:
             river_space = get_river_space(task)
-            river_configs = sample_hyperparameters(river_space, n_iter, is_grid, seed)
+            river_configs = sample_hyperparameters(river_space, n_engine_trials, is_grid, seed)
             print(f"  [2/3] Iniciando River ({len(river_configs)} ensaios, {jobs} workers)...")
             river_trials = run_engine_trials(
                 "river",
@@ -841,7 +1050,7 @@ def run_tuning_suite(
         # 3. Scikit-Learn
         if "sklearn" in selected_engines or "all" in selected_engines:
             sklearn_space = get_sklearn_space(task)
-            sklearn_configs = sample_hyperparameters(sklearn_space, n_iter, is_grid, seed)
+            sklearn_configs = sample_hyperparameters(sklearn_space, n_engine_trials, is_grid, seed)
             print(f"  [3/3] Iniciando Scikit-Learn ({len(sklearn_configs)} ensaios, {jobs} workers)...")
             sklearn_trials = run_engine_trials(
                 "sklearn",
@@ -874,7 +1083,8 @@ def main():
     parser.add_argument("--json", default=os.path.join(os.path.dirname(__file__), "hyperparam_results.json"))
     parser.add_argument("--dataset", default="all", help="Dataset(s) to run (e.g. 'all' or 'sea,friedman').")
     parser.add_argument("--engine", default="all", help="Engines to run ('all' or 'c11,river,sklearn').")
-    parser.add_argument("--n-iter", type=int, default=30, help="Number of random search iterations per engine.")
+    parser.add_argument("--trials-per-tier", type=int, default=30, help="Number of trials per memory tier in C11 (default: 30).")
+    parser.add_argument("--n-iter", type=int, default=30, help="Number of random search iterations per engine (legacy fallback).")
     parser.add_argument("--grid", action="store_true", help="Perform full exhaustive grid search.")
     parser.add_argument("--jobs", type=int, default=12, help="Number of parallel jobs.")
     
@@ -893,6 +1103,7 @@ def main():
         args.grid,
         42,
         args.jobs,
+        args.trials_per_tier,
     )
 
 
