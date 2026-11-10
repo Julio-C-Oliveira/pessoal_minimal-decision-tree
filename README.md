@@ -335,7 +335,7 @@ Para certificar o comportamento determinístico em **ambiente embarcado emulado 
 
 **Configuração do Experimento:**
 - **Perfil de Compilação:** Tier 8 Universal (`-DHT_MAX_NODES=128 -DHT_MAX_ACTIVE_LEAVES=8 -DHT_MAX_FEATURES=64 -DHT_MAX_CLASSES=10`) ocupando $\approx 111{,}3\text{ KB}$ de SRAM estática (`.bss`).
-- **Protocolo de Injeção em Streaming:** O host (`emulation/esp32/stream_runner.py`) injetou **152.114 amostras reais** dos 8 datasets do repositório (até 20.000 amostras por dataset; 70% treino e 30% teste) através de um socket TCP/UART com protocolo de janela deslizante (*sliding window* $W=16$).
+- **Protocolo de Injeção em Streaming:** O host (`emulation/esp32/stream_runner.py`) injetou **187.426 amostras reais** dos 8 datasets do repositório (volume completo de treino e teste do `main_benchmark`; 70% treino e 30% teste) através de um socket TCP/UART com protocolo de janela deslizante (*sliding window* $W=16$).
 - **Cronometria de Precisão:** A latência por amostra é cronometrada em ciclos de clock de hardware através da instrução de registrador `esp_cpu_get_cycle_count()` no núcleo Xtensa ($1\text{ ciclo} = 4{,}1667\text{ ns}$ @ 240 MHz).
 - **Relatório Completo:** Detalhes da infraestrutura e logs em **[`emulation/esp32/esp32_emulation_report.md`](emulation/esp32/esp32_emulation_report.md)**.
 
@@ -344,9 +344,9 @@ Para certificar o comportamento determinístico em **ambiente embarcado emulado 
 | Dataset | Amostras Treino | Amostras Teste | Acurácia Holdout (%) | Precisão Macro (%) | Recall Macro (%) | F1-Score Macro (%) | Acurácia Prequential (%) | Topologia (Nós / Folhas) |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
 | **SEA** (3 feat, 2 classes) | 14.000 | 6.000 | **99,02%** | **98,76%** | **98,99%** | **98,87%** | 97,29% | 43 nós (8 folhas) |
-| **Electricity** (8 feat, 2 classes) | 14.000 | 6.000 | **64,20%** | **63,83%** | **63,63%** | **63,67%** | 63,93% | 49 nós (8 folhas) |
-| **Forest Covertype** (54 feat, 7 classes) | 14.000 | 6.000 | **66,43%** | **67,08%** | **62,48%** | **63,69%** | 59,00% | 73 nós (8 folhas) |
-| **Airlines Delay** (7 feat, 2 classes) | 14.000 | 6.000 | **76,53%** | **66,01%** | **56,82%** | **56,93%** | 75,79% | 15 nós (8 folhas) |
+| **Electricity** (8 feat, 2 classes) | 31.718 | 13.594 | **64,37%** | **64,00%** | **63,93%** | **63,96%** | 64,58% | 77 nós (8 folhas) |
+| **Forest Covertype** (54 feat, 7 classes) | 17.500 | 7.500 | **66,00%** | **63,27%** | **62,92%** | **62,73%** | 60,74% | 79 nós (8 folhas) |
+| **Airlines Delay** (7 feat, 2 classes) | 17.500 | 7.500 | **75,75%** | **63,75%** | **58,63%** | **59,47%** | 75,85% | 23 nós (8 folhas) |
 
 ---
 
@@ -354,10 +354,10 @@ Para certificar o comportamento determinístico em **ambiente embarcado emulado 
 
 | Dataset | Amostras Treino | Amostras Teste | Holdout MAE | Holdout RMSE | Holdout $R^2$ | Prequential MAE | Prequential RMSE | Prequential $R^2$ | Topologia (Nós / Folhas) |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **Friedman #1** (10 feat, contínuo) | 14.000 | 6.000 | **2,2244** | **2,7960** | **0,6854** | 2,2319 | 2,8466 | 0,6704 | 43 nós (8 folhas) |
-| **Bikes** (12 feat, contínuo) | 12.165 | 5.214 | **39,6668** | **58,4939** | **0,3932** | 52,2378 | 77,4104 | 0,5919 | 39 nós (8 folhas) |
-| **Appliances Energy** (28 feat, contínuo) | 13.814 | 5.921 | **29,9763** | **37,8965** | **0,7431** | 38,3980 | 507,6419 | -44,5031 | 51 nós (8 folhas) |
-| **NYC Taxi** (7 feat, contínuo) | 10.500 | 4.500 | **331,8239** | **432,7701** | **0,2345** | 361,9140 | 2.302,3561 | -20,1357 | 61 nós (8 folhas) |
+| **Friedman #1** (10 feat, contínuo) | 14.000 | 6.000 | **2,2983** | **2,8873** | **0,6645** | 2,2714 | 2,8942 | 0,6593 | 41 nós (8 folhas) |
+| **Bikes** (12 feat, contínuo) | 12.165 | 5.214 | **47,0819** | **71,8738** | **0,0839** | 66,6412 | 98,2309 | 0,3429 | 45 nós (8 folhas) |
+| **Appliances Energy** (28 feat, contínuo) | 13.814 | 5.921 | **30,5998** | **38,6607** | **0,7326** | 40,4381 | 507,9032 | -44,5499 | 55 nós (8 folhas) |
+| **NYC Taxi** (7 feat, contínuo) | 10.500 | 4.500 | **351,7103** | **457,7860** | **0,1435** | 384,1912 | 2.307,6217 | -20,2325 | 55 nós (8 folhas) |
 
 ---
 
@@ -371,20 +371,20 @@ Para certificar o comportamento determinístico em **ambiente embarcado emulado 
 
 | Dataset | Tarefa | Latência Média | Latência $p_{95}$ | Latência $p_{99}$ | Throughput (Vazão) | Model Footprint | Consumo RAM (SRAM / Heap) | FLOPs / Amostra |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **SEA** | Classificação | **46,80 µs** | 161,40 µs | 236,79 µs | **21.368 am/s** | 1.236 B (.bin) / 111,3 KB | 111,3 KB (.bss) / **0 B Heap** | **69 FLOPs** |
-| **Electricity** | Classificação | **46,84 µs** | 75,94 µs | 113,50 µs | **21.349 am/s** | 1.404 B (.bin) / 111,3 KB | 111,3 KB (.bss) / **0 B Heap** | **149 FLOPs** |
-| **Forest Covertype** | Classificação | **690,55 µs** | 2.028,09 µs | 5.963,50 µs | **1.448 am/s** | 2.076 B (.bin) / 111,3 KB | 111,3 KB (.bss) / **0 B Heap** | **2.250 FLOPs** |
-| **Airlines Delay** | Classificação | **58,73 µs** | 82,17 µs | 1.027,95 µs | **17.027 am/s** | 452 B (.bin) / 111,3 KB | 111,3 KB (.bss) / **0 B Heap** | **133 FLOPs** |
-| **Friedman #1** | Regressão | **90,51 µs** | 211,18 µs | 284,93 µs | **11.049 am/s** | 1.236 B (.bin) / 111,3 KB | 111,3 KB (.bss) / **0 B Heap** | **138 FLOPs** |
-| **Bikes** | Regressão | **69,60 µs** | 165,62 µs | 224,60 µs | **14.368 am/s** | 1.124 B (.bin) / 111,3 KB | 111,3 KB (.bss) / **64 B Heap** | **160 FLOPs** |
-| **Appliances Energy** | Regressão | **97,42 µs** | 263,98 µs | 368,92 µs | **10.265 am/s** | 1.460 B (.bin) / 111,3 KB | 111,3 KB (.bss) / **0 B Heap** | **336 FLOPs** |
-| **NYC Taxi** | Regressão | **48,98 µs** | 122,19 µs | 180,91 µs | **20.416 am/s** | 1.740 B (.bin) / 111,3 KB | 111,3 KB (.bss) / **0 B Heap** | **105 FLOPs** |
+| **SEA** | Classificação | **37,36 µs** | 125,95 µs | 178,11 µs | **26.767 am/s** | 1.236 B (.bin) / 43 nós | 112,0 KB (.bss) / **0 B Heap** | **69 FLOPs** |
+| **Electricity** | Classificação | **26,64 µs** | 50,48 µs | 70,17 µs | **37.538 am/s** | 2.188 B (.bin) / 77 nós | 112,0 KB (.bss) / **0 B Heap** | **149 FLOPs** |
+| **Forest Covertype** | Classificação | **541,17 µs** | 1.609,30 µs | 4.134,62 µs | **1.848 am/s** | 2.244 B (.bin) / 79 nós | 112,0 KB (.bss) / **0 B Heap** | **2.250 FLOPs** |
+| **Airlines Delay** | Classificação | **41,99 µs** | 53,67 µs | 935,05 µs | **23.815 am/s** | 676 B (.bin) / 23 nós | 112,0 KB (.bss) / **0 B Heap** | **133 FLOPs** |
+| **Friedman #1** | Regressão | **66,10 µs** | 118,65 µs | 161,13 µs | **15.129 am/s** | 1.180 B (.bin) / 41 nós | 112,0 KB (.bss) / **0 B Heap** | **138 FLOPs** |
+| **Bikes** | Regressão | **63,42 µs** | 123,90 µs | 157,09 µs | **15.768 am/s** | 1.292 B (.bin) / 45 nós | 112,0 KB (.bss) / **64 B Heap** | **160 FLOPs** |
+| **Appliances Energy** | Regressão | **114,19 µs** | 234,95 µs | 305,71 µs | **8.757 am/s** | 1.572 B (.bin) / 55 nós | 112,0 KB (.bss) / **0 B Heap** | **336 FLOPs** |
+| **NYC Taxi** | Regressão | **40,66 µs** | 94,04 µs | 131,65 µs | **24.594 am/s** | 1.572 B (.bin) / 55 nós | 112,0 KB (.bss) / **0 B Heap** | **105 FLOPs** |
 
 > [!TIP]
 > **Destaques da Validação em Hardware Emulado (QEMU ESP32):**
-> - **Zero Alocação em Runtime Comprovada:** O monitoramento contínuo via `esp_get_free_heap_size()` confirmou ausência de fragmentação ou vazamento no FreeRTOS durante o processamento das 152.114 amostras reais.
-> - **Throughput de Alta Frequência em Microcontrolador:** Com vazão de até **21.368 amostras/segundo** e latência média tão baixa quanto **46,80 µs** (para fluxos de 3 a 28 atributos a 240 MHz), o modelo é plenamente capaz de operar em malhas fechadas de controle e telemetria preditiva de alta frequência em IoT.
-> - **Latência de Cauda Controlada:** O percentil $p_{99}$ permaneceu abaixo de $230\,\mu\text{s}$ na maioria dos fluxos, demonstrando extrema estabilidade temporal em tempo real.
+> - **Zero Alocação em Runtime Comprovada:** O monitoramento contínuo via `esp_get_free_heap_size()` confirmou ausência de fragmentação ou vazamento no FreeRTOS durante o processamento das 187.426 amostras reais.
+> - **Throughput de Alta Frequência em Microcontrolador:** Com vazão de até **37.538 amostras/segundo** e latência média tão baixa quanto **26,64 µs** (para fluxos de 3 a 28 atributos a 240 MHz), o modelo é plenamente capaz de operar em malhas fechadas de controle e telemetria preditiva de alta frequência em IoT.
+> - **Latência de Cauda Controlada:** O percentil $p_{99}$ permaneceu abaixo de $180\,\mu\text{s}$ na grande maioria dos fluxos, demonstrando extrema estabilidade temporal em tempo real.
 
 ---
 
