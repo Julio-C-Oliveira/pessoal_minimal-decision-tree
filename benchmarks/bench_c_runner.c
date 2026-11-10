@@ -389,6 +389,9 @@ int main(int argc, char *argv[]) {
 
     const char *mode_str = (sizeof(ht_float_t) == 8) ? "float64 (double)" : "float32 (single)";
     size_t model_struct_bytes = sizeof(ht_tree_t) + (enable_hat ? sizeof(ht_adwin_pool_t) : 0);
+    if (use_prep_pipeline) {
+        model_struct_bytes += sizeof(ht_prep_pipeline_t);
+    }
 
     printf("====================================================================================\n");
     printf(" C11 Hoeffding Tree Prequential Benchmark Runner (%s, %s)\n",
@@ -508,6 +511,9 @@ int main(int argc, char *argv[]) {
             size_t bytes_used = ht_memory_bytes_used(&tree_instance.memory);
             if (enable_hat) {
                 bytes_used += ht_adwin_pool_bytes_used(&adwin_pool);
+            }
+            if (use_prep_pipeline) {
+                bytes_used += sizeof(ht_prep_pipeline_t);
             }
             double avg_us = total_elapsed_us / (double)sample_idx;
 
@@ -653,6 +659,9 @@ int main(int argc, char *argv[]) {
     size_t final_bytes = ht_memory_bytes_used(&tree_instance.memory);
     if (enable_hat) {
         final_bytes += ht_adwin_pool_bytes_used(&adwin_pool);
+    }
+    if (use_prep_pipeline) {
+        final_bytes += sizeof(ht_prep_pipeline_t);
     }
     double final_avg_us = (sample_idx > 0) ? (total_elapsed_us / (double)sample_idx) : 0.0;
 
