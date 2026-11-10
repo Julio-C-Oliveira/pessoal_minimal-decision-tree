@@ -566,7 +566,7 @@ def generate_markdown_report(report_path: str, results: List[Dict[str, Any]]):
 
         # Classification Table
         f.write("## 2. Resultados em Classificação (4 Datasets)\n\n")
-        f.write("| Dataset | Modelo / Tier | Holdout Acc (%) | Macro F1 (%) | Prequential Acc (%) | Total Nós | RAM Intra-Treino (Mod+Heap) | RSS Treino (MB) | RSS Teste (MB) | RSS Total (MB) | Tempo/amostra ($\\mu$s) | Speedup vs River |\n")
+        f.write("| Dataset | Modelo / Tier | Holdout Acc (%) | Macro F1 (%) | Prequential Acc (%) | Total Nós | RAM Intra-Treino (Mod+Heap) | RSS Treino (MB) | RSS Teste (MB) | RSS Total (MB) | Tempo/amostra (µs) | Speedup vs River |\n")
         f.write("| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |\n")
 
         for r in results:
@@ -601,7 +601,7 @@ def generate_markdown_report(report_path: str, results: List[Dict[str, Any]]):
                 tr_rss = f"{m['train_rss_mb']:.1f} MB"
                 te_rss = f"{m['test_rss_mb']:.1f} MB"
                 tot_rss = f"{m['peak_rss_mb']:.1f} MB"
-                time_s = f"{m['avg_us_per_sample']:.2f} $\\mu$s"
+                time_s = f"{m['avg_us_per_sample']:.2f} µs"
                 sp = m.get("speedup", "-")
                 sp_s = f"**{sp:.1f}x**" if isinstance(sp, float) else str(sp)
                 bold = "**" if key.startswith("c_") else ""
@@ -609,7 +609,7 @@ def generate_markdown_report(report_path: str, results: List[Dict[str, Any]]):
 
         # Regression Table
         f.write("\n## 3. Resultados em Regressão Contínua (4 Datasets)\n\n")
-        f.write("| Dataset | Modelo / Tier | Holdout MAE | Holdout RMSE | Holdout $R^2$ | Prequential MAE | Total Nós | RAM Intra-Treino (Mod+Heap) | RSS Treino (MB) | RSS Teste (MB) | RSS Total (MB) | Tempo/amostra ($\\mu$s) | Speedup vs River |\n")
+        f.write("| Dataset | Modelo / Tier | Holdout MAE | Holdout RMSE | Holdout $R^2$ | Prequential MAE | Total Nós | RAM Intra-Treino (Mod+Heap) | RSS Treino (MB) | RSS Teste (MB) | RSS Total (MB) | Tempo/amostra (µs) | Speedup vs River |\n")
         f.write("| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |\n")
 
         for r in results:
@@ -645,7 +645,7 @@ def generate_markdown_report(report_path: str, results: List[Dict[str, Any]]):
                 tr_rss = f"{m['train_rss_mb']:.1f} MB"
                 te_rss = f"{m['test_rss_mb']:.1f} MB"
                 tot_rss = f"{m['peak_rss_mb']:.1f} MB"
-                time_s = f"{m['avg_us_per_sample']:.2f} $\\mu$s"
+                time_s = f"{m['avg_us_per_sample']:.2f} µs"
                 sp = m.get("speedup", "-")
                 sp_s = f"**{sp:.1f}x**" if isinstance(sp, float) else str(sp)
                 bold = "**" if key.startswith("c_") else ""
@@ -656,37 +656,37 @@ def generate_markdown_report(report_path: str, results: List[Dict[str, Any]]):
         f.write("### 4.1. Datasets de Classificação\n\n")
         f.write("#### 1. SEA (Sintético, 3 features contínuas, 2 classes)\n")
         f.write("- **Desempenho Preditivo com Hiperparâmetros Ótimos:** Com a sintonia fina, o **C11 Tier 256** atinge a maior acurácia de todo o experimento (**99.32%** e **99.22%** de Macro F1 com 37 nós), superando tanto o **River HTC** (**99.22%**) quanto o **Scikit-Learn Batch** (**99.18%** com 133 nós). O **C11 Tier 8** atinge **99.02%** e o **Tier 4** atinge **98.07%**.\n")
-        f.write("- **Memória e Velocidade:** O **C11 Tier 8** entrega **99.02%** consumindo apenas **16.8 KB** de RAM estática (**>60x menor** que os 1.020 KB do Scikit-Learn e **>35x menor** que os 601 KB do River) e processa cada amostra a **0.28 $\\mu$s** (**>500x mais rápido** que o River).\n\n")
+        f.write("- **Memória e Velocidade:** O **C11 Tier 8** entrega **99.02%** consumindo apenas **16.8 KB** de RAM estática (**>60x menor** que os 1.020 KB do Scikit-Learn e **>35x menor** que os 601 KB do River) e processa cada amostra a **0.28 µs** (**>500x mais rápido** que o River).\n\n")
 
         f.write("#### 2. Electricity / Elec2 (Real, 8 features contínuas, 2 classes)\n")
         f.write("- **Desempenho Preditivo:** O modelo streaming supera consistentemente o CART Batch. O **C11 Tier 8** atinge a maior acurácia (**64.37%** holdout e **63.96%** Macro F1 com 79 nós), superando o **River** (**64.23%**) e o **Scikit-Learn** (**64.03%** com 103 nós). O C11 Tier 256 e o Tier 4 também mantêm mais de 64% de acurácia.\n")
-        f.write("- **Memória e Velocidade:** O **C11 Tier 8 (16.8 KB)** processa a **0.26 $\\mu$s/amostra** (**>2.500x mais rápido** que o River em Python, que leva 681 $\\mu$s, e usando **>160x menos RAM** que os 2.760 KB do Scikit-Learn).\n\n")
+        f.write("- **Memória e Velocidade:** O **C11 Tier 8 (16.8 KB)** processa a **0.26 µs/amostra** (**>2.500x mais rápido** que o River em Python, que leva 681 µs, e usando **>160x menos RAM** que os 2.760 KB do Scikit-Learn).\n\n")
 
         f.write("#### 3. Forest Covertype (Real, 54 features mistas/binárias, 7 classes)\n")
         f.write("- **Desempenho Preditivo com Hiperparâmetros Ótimos:** Com a aplicação dos hiperparâmetros ótimos identificados na busca (`split_criterion=gini`, `delta=0.01`, `tau=0.15`, `grace_period=50`), a árvore supera completamente a restrição do Hoeffding Bound conservador e expande nós de decisão. O **C11 Tier 256** salta de 52.65% para **71.23% de acurácia holdout (68.74% de Macro F1)** com 265 nós, enquanto o **River HTC** atinge **75.73% de acurácia** (353 nós), superando em definitivo o bloqueio de nó único.\n")
         f.write("- **Resolução do Root-Freezing:** A substituição do critério Information Gain ($R = \\log_2(7) \\approx 2.807$) pelo Gini ($R = 1.0$) reduz a cota $\\epsilon$ em quase $3\\times$, permitindo que a diferença entre atributos ($\\Delta G$) supere o limite estatístico e ative o desempate com $\\tau=0.15$.\n")
         f.write("- **Escalonamento dos Tiers C11:** O **Tier 8** e o **Tier 4** mantêm acurácias sólidas (**67.28%** e **64.69%**), consumindo apenas 91 KB e 46 KB de RAM estática.\n")
-        f.write("- **Memória e Velocidade:** Devido aos 54 atributos e 7 classes, o River consome ~750 $\\mu$s por amostra, enquanto a biblioteca C11 processa cada amostra em cerca de **1.1 a 4.6 $\\mu$s** (**speedup de 160x a >650x** frente ao River em Python).\n\n")
+        f.write("- **Memória e Velocidade:** Devido aos 54 atributos e 7 classes, o River consome ~750 µs por amostra, enquanto a biblioteca C11 processa cada amostra em cerca de **1.1 a 4.6 µs** (**speedup de 160x a >650x** frente ao River em Python).\n\n")
 
         f.write("#### 4. Airlines Delay (Real, 7 features, 2 classes)\n")
         f.write("- **Desempenho Preditivo:** O **C11 Tier 256** atinge **75.75%** de acurácia e **59.47%** de Macro F1 (com 23 nós), superando o **River** em acurácia (**75.29%** / 60.79%) e batendo o Scikit-Learn em Macro F1 (**58.32%** com 123 nós). O uso de pré-processamento (`--prep-scaler --obs hist`) reduziu drasticamente o Macro F1 para 43.31%, demonstrando que a ingestão de dados brutos com hiperparâmetros sintonizados preserva a melhor calibração entre classes.\n")
-        f.write("- **Memória e Velocidade:** O **C11 Tier 8 (16.8 KB)** processa cada amostra em **0.38 $\\mu$s** (**>1.000x mais rápido** que os 380 $\\mu$s do River).\n\n")
+        f.write("- **Memória e Velocidade:** O **C11 Tier 8 (16.8 KB)** processa cada amostra em **0.38 µs** (**>1.000x mais rápido** que os 380 µs do River).\n\n")
 
         f.write("### 4.2. Datasets de Regressão Contínua\n\n")
         f.write("#### 5. Friedman #1 (Sintético, 10 features contínuas, alvo não-linear)\n")
         f.write("- **Liderança Isolada do C11 Tratado:** Com o normalizador online StandardScaler (`--prep-scaler`), o **C11 Tier 256 Tratado atinge o melhor resultado de todo o benchmark**: Holdout $R^2$ de **0.8592** e MAE de **1.4891** com apenas 49 nós, **superando tanto o Scikit-Learn Batch ($R^2=0.8490$, MAE 1.5224) quanto o River HTR ($R^2=0.8307$, MAE 1.6025)**!\n")
-        f.write("- **Memória e Velocidade:** O C11 consome apenas **531.4 KB** de RAM estática e zero heap dinâmico (frente aos 13.058 KB do River e 2.022 KB do Scikit-Learn) rodando a **1.24 $\\mu$s** (**>940x mais rápido** que o River).\n\n")
+        f.write("- **Memória e Velocidade:** O C11 consome apenas **531.4 KB** de RAM estática e zero heap dinâmico (frente aos 13.058 KB do River e 2.022 KB do Scikit-Learn) rodando a **1.24 µs** (**>940x mais rápido** que o River).\n\n")
 
         f.write("#### 6. Bikes / Bike Sharing (Real, 12 features, contagem de demanda)\n")
-        f.write("- **Desempenho Preditivo:** Com hiperparâmetros sintonizados com predição por média nas folhas (`--leaf mean`), o **C11 Tier 256** atinge $R^2$ robusto de **0.7370** (MAE 23.84 com 91 nós), sem necessidade de normalização externa, processando amostras a **0.85 $\\mu$s** (**>750x mais rápido** que o River).\n\n")
+        f.write("- **Desempenho Preditivo:** Com hiperparâmetros sintonizados com predição por média nas folhas (`--leaf mean`), o **C11 Tier 256** atinge $R^2$ robusto de **0.7370** (MAE 23.84 com 91 nós), sem necessidade de normalização externa, processando amostras a **0.85 µs** (**>750x mais rápido** que o River).\n\n")
 
         f.write("#### 7. Appliances Energy (Real, 28 features de telemetria IoT, consumo em Wh)\n")
-        f.write("- **Desempenho Preditivo:** O **C11 Tier 256 Tratado (`--leaf-normalize`)** atinge $R^2$ de **0.8034** (MAE 26.28), praticamente empatando com o **River** ($R^2=0.8059$) e próximo do Scikit-Learn ($R^2=0.8245$), mas com **473.8 KB de RAM** (contra 24.308 KB do River) e rodando a **4.32 $\\mu$s** (**500x mais rápido** que os 2.161 $\\mu$s do River).\n")
-        f.write("- **Escalonamento nos Tiers Leves:** O **C11 Tier 8** entrega $R^2 = 0.6606$ com apenas **91.0 KB** de RAM a 1.16 $\\mu$s/amostra.\n\n")
+        f.write("- **Desempenho Preditivo:** O **C11 Tier 256 Tratado (`--leaf-normalize`)** atinge $R^2$ de **0.8034** (MAE 26.28), praticamente empatando com o **River** ($R^2=0.8059$) e próximo do Scikit-Learn ($R^2=0.8245$), mas com **473.8 KB de RAM** (contra 24.308 KB do River) e rodando a **4.32 µs** (**500x mais rápido** que os 2.161 µs do River).\n")
+        f.write("- **Escalonamento nos Tiers Leves:** O **C11 Tier 8** entrega $R^2 = 0.6606$ com apenas **91.0 KB** de RAM a 1.16 µs/amostra.\n\n")
 
         f.write("#### 8. NYC Taxi Trip Duration (Real, 7 features espaciais/temporais, duração em segundos)\n")
         f.write("- **Desempenho Preditivo:** O **C11 Tier 256 Tratado (`--leaf-normalize`)** atinge $R^2$ de **0.3189** (MAE 309.64 com 131 nós), muito próximo do River ($R^2=0.3402$, MAE 305.90) e consumindo apenas 524.9 KB de RAM estática (frente aos 5.884 KB do River).\n")
-        f.write("- **Eficiência Extrema nos Tiers 8 e 4:** O **C11 Tier 8** roda em **0.38 $\\mu$s/amostra** (**>1.900x mais rápido** que o River), e o **Tier 4** processa em **0.30 $\\mu$s** (**>2.400x mais rápido** que o River).\n\n")
+        f.write("- **Eficiência Extrema nos Tiers 8 e 4:** O **C11 Tier 8** roda em **0.38 µs/amostra** (**>1.900x mais rápido** que o River), e o **Tier 4** processa em **0.30 µs** (**>2.400x mais rápido** que o River).\n\n")
 
         # Section 5: Global Memory & Synthesis
         f.write("## 5. Síntese Geral: Eficiência de Memória, Limitações e Escalonamento\n\n")
@@ -700,7 +700,7 @@ def generate_markdown_report(report_path: str, results: List[Dict[str, Any]]):
         f.write("3. **Guia Prático de Escolha entre os Tiers C11:**\n")
         f.write("   - **Tier 256 ($473\\text{ a }532\\text{ KB}$):** Recomendado para problemas de regressão não-linear complexa (**Friedman #1**, **Appliances Energy**, **NYC Taxi**) em microcontroladores de maior porte (ESP32-S3 com PSRAM, STM32H7, Cortex-A), garantindo desempenho igual ou superior ao River e ao Scikit-Learn.\n")
         f.write("   - **Tier 8 ($16.6\\text{ a }97.5\\text{ KB}$):** O **ponto ótimo de custo-benefício (Sweet Spot)**. Entrega **100% da acurácia do Tier 256** em classificação e supera o Scikit-Learn no Appliances Energy consumindo até **$31\\times$ menos RAM** que o Tier 256.\n")
-        f.write("   - **Tier 4 ($8.4\\text{ a }52.5\\text{ KB}$):** Projetado para MCUs sub-32KB SRAM (Cortex-M0+, AVR, RISC-V ultraleves). Mantém excelente acurácia em classificação (97.03% no SEA, 64.34% no Electricity, 76.96% no Airlines) e atinge latências sub-microssegundo (**0.31 a 0.89 $\\mu$s**).\n")
+        f.write("   - **Tier 4 ($8.4\\text{ a }52.5\\text{ KB}$):** Projetado para MCUs sub-32KB SRAM (Cortex-M0+, AVR, RISC-V ultraleves). Mantém excelente acurácia em classificação (97.03% no SEA, 64.34% no Electricity, 76.96% no Airlines) e atinge latências sub-microssegundo (**0.31 a 0.89 µs**).\n")
         f.write("4. **Impacto do Pré-Processamento Especializado (`libht_prep` & Leaf Normalization):**\n")
         f.write("   - **Política Estrita de Apresentação:** O tratamento é mantido e apresentado exclusivamente onde houve ganhos comprovados de $R^2$ (**Friedman #1**, **Appliances Energy**, **NYC Taxi**). Nos demais datasets (SEA, Electricity, Covertype, Airlines, Bikes), os dados brutos com hiperparâmetros ótimos entregam desempenho superior ou equivalente, sendo mantida apenas a avaliação C11 direta sem sobrecusto.\n")
         f.write("   - **Resultados de Destaque:** O C11 Tratado supera Scikit-Learn Batch e River em **Friedman #1** ($R^2 = 0.8592$, MAE 1.4891) e apresenta ganhos sólidos em **Appliances Energy** ($R^2 = 0.8034$) e **NYC Taxi** ($R^2 = 0.3189$).\n\n")
