@@ -27,16 +27,20 @@ No projeto **kansho**, o versionamento segue estritamente o padrão [Semantic Ve
 
 ---
 
-## 2. Critérios de Avaliação SemVer 2.0.0
+## 2. Critérios de Avaliação SemVer 2.0.0 (Escopo Estrito em `code/`)
 
-Ao analisar os commits acumulados desde o último bump de `VERSION`:
+> [!IMPORTANT]
+> **A versão SemVer da biblioteca reflete única e exclusivamente a solução em `code/` (`code/include/`, `code/src/`, `code/tests/`, `code/Makefile`).**
+> Commits que alteram apenas `.agents/` (skills, regras), `benchmarks/`, `docs/` ou `wiki/` são classificados como ferramentas ou metadados de suporte e **nunca desencadeiam upgrade de versão**.
 
-| Tipo | Critério | Exemplos no Kansho |
+Ao analisar os commits acumulados na linha principal desde o último bump de `VERSION`:
+
+| Tipo | Critério (Somente em `code/`) | Exemplos no Kansho |
 | :--- | :--- | :--- |
-| **`PATCH`** (`0.x.+1`) | Correções de bugs retrocompatíveis, ajustes numéricos, otimizações internas ou refatorações de código C sem alteração da API pública nem quebra de layout binário. | `fix(memory): restringir assert`, correções de precisão em Welford/ADWIN2. |
-| **`MINOR`** (`0.+1.0`) | Novas funcionalidades públicas retrocompatíveis, novos observadores, novos algoritmos de split, expansão de structs públicas ou novos módulos da biblioteca companheira. | Adição de `HT_OBS_HISTOGRAM`, pipeline `libht_prep`, novos kernels de regressão. |
-| **`MAJOR`** (`+1.0.0`) | Alterações incompatíveis na API pública (`BREAKING CHANGE`), mudanças drásticas de layout de memória/estruturas sem migração transparente, ou marcos de estabilização do projeto (`1.0.0`). | Alteração na assinatura de `ht_learn_one` / `ht_predict`, alteração de formato de serialização binária (`HT_SERIAL_VERSION`). |
-| **`NONE`** (Sem bump) | Commits exclusivos de documentação (`docs:`), benchmarks (`bench:`), testes (`test:`) ou manutenção de infraestrutura (`chore:`). | Atualização de documentação em `docs/` ou `wiki/`, scripts de tuning. |
+| **`PATCH`** (`0.x.+1`) | Correções de bugs retrocompatíveis (`fix:`), correções de precisão numérica ou otimizações internas no código em `code/` sem alteração da API pública. | `fix(memory): restringir assert`, correções de precisão em Welford/ADWIN2. |
+| **`MINOR`** (`0.+1.0`) | Novas funcionalidades públicas retrocompatíveis (`feat:`) em `code/`, novos observadores, novos splits ou expansão de structs da biblioteca. | Adição de `HT_OBS_HISTOGRAM`, pipeline `libht_prep`, novos kernels de regressão. |
+| **`MAJOR`** (`+1.0.0`) | Alterações incompatíveis na API pública (`BREAKING CHANGE`) em `code/include/`, mudanças drásticas de layout de memória/estruturas ou marcos (`1.0.0`). | Alteração na assinatura de `ht_learn_one` / `ht_predict`, alteração de formato de serialização binária (`HT_SERIAL_VERSION`). |
+| **`NONE`** (Sem bump) | Commits sem alterações em `code/` (ex: `docs:`, `wiki/`, `bench:`, `.agents/`, `chore:`) ou apenas testes/build sem impacto na biblioteca. | Nova skill em `.agents/skills/`, documentação em `docs/` ou `wiki/`, scripts de tuning. |
 
 ---
 

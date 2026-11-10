@@ -135,11 +135,11 @@ def analyze_commits(repo_root):
     res_base_info = run_cmd(f"git log -1 --format='%h %s (%cd)' --date=short {base_commit}", cwd=repo_root, check=False)
     base_info = res_base_info.stdout.strip()
 
-    # 2. Lista commits de base_commit até HEAD
-    res_log = run_cmd(f"git log {base_commit}..HEAD --oneline", cwd=repo_root, check=False)
+    # 2. Lista commits de base_commit até HEAD na linha principal
+    res_log = run_cmd(f"git log --first-parent {base_commit}..HEAD --oneline", cwd=repo_root, check=False)
     log_lines = [l.strip() for l in res_log.stdout.strip().split("\n") if l.strip()]
 
-    # 3. Classifica os commits
+    # 3. Classifica os commits considerando estritamente alterações na solução em code/
     classified_commits = []
     has_breaking = False
     has_feat = False
@@ -150,51 +150,79 @@ def analyze_commits(repo_root):
         commit_hash = parts[0]
         subject = parts[1] if len(parts) > 1 else ""
 
-        # Checa commit completo por BREAKING CHANGE
+        # Checa arquivos modificados pelo commit
+        res_files = run_cmd(f"git diff-tree --no-commit-id --name-only -r {commit_hash}", cwd=repo_root, check=False)
+        files = [f.strip() for f in res_files.stdout.strip().split("\n") if f.strip()]
+
+        code_files = [f for f in files if f.startswith("code/")]
+        core_files = [f for f in files if f.startswith("code/src/") or f.startswith("code/include/")]
+        touches_code = len(code_files) > 0
+        touches_core = len(core_files) > 0
+
+        # Checa corpo completo do commit por BREAKING CHANGE
         res_body = run_cmd(f"git log -1 --format=%B {commit_hash}", cwd=repo_root, check=False)
         body = res_body.stdout
 
         category = "other"
-        if "BREAKING CHANGE" in body or re.search(r"^[a-z]+(\([^\)]+\))?!:", subject):
-            category = "breaking"
-            has_breaking = True
-        elif subject.startswith("feat") or re.search(r"^feat(\([^\)]+\))?:", subject):
-            category = "feat"
-            has_feat = True
-        elif subject.startswith("fix") or re.search(r"^fix(\([^\)]+\))?:", subject):
-            category = "fix"
-            has_fix = True
-        elif subject.startswith("docs"):
-            category = "docs"
-        elif subject.startswith("bench"):
-            category = "bench"
-        elif subject.startswith("test"):
-            category = "test"
-        elif subject.startswith("chore"):
-            category = "chore"
+        # Regra inviolável: A versão SemVer reflete estritamente a solução em code/
+        if touches_code:
+            if touches_core and ("BREAKING CHANGE" in body or re.search(r"^[a-z]+(\([^\)]+\))?!:", subject)):
+                category = "breaking"
+                has_breaking = True
+            elif touches_core and (subject.startswith("feat") or re.search(r"^feat(\([^\)]+\))?:", subject)):
+                category = "feat"
+                has_feat = True
+            elif touches_core and (subject.startswith("fix") or re.search(r"^fix(\([^\)]+\))?:", subject)):
+                category = "fix"
+                has_fix = True
+            elif subject.startswith("fix") or re.search(r"^fix(\([^\)]+\))?:", subject):
+                category = "fix (code/)"
+                has_fix = True
+            elif subject.startswith("test"):
+                category = "test (code/)"
+            elif subject.startswith("bench"):
+                category = "bench (code/)"
+            elif subject.startswith("chore"):
+                category = "chore (code/)"
+        else:
+            # Commits externos a code/ (não impactam o SemVer da biblioteca C11)
+            if subject.startswith("feat"):
+                category = "feat (tools/skills)"
+            elif subject.startswith("fix"):
+                category = "fix (docs/tools)"
+            elif subject.startswith("docs"):
+                category = "docs"
+            elif subject.startswith("bench"):
+                category = "bench (external)"
+            elif subject.startswith("test"):
+                category = "test (external)"
+            elif subject.startswith("chore"):
+                category = "chore (infra)"
 
         classified_commits.append({
             "hash": commit_hash,
             "subject": subject,
-            "category": category
+            "category": category,
+            "touches_code": touches_code,
+            "touches_core": touches_core
         })
 
-    # Determina sugestão SemVer
+    # Determina sugestão SemVer estritamente sobre a solução em code/
     if has_breaking:
         recommendation = "MAJOR"
-        reason = "Detectadas alterações com quebra de compatibilidade (BREAKING CHANGE / API breaking)."
+        reason = "Detectadas alterações incompatíveis na API/estruturas em code/ (BREAKING CHANGE)."
     elif has_feat:
         recommendation = "MINOR"
-        reason = "Detectadas novas funcionalidades retrocompatíveis ('feat:')."
+        reason = "Detectadas novas funcionalidades retrocompatíveis na biblioteca em code/ ('feat:')."
     elif has_fix:
         recommendation = "PATCH"
-        reason = "Detectadas correções de bugs ou ajustes numéricos ('fix:') sem novas funcionalidades."
+        reason = "Detectadas correções de bugs ou ajustes numéricos no código em code/ ('fix:')."
     elif len(classified_commits) == 0:
         recommendation = "NONE"
         reason = "Nenhum commit realizado desde o último bump de versão."
     else:
         recommendation = "NONE"
-        reason = "Todos os commits acumulados são exclusivos de documentação, benchmarks, testes ou build/configuração ('docs:', 'bench:', 'test:', 'chore:')."
+        reason = "Nenhum commit recente introduziu alterações funcionais ou correções na biblioteca em code/ (apenas documentação, ferramentas de suporte, benchmarks ou agentes fora de code/)."
 
     return {
         "base_commit": base_commit,
@@ -301,11 +329,12 @@ def cmd_analyze(repo_root):
     if not analysis["commits"]:
         print("*Nenhum commit encontrado.*")
     else:
-        print("| Hash | Categoria | Mensagem |")
-        print("| :--- | :--- | :--- |")
+        print("| Hash | Categoria | Afeta code/? | Mensagem |")
+        print("| :--- | :--- | :--- | :--- |")
         for c in analysis["commits"]:
             cat_badge = f"`{c['category']}`"
-            print(f"| `{c['hash']}` | {cat_badge} | {c['subject']} |")
+            code_badge = "**Sim**" if c["touches_code"] else "Não"
+            print(f"| `{c['hash']}` | {cat_badge} | {code_badge} | {c['subject']} |")
 
     print("\n---")
     if analysis["recommendation"] != "NONE":
