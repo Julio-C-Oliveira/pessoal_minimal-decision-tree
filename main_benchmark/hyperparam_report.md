@@ -7,9 +7,17 @@ Suíte automatizada de exploração de hiperparâmetros comparando **Kansho**, *
 ## Dataset: SEA (Classification)
 
 - **Descrição:** SEA (Synthetic, 3 continuous, 2 classes)
-- **Total de Experimentos (Trials):** 468
+- **Total de Experimentos (Trials):** 498
 
 ### 1. Melhores Modelos por Tier (Kansho) e Competidores (Top 3)
+
+#### Kansho (Tier 3)
+
+| Rank | Configuração | Acurácia (%) | F1 Macro (%) | RAM (KB) | Latência (µs) |
+| :---: | :--- | :---: | :---: | :---: | :---: |
+| #1 | `tier=3`, `grace_period=50`, `delta=0.001`, `tau=0.05`, `prep_scaler=None`, `obs_splitter=gaussian`, `filter_hampel=False`, `split_criterion=info_gain`, `leaf_prediction=nba` | 96.77% | 96.26% | 15.5 KB | 0.21 µs |
+| #2 | `tier=3`, `grace_period=400`, `delta=0.0001`, `tau=0.15`, `prep_scaler=standard`, `obs_splitter=histogram`, `filter_hampel=False`, `split_criterion=info_gain`, `leaf_prediction=nba` | 96.03% | 95.47% | 22.1 KB | 0.49 µs |
+| #3 | `tier=3`, `grace_period=50`, `delta=1e-07`, `tau=0.15`, `prep_scaler=standard`, `obs_splitter=histogram`, `filter_hampel=False`, `split_criterion=info_gain`, `leaf_prediction=mc` | 95.08% | 94.31% | 22.1 KB | 0.54 µs |
 
 #### Kansho (Tier 4)
 
@@ -81,9 +89,17 @@ Suíte automatizada de exploração de hiperparâmetros comparando **Kansho**, *
 ## Dataset: Electricity (Classification)
 
 - **Descrição:** Electricity / Elec2 (Real, 8 continuous, 2 classes)
-- **Total de Experimentos (Trials):** 468
+- **Total de Experimentos (Trials):** 498
 
 ### 1. Melhores Modelos por Tier (Kansho) e Competidores (Top 3)
+
+#### Kansho (Tier 3)
+
+| Rank | Configuração | Acurácia (%) | F1 Macro (%) | RAM (KB) | Latência (µs) |
+| :---: | :--- | :---: | :---: | :---: | :---: |
+| #1 | `tier=3`, `grace_period=100`, `delta=1e-07`, `tau=0.05`, `prep_scaler=standard`, `obs_splitter=histogram`, `filter_hampel=False`, `split_criterion=info_gain`, `leaf_prediction=nba` | 64.18% | 63.92% | 22.1 KB | 0.70 µs |
+| #2 | `tier=3`, `grace_period=200`, `delta=0.0001`, `tau=0.01`, `prep_scaler=standard`, `obs_splitter=histogram`, `filter_hampel=False`, `split_criterion=gini`, `leaf_prediction=nba` | 64.33% | 63.77% | 22.1 KB | 1.60 µs |
+| #3 | `tier=3`, `grace_period=50`, `delta=1e-07`, `tau=0.01`, `prep_scaler=standard`, `obs_splitter=histogram`, `filter_hampel=False`, `split_criterion=info_gain`, `leaf_prediction=nba` | 64.32% | 63.76% | 22.1 KB | 1.43 µs |
 
 #### Kansho (Tier 4)
 
@@ -155,9 +171,17 @@ Suíte automatizada de exploração de hiperparâmetros comparando **Kansho**, *
 ## Dataset: Forest Covertype (Classification)
 
 - **Descrição:** Forest Covertype (Real, 54 features, 7 classes)
-- **Total de Experimentos (Trials):** 311
+- **Total de Experimentos (Trials):** 341
 
 ### 1. Melhores Modelos por Tier (Kansho) e Competidores (Top 3)
+
+#### Kansho (Tier 3)
+
+| Rank | Configuração | Acurácia (%) | F1 Macro (%) | RAM (KB) | Latência (µs) |
+| :---: | :--- | :---: | :---: | :---: | :---: |
+| #1 | `tier=3`, `grace_period=50`, `delta=0.001`, `tau=0.1`, `split_criterion=gini`, `leaf_prediction=nba`, `prep_scaler=None`, `obs_splitter=gaussian`, `filter_hampel=False` | 62.15% | 59.39% | 53.8 KB | 1.55 µs |
+| #2 | `tier=3`, `grace_period=400`, `delta=0.01`, `tau=0.1`, `split_criterion=gini`, `leaf_prediction=mc`, `prep_scaler=None`, `obs_splitter=gaussian`, `filter_hampel=False` | 61.24% | 56.97% | 53.8 KB | 0.34 µs |
+| #3 | `tier=3`, `grace_period=400`, `delta=0.001`, `tau=0.1`, `prep_scaler=standard`, `obs_splitter=gaussian`, `filter_hampel=False`, `split_criterion=gini`, `leaf_prediction=mc` | 58.40% | 56.64% | 80.0 KB | 0.91 µs |
 
 #### Kansho (Tier 4)
 
@@ -213,9 +237,17 @@ Suíte automatizada de exploração de hiperparâmetros comparando **Kansho**, *
 ## Dataset: Airlines (Classification)
 
 - **Descrição:** Airlines Delay (Real, 7 features, 2 classes)
-- **Total de Experimentos (Trials):** 468
+- **Total de Experimentos (Trials):** 498
 
 ### 1. Melhores Modelos por Tier (Kansho) e Competidores (Top 3)
+
+#### Kansho (Tier 3)
+
+| Rank | Configuração | Acurácia (%) | F1 Macro (%) | RAM (KB) | Latência (µs) |
+| :---: | :--- | :---: | :---: | :---: | :---: |
+| #1 | `tier=3`, `grace_period=50`, `delta=0.001`, `tau=0.1`, `split_criterion=gini`, `leaf_prediction=nba`, `prep_scaler=None`, `obs_splitter=gaussian`, `filter_hampel=False` | 76.87% | 59.48% | 15.5 KB | 0.23 µs |
+| #2 | `tier=3`, `grace_period=100`, `delta=1e-07`, `tau=0.05`, `prep_scaler=standard`, `obs_splitter=histogram`, `filter_hampel=False`, `split_criterion=info_gain`, `leaf_prediction=nba` | 77.17% | 54.91% | 22.1 KB | 0.73 µs |
+| #3 | `tier=3`, `grace_period=400`, `delta=0.01`, `tau=0.1`, `split_criterion=gini`, `leaf_prediction=mc`, `prep_scaler=None`, `obs_splitter=gaussian`, `filter_hampel=False` | 77.03% | 54.30% | 15.5 KB | 0.15 µs |
 
 #### Kansho (Tier 4)
 
@@ -287,9 +319,17 @@ Suíte automatizada de exploração de hiperparâmetros comparando **Kansho**, *
 ## Dataset: Friedman #1 (Regression)
 
 - **Descrição:** Friedman #1 (Synthetic, 10 continuous, nonlinear target)
-- **Total de Experimentos (Trials):** 461
+- **Total de Experimentos (Trials):** 491
 
 ### 1. Melhores Modelos por Tier (Kansho) e Competidores (Top 3)
+
+#### Kansho (Tier 3)
+
+| Rank | Configuração | MAE | R² | RAM (KB) | Latência (µs) |
+| :---: | :--- | :---: | :---: | :---: | :---: |
+| #1 | `tier=3`, `grace_period=200`, `delta=1e-07`, `tau=0.01`, `leaf_prediction=model`, `reg_num_slots=16`, `leaf_normalize=False`, `prep_scaler=standard`, `obs_splitter=gaussian`, `filter_hampel=False` | 2.4114 | 0.6279 | 22.1 KB | 0.46 µs |
+| #2 | `tier=3`, `grace_period=100`, `delta=1e-07`, `tau=0.01`, `leaf_prediction=adaptive`, `reg_num_slots=16`, `leaf_normalize=True`, `prep_scaler=None`, `obs_splitter=gaussian`, `filter_hampel=False` | 2.4169 | 0.6273 | 15.5 KB | 0.75 µs |
+| #3 | `tier=3`, `grace_period=100`, `delta=1e-07`, `tau=0.05`, `prep_scaler=standard`, `obs_splitter=histogram`, `filter_hampel=False`, `leaf_prediction=adaptive`, `reg_num_slots=16`, `leaf_normalize=False` | 2.4298 | 0.6242 | 22.1 KB | 0.54 µs |
 
 #### Kansho (Tier 4)
 
@@ -361,9 +401,17 @@ Suíte automatizada de exploração de hiperparâmetros comparando **Kansho**, *
 ## Dataset: Bikes (Regression)
 
 - **Descrição:** Bikes (Real, 12 features, demand count)
-- **Total de Experimentos (Trials):** 461
+- **Total de Experimentos (Trials):** 491
 
 ### 1. Melhores Modelos por Tier (Kansho) e Competidores (Top 3)
+
+#### Kansho (Tier 3)
+
+| Rank | Configuração | MAE | R² | RAM (KB) | Latência (µs) |
+| :---: | :--- | :---: | :---: | :---: | :---: |
+| #1 | `tier=3`, `grace_period=50`, `delta=0.01`, `tau=0.1`, `prep_scaler=None`, `obs_splitter=gaussian`, `filter_hampel=False`, `leaf_prediction=mean`, `reg_num_slots=8`, `leaf_normalize=False` | 41.3206 | 0.1986 | 9.5 KB | 0.23 µs |
+| #2 | `tier=3`, `grace_period=100`, `delta=1e-07`, `tau=0.05`, `prep_scaler=standard`, `obs_splitter=histogram`, `filter_hampel=False`, `leaf_prediction=adaptive`, `reg_num_slots=16`, `leaf_normalize=False` | 49.0942 | 0.0968 | 22.1 KB | 0.43 µs |
+| #3 | `tier=3`, `grace_period=100`, `delta=0.0001`, `tau=0.15`, `leaf_prediction=adaptive`, `reg_num_slots=32`, `leaf_normalize=True`, `prep_scaler=standard`, `obs_splitter=histogram`, `filter_hampel=False` | 50.1308 | -0.0250 | 34.1 KB | 1.25 µs |
 
 #### Kansho (Tier 4)
 
@@ -435,9 +483,17 @@ Suíte automatizada de exploração de hiperparâmetros comparando **Kansho**, *
 ## Dataset: Appliances Energy (Regression)
 
 - **Descrição:** Appliances Energy (Real, 28 features, building Wh)
-- **Total de Experimentos (Trials):** 314
+- **Total de Experimentos (Trials):** 344
 
 ### 1. Melhores Modelos por Tier (Kansho) e Competidores (Top 3)
+
+#### Kansho (Tier 3)
+
+| Rank | Configuração | MAE | R² | RAM (KB) | Latência (µs) |
+| :---: | :--- | :---: | :---: | :---: | :---: |
+| #1 | `tier=3`, `grace_period=400`, `delta=0.0001`, `tau=0.15`, `prep_scaler=standard`, `obs_splitter=histogram`, `filter_hampel=False`, `leaf_prediction=mean`, `reg_num_slots=32`, `leaf_normalize=False` | 33.4426 | 0.6811 | 128.0 KB | 1.89 µs |
+| #2 | `tier=3`, `grace_period=400`, `delta=0.01`, `tau=0.01`, `prep_scaler=None`, `obs_splitter=gaussian`, `filter_hampel=False`, `leaf_prediction=mean`, `reg_num_slots=32`, `leaf_normalize=False` | 35.4756 | 0.6398 | 101.8 KB | 1.93 µs |
+| #3 | `tier=3`, `grace_period=200`, `delta=0.0001`, `tau=0.1`, `prep_scaler=None`, `obs_splitter=histogram`, `filter_hampel=False`, `leaf_prediction=model`, `reg_num_slots=8`, `leaf_normalize=True` | 35.6041 | 0.6337 | 35.8 KB | 1.78 µs |
 
 #### Kansho (Tier 4)
 
@@ -493,9 +549,17 @@ Suíte automatizada de exploração de hiperparâmetros comparando **Kansho**, *
 ## Dataset: NYC Taxi (Regression)
 
 - **Descrição:** NYC Taxi (Real, 7 features, trip duration seconds)
-- **Total de Experimentos (Trials):** 461
+- **Total de Experimentos (Trials):** 491
 
 ### 1. Melhores Modelos por Tier (Kansho) e Competidores (Top 3)
+
+#### Kansho (Tier 3)
+
+| Rank | Configuração | MAE | R² | RAM (KB) | Latência (µs) |
+| :---: | :--- | :---: | :---: | :---: | :---: |
+| #1 | `tier=3`, `grace_period=50`, `delta=1e-07`, `tau=0.1`, `prep_scaler=None`, `obs_splitter=gaussian`, `filter_hampel=False`, `leaf_prediction=adaptive`, `reg_num_slots=32`, `leaf_normalize=True` | 354.4409 | 0.1341 | 27.5 KB | 0.41 µs |
+| #2 | `tier=3`, `grace_period=200`, `delta=0.01`, `tau=0.05`, `prep_scaler=None`, `obs_splitter=gaussian`, `filter_hampel=False`, `leaf_prediction=mean`, `reg_num_slots=32`, `leaf_normalize=False` | 354.6074 | 0.1222 | 27.5 KB | 0.37 µs |
+| #3 | `tier=3`, `grace_period=200`, `delta=0.01`, `tau=0.1`, `leaf_prediction=mean`, `reg_num_slots=8`, `leaf_normalize=False`, `prep_scaler=None`, `obs_splitter=gaussian`, `filter_hampel=False` | 355.8057 | 0.1169 | 9.5 KB | 0.30 µs |
 
 #### Kansho (Tier 4)
 

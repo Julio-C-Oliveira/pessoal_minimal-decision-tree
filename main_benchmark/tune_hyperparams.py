@@ -58,6 +58,7 @@ if os.path.exists(VENV_PYTHON):
 
 # Memory Tiers: Tier -> (Leaves, Nodes)
 TIER_MAP = {
+    3: (3, 64),
     4: (4, 64),
     8: (8, 128),
     16: (16, 256),
@@ -116,9 +117,9 @@ def calculate_safe_capacity(tier: int, slots: int, is_high_dim: bool) -> Tuple[i
     total_bytes = (nodes * (node_size + 2)) + (leaves * (leaf_size + 2)) + 64
 
     # Safety clamp ensuring pool never exceeds 980 KB:
-    while total_bytes > (980 * 1024) and leaves > 4:
-        leaves = max(4, int(leaves * 0.8))
-        nodes = max(64, leaves * 16)
+    while total_bytes > (980 * 1024) and leaves > 3:
+        leaves = max(3, int(leaves * 0.8))
+        nodes = max(48, leaves * 16)
         total_bytes = (nodes * (node_size + 2)) + (leaves * (leaf_size + 2)) + 64
 
     return leaves, nodes
@@ -465,9 +466,12 @@ def run_trial_sklearn(
 # Hyperparameter Search Space Builders
 # ==============================================================================
 
-def get_c11_space(task: str, is_high_dim: bool = False) -> Dict[str, List[Any]]:
+def get_c11_space(task: str, is_high_dim: bool = False, target_tier: Optional[int] = None) -> Dict[str, List[Any]]:
     # In dense datasets, max physical active leaves is 40 to guarantee <= 1 MB SRAM
-    tiers = [4, 8, 16, 40] if is_high_dim else [4, 8, 16, 64, 128, 256]
+    if target_tier is not None and target_tier > 0:
+        tiers = [target_tier]
+    else:
+        tiers = [3, 4, 8, 16, 40] if is_high_dim else [3, 4, 8, 16, 64, 128, 256]
     space: Dict[str, List[Any]] = {
         "grace_period": [50, 100, 200, 400],
         "delta": [1e-2, 1e-3, 1e-4, 1e-7],
@@ -605,13 +609,14 @@ def sample_stratified_c11_space(
     is_high_dim: bool,
     trials_per_tier: int,
     seed: int = 42,
+    target_tier: Optional[int] = None,
 ) -> List[Dict[str, Any]]:
     """
     Samples configurations stratified per tier:
     1. Injects the 4 canonical seeds for each tier.
     2. Samples remaining (trials_per_tier - 4) exploratory configurations uniformly.
     """
-    space = get_c11_space(task, is_high_dim)
+    space = get_c11_space(task, is_high_dim, target_tier=target_tier)
     tiers = space["tier"]
     all_configs: List[Dict[str, Any]] = []
     rng = random.Random(seed)
@@ -956,6 +961,7 @@ def run_tuning_suite(
     seed: int,
     jobs: int,
     trials_per_tier: int = 30,
+    target_tier: Optional[int] = None,
 ):
     # Pre-calculate total planned trials across datasets and engines
     active_datasets = [
@@ -970,9 +976,9 @@ def run_tuning_suite(
     total_planned_trials = 0
     for _, _, task, _, is_high_dim in active_datasets:
         if is_grid:
-            n_c11 = len(sample_hyperparameters(get_c11_space(task, is_high_dim), n_iter, is_grid, seed))
+            n_c11 = len(sample_hyperparameters(get_c11_space(task, is_high_dim, target_tier), n_iter, is_grid, seed))
         else:
-            n_c11 = len(sample_stratified_c11_space(task, is_high_dim, trials_per_tier, seed))
+            n_c11 = len(sample_stratified_c11_space(task, is_high_dim, trials_per_tier, seed, target_tier))
 
         if kansho_enabled:
             total_planned_trials += n_c11
@@ -987,7 +993,8 @@ def run_tuning_suite(
     print(" HYPERPARAMETER TUNING & SENSITIVITY ANALYSIS SUITE")
     print(f" Datasets:     {', '.join(selected_datasets)} ({len(active_datasets)} selecionados)")
     print(f" Engines:      {', '.join(selected_engines)}")
-    print(f" Mode:         {'Cartesian Grid Search' if is_grid else f'Stratified Search ({trials_per_tier} trials/tier)'}")
+    tier_info = f"Tier {target_tier}" if target_tier is not None else "All Tiers"
+    print(f" Mode:         {'Cartesian Grid Search' if is_grid else f'Stratified Search ({trials_per_tier} trials/tier, {tier_info})'}")
     print(f" Parallelism:  {jobs} job(s) / núcleo(s)")
     print(f" Total Trials: {total_planned_trials} ensaios planejados")
     print(f" Report Dest:  {output_report}")
@@ -995,6 +1002,14 @@ def run_tuning_suite(
     print("================================================================================")
 
     all_results: Dict[str, List[Dict[str, Any]]] = {}
+    if os.path.exists(output_json):
+        try:
+            with open(output_json, "r", encoding="utf-8") as f:
+                all_results = json.load(f)
+            print(f"  [Loaded existing results from {output_json}: {len(all_results)} datasets]")
+        except Exception as e:
+            print(f"  [Warning: Could not load existing {output_json}: {e}]")
+            all_results = {}
 
     for d_id, d_name, task, desc, is_high_dim in DATASETS_CONFIG:
         if selected_datasets and d_id not in selected_datasets and "all" not in selected_datasets:
@@ -1017,9 +1032,9 @@ def run_tuning_suite(
 
         # 1. Kansho (C11)
         if is_grid:
-            c11_configs = sample_hyperparameters(get_c11_space(task, is_high_dim), n_iter, is_grid, seed)
+            c11_configs = sample_hyperparameters(get_c11_space(task, is_high_dim, target_tier), n_iter, is_grid, seed)
         else:
-            c11_configs = sample_stratified_c11_space(task, is_high_dim, trials_per_tier, seed)
+            c11_configs = sample_stratified_c11_space(task, is_high_dim, trials_per_tier, seed, target_tier)
 
         if kansho_enabled:
             print(f"  [1/3] Iniciando Kansho ({len(c11_configs)} ensaios, {jobs} workers)...")
@@ -1068,7 +1083,24 @@ def run_tuning_suite(
             )
             dataset_trials.extend(sklearn_trials)
 
-        all_results[d_id] = dataset_trials
+        # Incremental merge with existing results for this dataset
+        existing_trials = all_results.get(d_id, [])
+        preserved_trials = []
+        for t in existing_trials:
+            eng = t.get("engine", "")
+            t_tier = t.get("params", {}).get("tier")
+            if kansho_enabled and eng in ("c11", "kansho"):
+                if target_tier is not None and t_tier == target_tier:
+                    continue  # Overwrite target_tier runs
+                if target_tier is None:
+                    continue  # Overwrite all C11 runs if running all tiers
+            elif river_enabled and eng == "river":
+                continue
+            elif sklearn_enabled and eng == "sklearn":
+                continue
+            preserved_trials.append(t)
+
+        all_results[d_id] = preserved_trials + dataset_trials
 
         # Incremental save after each dataset
         os.makedirs(os.path.dirname(output_json), exist_ok=True)
@@ -1088,6 +1120,7 @@ def main():
     parser.add_argument("--json", default=os.path.join(os.path.dirname(__file__), "hyperparam_results.json"))
     parser.add_argument("--dataset", default="all", help="Dataset(s) to run (e.g. 'all' or 'sea,friedman').")
     parser.add_argument("--engine", default="all", help="Engines to run ('all' or 'kansho,river,sklearn').")
+    parser.add_argument("--tier", default=None, help="Target specific memory tier in Kansho (e.g. '3' or 'all').")
     parser.add_argument("--trials-per-tier", type=int, default=30, help="Number of trials per memory tier in Kansho (default: 30).")
     parser.add_argument("--n-iter", type=int, default=30, help="Number of random search iterations per engine (legacy fallback).")
     parser.add_argument("--grid", action="store_true", help="Perform full exhaustive grid search.")
@@ -1097,6 +1130,13 @@ def main():
     
     datasets = args.dataset.split(",")
     engines = args.engine.split(",")
+
+    target_tier = None
+    if args.tier and args.tier.lower() != "all":
+        try:
+            target_tier = int(args.tier)
+        except ValueError:
+            target_tier = None
 
     run_tuning_suite(
         args.data_dir,
@@ -1109,6 +1149,7 @@ def main():
         42,
         args.jobs,
         args.trials_per_tier,
+        target_tier,
     )
 
 
