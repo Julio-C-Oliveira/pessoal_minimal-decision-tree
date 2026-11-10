@@ -42,7 +42,7 @@ Este repositório desenvolve **kansho** (簡樹, "árvore simples"): uma **Hoeff
     - **`MINOR` (0.+1.0):** nova funcionalidade retrocompatível (`feat`), novos módulos/algoritmos (ex: novos observadores, novos tipos de split, novas estratégias de drift), expansão de structs ou utilitários da biblioteca.
     - **`MAJOR` (+1.0.0):** alterações incompatíveis na API pública (`BREAKING CHANGE`), mudanças drásticas de layout de memória/estruturas ou marcos de estabilização do projeto (ex: release `1.0.0`).
   - Quando um upgrade de versão for indicado, **o agente nunca deve executá-lo de forma autônoma sem confirmação prévia**. O agente deve obrigatoriamente apresentar ao usuário a proposta de bump (ex: `0.2.0` -> `0.2.1` ou `0.3.0`), explicando detalhadamente as justificativas técnicas e os critérios SemVer que embasam a recomendação, solicitando sua aprovação explícita.
-  - Uma vez aprovado pelo usuário, o upgrade deve ser executado em um **commit atômico dedicado** (`chore(version): bump version to X.Y.Z`), sincronizando `VERSION`, `code/include/ht_config.h` e `code/tests/test_main.c`, com validação prévia de 100% dos testes.
+  - Uma vez aprovado pelo usuário, o upgrade deve ser executado em um **commit atômico dedicado** (`chore(version): bump version to X.Y.Z`), sincronizando `VERSION`, `code/include/ht_config.h` e `code/tests/test_main.c`, com validação prévia de 100% dos testes (utilizando a skill `version-upgrade`).
   - Nunca crie tags Git sem antes validar 100% dos testes unitários e de integração em precisão simples (`float`) e dupla (`double`).
   - Releases no GitHub devem obrigatoriamente usar tags anotadas no padrão `vX.Y.Z` (ex: `git tag -a v0.1.0 -m "Release v0.1.0: ..."`).
 
@@ -66,3 +66,4 @@ Ative a skill correspondente antes de iniciar cada tipo de tarefa:
 - **`embedded-c-tree`**: Para implementar, revisar ou otimizar módulos em `code/include/`, `code/src/` e `code/tests/` respeitando o orçamento de 1 MB e o protocolo de testes em 3 níveis.
 - **`river-parity-benchmark`**: Para validar acurácia *prequential*, número de splits e consumo de RAM em `benchmarks/` contra o River.
 - **`sync-wiki`**: Para sincronizar e publicar automaticamente as alterações de `wiki/` no repositório oficial da GitHub Wiki (`pessoal_minimal-decision-tree.wiki.git`).
+- **`version-upgrade`**: Para avaliar elegibilidade de upgrade SemVer após commits, apresentar justificativas para aprovação do usuário e atualizar atomicamente `VERSION`, `code/include/ht_config.h`, `code/tests/test_main.c` e o changelog na Wiki.
