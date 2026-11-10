@@ -232,7 +232,7 @@ cmd_bench() {
         PYTHON_BIN="${PROJECT_ROOT}/.venv/bin/python"
     fi
 
-    local max_samp="${MAX_SAMPLES:-20000}"
+    local max_samp="${MAX_SAMPLES:-0}"
     local extra_args=()
     if [ "${max_samp}" != "0" ]; then
         extra_args+=(--max-samples "${max_samp}")

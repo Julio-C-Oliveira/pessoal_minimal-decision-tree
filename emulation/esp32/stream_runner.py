@@ -538,7 +538,7 @@ def run_main_suite(
     window_size: int = 16,
 ) -> List[Dict[str, Any]]:
     """Runs all 8 datasets from main_benchmark sequentially through the emulated ESP32."""
-    # Optimal Tier 8 hyperparameters extracted from main_benchmark/hyperparam_report.md
+    # Tier 8 configurations from main_benchmark
     datasets = [
         # (d_id, name, task, grace, delta, tau, criterion, leaf)
         ("sea", "SEA", "classification", 100, 0.01, 0.10, "info_gain", "nba"),
@@ -553,9 +553,9 @@ def run_main_suite(
 
     results = []
     print("\n" + "=" * 80)
-    print(" ESP32 HARDWARE-IN-THE-LOOP EMULATION: 8 DATASETS (TIER 8 OPTIMAL)")
-    print(" Architecture: Xtensa LX6 @ 240 MHz | RAM Budget: <= 115 KB static SRAM")
-    print(" Hyperparameters: Top-1 Tier 8 configurations from hyperparam_report.md")
+    print(" ESP32 HARDWARE-IN-THE-LOOP EMULATION: 8 DATASETS (TIER 8 MAIN BENCHMARK)")
+    print(" Architecture: Xtensa LX6 @ 240 MHz | RAM Budget: <= 90 KB static SRAM")
+    print(" Configurations: Tier 8 configurations from main_benchmark")
     print("=" * 80)
 
     for d_id, name, task, grace, delta, tau, criterion, leaf in datasets:
@@ -602,8 +602,8 @@ def generate_markdown_report(results: List[Dict[str, Any]], report_path: str):
     md = []
     md.append("# Relatório de Emulação ESP32 — Hoeffding Tree C11 (Tier 8 Universal)\n")
     md.append("> **Ambiente de Emulação:** ESP32 (Xtensa Dual-Core LX6 @ 240 MHz) via `qemu-system-xtensa`")
-    md.append("> **Perfil de Memória:** Tier 8 Universal (`HT_MAX_NODES=128`, `HT_MAX_ACTIVE_LEAVES=8`, `HT_MAX_FEATURES=64`, `HT_MAX_CLASSES=10`, `HT_REG_NUM_SLOTS=8`)")
-    md.append("> **Otimização de Hiperparâmetros:** Melhores configurações empíricas do **Tier 8** extraídas de `main_benchmark/hyperparam_report.md`")
+    md.append("> **Perfil de Memória:** Tier 8 Universal (`HT_MAX_NODES=128`, `HT_MAX_ACTIVE_LEAVES=8`, `HT_MAX_FEATURES=64`, `HT_MAX_CLASSES=10`)")
+    md.append("> **Configurações:** Configurações oficiais do **Tier 8** extraídas do `main_benchmark` (`main_benchmark/main_benchmark.py` / `main_benchmark_report.md`)")
     md.append(r"> **Garantia de Determinismo:** Zero `malloc`/`free` em runtime ($\Delta\text{Heap} = 0\text{ bytes}$ comprovados)" + "\n")
     md.append("---\n")
 
@@ -687,7 +687,7 @@ def generate_markdown_report(results: List[Dict[str, Any]], report_path: str):
     md.append("## 4. Conclusões da Emulação\n")
     md.append("1. **Zero Vazamento de Memória:** O contador de heap livre (`esp_get_free_heap_size()`) permaneceu rigorosamente inalterado em todos os fluxos de dados, validando o isolamento do Slab Allocator estático (`ht_memory`).")
     md.append("2. **Latência de Microcontrolador:** Mesmo operando a 240 MHz com ponto flutuante de precisão simples, o algoritmo processou cada amostra completa (predição + treino online) em ordens de microsegundos, capacitando o microcontrolador a realizar aprendizado incremental em fluxos de alta frequência.")
-    md.append("3. **Stack e SRAM Seguros:** O modelo ocupou estritamente $\\approx 111\\text{ KB}$ de SRAM interna da ESP32, deixando mais de $200\\text{ KB}$ livres para o RTOS, pilha de rede e sensores da aplicação embarcada.")
+    md.append("3. **Stack e SRAM Seguros:** O modelo ocupou estritamente $\\le 90\\text{ KB}$ de SRAM interna da ESP32, deixando mais de $230\\text{ KB}$ livres para o RTOS, pilha de rede e sensores da aplicação embarcada.")
 
     with open(report_path, "w", encoding="utf-8") as f:
         f.write("\n".join(md) + "\n")

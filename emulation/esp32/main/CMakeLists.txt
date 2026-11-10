@@ -6,6 +6,7 @@ idf_component_register(
         "../../../code/src/ht_criterion.c"
         "../../../code/src/ht_tree.c"
         "../../../code/src/ht_drift.c"
+        "../../../code/src/ht_prep.c"
     INCLUDE_DIRS
         "."
         "../../../code/include"

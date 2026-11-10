@@ -7,7 +7,6 @@ add_compile_definitions(
     HT_MAX_FEATURES=64
     HT_MAX_CLASSES=10
     HT_MAX_ADWIN_DETECTORS=32
-    HT_REG_NUM_SLOTS=8
 )
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
