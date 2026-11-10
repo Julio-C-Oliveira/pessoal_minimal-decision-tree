@@ -1,6 +1,6 @@
 # Arquitetura, Design e Fluxogramas Completos (VFDT, HAT, VFDT-R e HAT-R)
 
-Este documento consolida a fundamentação arquitetural, as decisões de engenharia em **C11 puro** e todos os fluxogramas visuais da biblioteca **Minimal Decision Tree** ([`code/include/`](../code/include) e [`code/src/`](../code/src)). Todos os fluxos operam com **zero alocação dinâmica (`malloc`/`free`) em runtime**, utilizando exclusivamente *Slab/Pool Allocators* estáticos indexados por `uint16_t` dentro de um orçamento estrito de **$\le 1\text{ MB}$ de RAM**.
+Este documento consolida a fundamentação arquitetural, as decisões de engenharia em **C11 puro** e todos os fluxogramas visuais da biblioteca **kansho** ([`code/include/`](../code/include) e [`code/src/`](../code/src)). Todos os fluxos operam com **zero alocação dinâmica (`malloc`/`free`) em runtime**, utilizando exclusivamente *Slab/Pool Allocators* estáticos indexados por `uint16_t` dentro de um orçamento estrito de **$\le 1\text{ MB}$ de RAM**.
 
 ---
 

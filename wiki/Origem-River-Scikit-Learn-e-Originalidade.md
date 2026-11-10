@@ -1,6 +1,6 @@
 # Linhagem Arquitetural: O que Veio do River, do Scikit-Learn e o que é Original
 
-Esta página detalha a genealogia técnica e as decisões de engenharia do **Minimal Decision Tree**. O projeto não é uma simples tradução linha por linha de uma biblioteca existente nem uma reimplementação do zero: trata-se da **síntese arquitetural** entre os algoritmos de aprendizado em fluxo (*stream learning*) do **River**, os padrões de localidade de cache e otimização numérica em baixo nível do **Scikit-Learn**, e um conjunto substancial de **inovações originais** projetadas para viabilizar inferência e treinamento incremental em microcontroladores bare-metal com **$\le 1\text{ MB}$ de RAM** e **zero alocação dinâmica (`malloc`/`free`)**.
+Esta página detalha a genealogia técnica e as decisões de engenharia do **kansho**. O projeto não é uma simples tradução linha por linha de uma biblioteca existente nem uma reimplementação do zero: trata-se da **síntese arquitetural** entre os algoritmos de aprendizado em fluxo (*stream learning*) do **River**, os padrões de localidade de cache e otimização numérica em baixo nível do **Scikit-Learn**, e um conjunto substancial de **inovações originais** projetadas para viabilizar inferência e treinamento incremental em microcontroladores bare-metal com **$\le 1\text{ MB}$ de RAM** e **zero alocação dinâmica (`malloc`/`free`)**.
 
 ---
 
@@ -20,7 +20,7 @@ flowchart TD
         S3["Robustez de Engenharia:<br/>Divisão média segura (evita overflow),<br/>Roteamento iterativo sem recursão,<br/>Zeramento de padding para serialização"]
     end
 
-    subgraph ORIGINAL["Inovações Originais (Minimal Decision Tree em C11)"]
+    subgraph ORIGINAL["Inovações Originais (kansho em C11)"]
         O1["Zero Alocação Dinâmica em Runtime:<br/>0,0 KB de malloc/free, Pools estáticos O(1)"]
         O2["Separação Topologia Leve vs Estado Pesado:<br/>ht_node_t (28 B) vs ht_leaf_stats_t (1,3 KB)<br/>com reciclagem imediata no split"]
         O3["Índices Compactos uint16_t (16-bit):<br/>Serialização direta para Flash sem pointer swizzling"]
@@ -30,7 +30,7 @@ flowchart TD
         O7["ADWIN2 e HAT Iterativos Estáticos:<br/>Pool contíguo de buckets, poda sem recursão"]
     end
 
-    RIVER --> |"Teoria e Fluxo Estatístico"| MDT["Minimal Decision Tree (C11 Puro)"]
+    RIVER --> |"Teoria e Fluxo Estatístico"| MDT["kansho (C11 Puro)"]
     SKLEARN --> |"Design de Dados e Otimização Numérica"| MDT
     ORIGINAL --> |"Arquitetura Embarcada e Determinismo"| MDT
 ```
@@ -94,20 +94,20 @@ O [`scikit-learn`](https://github.com/scikit-learn/scikit-learn) (`sklearn/tree`
 - **Zeramento Explícito de Padding para Serialização Determinística:** Em [`_tree.pyx#L947-L948`](../references/sklearn_tree/_tree.pyx#L947-L948), o Scikit-Learn aplica `memset` zerando structs recém-alocadas para garantir que bytes de alinhamento (*padding*) não contenham lixo de memória na serialização em disco. Adotamos o mesmo rigor em `ht_memory.c`.
 
 ### 3.4 Roteamento Iterativo sem Recursão
-- **Navegação não-recursiva:** O método `_apply_dense` do Scikit-Learn ([`_tree.pyx#L1032-L1077`](../references/sklearn_tree/_tree.pyx#L1032-L1077)) utiliza um laço `while (node->left_child != _TREE_LEAF)`. Essa abordagem foi estendida no Minimal Decision Tree para todo o ciclo de vida (predição, treino, poda e liberação de memória), blindando a pilha de chamadas (*stack*) de microcontroladores contra *stack overflow*.
+- **Navegação não-recursiva:** O método `_apply_dense` do Scikit-Learn ([`_tree.pyx#L1032-L1077`](../references/sklearn_tree/_tree.pyx#L1032-L1077)) utiliza um laço `while (node->left_child != _TREE_LEAF)`. Essa abordagem foi estendida no kansho para todo o ciclo de vida (predição, treino, poda e liberação de memória), blindando a pilha de chamadas (*stack*) de microcontroladores contra *stack overflow*.
 
 ### 3.5 Registro de Candidatos na Stack
 - **`SplitRecord` Alocado na Pilha:** O Scikit-Learn define uma struct leve na stack ([`_splitter.pxd#L14-L44`](../references/sklearn_tree/_splitter.pxd#L14-L44)) para rastrear o melhor corte durante a iteração. Inspirados nisso, criamos `ht_split_candidate_t` (apenas $44\text{ B}$ em `float32`), dispensando qualquer alocação dinâmica durante a avaliação do limite de Hoeffding.
 
 ---
 
-## 4. O que é Original no Minimal Decision Tree
+## 4. O que é Original no kansho
 
 Embora o River forneça a teoria de streaming e o Scikit-Learn inspire a engenharia de dados, **nenhuma das duas bibliotecas é capaz de rodar em microcontroladores bare-metal ou RTOS com $\le 1\text{ MB}$ de RAM**:
 - O River depende de centenas de objetos dinâmicos Python, dicionários esparsos (`defaultdict`), chamadas contínuas ao Garbage Collector e alocação dinâmica intensiva no heap.
 - O Scikit-Learn consome dezenas de megabytes de RAM em buffers de ordenação $O(N)$ (`DensePartitioner`), compila em Cython com dependências pesadas do NumPy e foi arquitetado exclusivamente para treinamento offline em lote.
 
-As inovações originais do **Minimal Decision Tree** resolvem esse abismo de arquitetura:
+As inovações originais do **kansho** resolvem esse abismo de arquitetura:
 
 ### 4.1 Zero Alocação Dinâmica em Runtime (0,0 KB de Heap)
 - É **estritamente proibido** o uso de `malloc`, `calloc`, `realloc` ou `free` durante o aprendizado (`ht_learn_one`), inferência (`ht_predict`) ou atualização de drift (`ht_adwin_update`).
@@ -149,7 +149,7 @@ sequenceDiagram
   - **Relocabilidade binária direta:** O modelo pode ser gravado diretamente em Flash, EEPROM ou cartão SD via `ht_tree_save` (`fwrite` contíguo) e carregado via `ht_tree_load` em qualquer outro dispositivo ou endereço de memória sem necessidade de *pointer swizzling* ou reconstrução de grafos.
 
 ### 4.4 Dimensionamento Estritamente Estático por Macros de Compilação
-- Ao contrário do River e Scikit-Learn, que exigem alocadores dinâmicos para dimensionar matrizes em runtime, o Minimal Decision Tree define todas as capacidades máximas em tempo de compilação (`ht_config.h` ou flags `-D` no Makefile):
+- Ao contrário do River e Scikit-Learn, que exigem alocadores dinâmicos para dimensionar matrizes em runtime, o kansho define todas as capacidades máximas em tempo de compilação (`ht_config.h` ou flags `-D` no Makefile):
   `HT_MAX_NODES`, `HT_MAX_ACTIVE_LEAVES`, `HT_MAX_FEATURES`, `HT_MAX_CLASSES`, `HT_MAX_CATEGORIES`.
 - Isso elimina campos de controle dinâmico na struct `ht_tree_t` e permite ajustar o modelo fisicamente para qualquer microcontrolador:
   - **Tier 256 (~750 KB de RAM):** Linux Embarcado, ESP32, STM32F7.
@@ -163,7 +163,7 @@ sequenceDiagram
 
 ### 4.6 Unificação Física de Classificação e Regressão via `union` C11
 - Em bibliotecas Python convencionais, classificação (`HoeffdingTreeClassifier`) e regressão (`HoeffdingTreeRegressor`) vivem em arquivos e estruturas separadas.
-- No Minimal Decision Tree, unificamos tarefas de Classificação Multiclasse e Regressão Contínua (`VFDT-R` / `FIMT-DD` e `HAT-R`) na mesma estrutura `ht_tree_t` e `ht_node_t` usando *unions* anônimas do C11:
+- No kansho, unificamos tarefas de Classificação Multiclasse e Regressão Contínua (`VFDT-R` / `FIMT-DD` e `HAT-R`) na mesma estrutura `ht_tree_t` e `ht_node_t` usando *unions* anônimas do C11:
   - `class_counts[HT_MAX_CLASSES]` compartilha fisicamente os mesmos bytes de `reg_stats` (variância do alvo calculada por Welford).
   - Os observadores de atributos compartilham o mesmo buffer para densidade Gaussiana (classificação) e quantização em 5 slots com mesclagem de Chan (regressão).
   - **Custo adicional em RAM da unificação:** **0 bytes**.
@@ -192,9 +192,9 @@ sequenceDiagram
 
 ---
 
-## 5. Matriz Comparativa Tripla: River vs Scikit-Learn vs Minimal Decision Tree
+## 5. Matriz Comparativa Tripla: River vs Scikit-Learn vs kansho
 
-| Característica / Métrica | River (`online-ml/river`) | Scikit-Learn (`sklearn.tree`) | Minimal Decision Tree (C11) | Origem / Inspiração |
+| Característica / Métrica | River (`online-ml/river`) | Scikit-Learn (`sklearn.tree`) | kansho (C11) | Origem / Inspiração |
 | :--- | :--- | :--- | :--- | :--- |
 | **Linguagem Principal** | Python 3 + Cython esparso | Cython + C | **C11 Puro Estrito** | Autoral |
 | **Paradigma de Aprendizado** | *Online / Streaming* (amostra a amostra) | *Batch / Offline* (re-escaneia dataset) | ***Online / Streaming* (amostra a amostra)** | **River** |
@@ -216,7 +216,7 @@ sequenceDiagram
 
 ## 6. Diagrama de Ciclo de Vida da Memória
 
-O diagrama abaixo ilustra graficamente a principal inovação de engenharia que permitiu ao **Minimal Decision Tree** rodar em $\le 1\text{ MB}$ de RAM: a reciclagem imediata do estado pesado de aprendizado (`ht_leaf_stats_t`) e o crescimento contínuo da árvore topológica (`ht_node_t`):
+O diagrama abaixo ilustra graficamente a principal inovação de engenharia que permitiu ao **kansho** rodar em $\le 1\text{ MB}$ de RAM: a reciclagem imediata do estado pesado de aprendizado (`ht_leaf_stats_t`) e o crescimento contínuo da árvore topológica (`ht_node_t`):
 
 ```mermaid
 flowchart TD
@@ -251,7 +251,7 @@ flowchart TD
 
 ## 7. Licenciamento e Conformidade de Direitos Autorais
 
-O **Minimal Decision Tree** é distribuído sob a licença de código aberto permissiva **[BSD 3-Clause License](../LICENSE)** (`SPDX-License-Identifier: BSD-3-Clause`).
+O **kansho** é distribuído sob a licença de código aberto permissiva **[BSD 3-Clause License](../LICENSE)** (`SPDX-License-Identifier: BSD-3-Clause`).
 
 Em total conformidade com as boas práticas de engenharia de software e os termos legais das bibliotecas que serviram de estudo e inspiração, o arquivo de licença deste repositório preserva e reconhece integralmente os avisos de direitos autorais originais dos projetos de referência:
 - **River:** [BSD 3-Clause License](../references/river_tree/LICENSE), Copyright (c) 2020-presente, online-ml developers.

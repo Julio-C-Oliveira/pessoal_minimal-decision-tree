@@ -1,8 +1,8 @@
-# 06 — Plano de Implementação Persistente (C11 VFDT & HAT $\le 1\text{ MB}$)
+# 06 — Plano de Implementação Persistente (kansho: C11 VFDT & HAT $\le 1\text{ MB}$)
 
 > [!IMPORTANT]
 > **Fonte Única de Verdade Multi-Chat (`implementation-plan` skill):**
-> Este documento é o plano mestre compartilhado entre diferentes sessões de chat e agentes. Antes de iniciar qualquer implementação em `include/`, `src/`, `tests/` ou `benchmarks/`, verifique o **Quadro de Status das Entregas** abaixo, siga rigorosamente os contratos de structs/APIs e atualize o status (`[x]`) ao concluir cada entrega.
+> Este documento é o plano mestre compartilhado entre diferentes sessões de chat e agentes para o **kansho** (簡樹). Antes de iniciar qualquer implementação em `include/`, `src/`, `tests/` ou `benchmarks/`, verifique o **Quadro de Status das Entregas** abaixo, siga rigorosamente os contratos de structs/APIs e atualize o status (`[x]`) ao concluir cada entrega.
 
 ---
 

@@ -1,6 +1,6 @@
-# Wiki — Minimal Decision Tree (Embedded Hoeffding Tree in C11)
+# Wiki — kansho (Embedded Hoeffding Tree in C11)
 
-Bem-vindo à Wiki oficial do **Minimal Decision Tree**, uma implementação ultraleve de **Hoeffding Trees (`VFDT`, `HAT`, `VFDT-R` / `FIMT-DD` e `HAT-R`)** e detectores de mudança de conceito (**`ADWIN2`**) em **C11 puro**, projetada para aprendizado incremental (*online/streaming*) e inferência em tempo real em microcontroladores e sistemas embarcados com forte restrição de memória (**$\le 1\text{ MB}$ de RAM**, escalável para **$\approx 11\text{ KB}$**, com **zero `malloc`/`free`**).
+Bem-vindo à Wiki oficial do **kansho** (簡樹, *árvore simples*), uma implementação ultraleve de **Hoeffding Trees (`VFDT`, `HAT`, `VFDT-R` / `FIMT-DD` e `HAT-R`)** e detectores de mudança de conceito (**`ADWIN2`**) em **C11 puro**, projetada para aprendizado incremental (*online/streaming*) e inferência em tempo real em microcontroladores e sistemas embarcados com forte restrição de memória (**$\le 1\text{ MB}$ de RAM**, escalável para **$\approx 11\text{ KB}$**, com **zero `malloc`/`free`**).
 
 ---
 

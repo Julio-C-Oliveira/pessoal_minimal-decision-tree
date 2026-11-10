@@ -40,7 +40,7 @@ A biblioteca permite verificar a versão tanto durante a compilação do firmwar
 #include "ht_tree.h"
 
 #if !HT_VERSION_CHECK(0, 1, 0)
-#error "Este firmware requer Minimal Decision Tree >= 0.1.0!"
+#error "Este firmware requer kansho >= 0.1.0!"
 #endif
 ```
 
@@ -51,7 +51,7 @@ A biblioteca permite verificar a versão tanto durante a compilação do firmwar
 
 void print_system_info(void) {
     /* Retorna ponteiro para string literal em Flash (zero malloc, O(1)) */
-    printf("Minimal Decision Tree versao: %s\n", ht_version());
+    printf("kansho versao: %s\n", ht_version());
 }
 ```
 

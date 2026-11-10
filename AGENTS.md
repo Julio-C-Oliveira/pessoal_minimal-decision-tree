@@ -1,6 +1,6 @@
-# AGENTS.md — Minimal Decision Tree (Embedded Hoeffding Tree in C11)
+# AGENTS.md — kansho (Embedded Hoeffding Tree in C11)
 
-Este repositório desenvolve uma **Hoeffding Tree (VFDT / HAT)** ultraleve em **C11 puro**, projetada para treino incremental (*online*) e inferência em tempo real em sistemas embarcados com **$\le 1\text{ MB}$ de RAM**.
+Este repositório desenvolve **kansho** (簡樹, "árvore simples"): uma **Hoeffding Tree (VFDT / HAT)** ultraleve em **C11 puro**, projetada para treino incremental (*online*) e inferência em tempo real em sistemas embarcados com **$\le 1\text{ MB}$ de RAM**.
 
 ## 1. Regras Invioláveis de Arquitetura e Código C11
 

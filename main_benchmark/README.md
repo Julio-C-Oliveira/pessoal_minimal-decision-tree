@@ -1,6 +1,6 @@
 # Main Performance Benchmark Suite (`main_benchmark`)
 
-Esta pasta contém a **suíte principal de benchmark de desempenho** da árvore de decisão incremental em C11 pura (`libht`).
+Esta pasta contém a **suíte principal de benchmark de desempenho** do **kansho** (`libht` em C11 puro).
 
 A suíte realiza uma avaliação tripla direta (*apples-to-apples*) comparando:
 1. **C11 Hoeffding Tree (`float32`, $\le 1\text{ MB}$, Zero Malloc)**

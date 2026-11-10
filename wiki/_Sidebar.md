@@ -1,4 +1,4 @@
-### Minimal Decision Tree Wiki
+### kansho Wiki
 
 * **[Início (Home)](Home)**
 

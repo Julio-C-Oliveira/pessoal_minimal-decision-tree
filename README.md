@@ -1,6 +1,6 @@
-# Minimal Decision Tree (Embedded Hoeffding Tree in C11)
+# kansho — ultralight embedded streaming decision trees in c11 (<= 1 mb ram, zero malloc)
 
-Implementação ultraleve de **Hoeffding Trees (`VFDT`, `HAT`, `VFDT-R` / `FIMT-DD` e `HAT-R`)** em **C11 puro**, projetada para **treino incremental (*online/streaming*) e inferência em tempo real** em microcontroladores e sistemas embarcados com forte restrição de memória (**$\le 1\text{ MB}$ de RAM**, escalável para **$\approx 11\text{ KB}$**, com **zero alocação dinâmica `malloc`/`free`**).
+> **kansho** (簡樹, do japonês *árvore simples*): implementação ultraleve de **Hoeffding Trees (`VFDT`, `HAT`, `VFDT-R` / `FIMT-DD` e `HAT-R`)** em **C11 puro**, projetada para **treino incremental (*online/streaming*) e inferência em tempo real** em microcontroladores e sistemas embarcados com forte restrição de memória (**$\le 1\text{ MB}$ de RAM**, escalável para **$\approx 11\text{ KB}$**, com **zero alocação dinâmica `malloc`/`free`**).
 
 ---
 

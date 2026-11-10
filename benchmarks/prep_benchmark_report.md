@@ -1,7 +1,7 @@
 # Relatorio Experimental de Pre-Processamento e Observadores Nao-Parametricos (Fase 6)
 
 **Data de Execucao:** 2026-11-09 20:41:30
-**Biblioteca:** Minimal Decision Tree (C11 puro, SemVer 0.2.0)
+**Biblioteca:** kansho (libht / libht_prep em C11 puro, SemVer 0.2.0)
 **Ambiente:** Linux (x86_64), GCC -O2, River 0.26.1
 
 ---

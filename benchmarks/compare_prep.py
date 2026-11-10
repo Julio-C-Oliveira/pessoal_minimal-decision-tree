@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Benchmark de Pre-Processamento e Observadores Nao-Parametricos (Fase 6, Task 6.6)
-Minimal Decision Tree (libht / libht_prep) vs River
+kansho (libht / libht_prep) vs River
 
 Avalia tres cenarios experimentais fundamentais:
 1. Regressao Multi-Escala (Estabilidade de SGD nas Folhas):
@@ -232,7 +232,7 @@ def generate_report(report_path: str, results: Dict[str, Any]):
     with open(report_path, "w") as f:
         f.write("# Relatorio Experimental de Pre-Processamento e Observadores Nao-Parametricos (Fase 6)\n\n")
         f.write("**Data de Execucao:** " + time.strftime("%Y-%m-%d %H:%M:%S") + "\n")
-        f.write("**Biblioteca:** Minimal Decision Tree (C11 puro, SemVer 0.2.0)\n")
+        f.write("**Biblioteca:** kansho (libht / libht_prep em C11 puro, SemVer 0.2.0)\n")
         f.write("**Ambiente:** Linux (x86_64), GCC -O2, River 0.26.1\n\n")
         f.write("---\n\n")
 
