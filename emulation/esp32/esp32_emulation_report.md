@@ -33,20 +33,20 @@
 
 > **Nota sobre as Colunas de Latência:**
 > - **Ciclo Test-Then-Train:** Cada medição cobre o tempo para predição (`predict`) + treino incremental (`learn_one`) daquela amostra.
-> - **Cronometria por Ciclos:** As latências são obtidas em ciclos de clock de CPU via `esp_cpu_get_cycle_count()` e convertidas para microssegundos ($\mu\text{s}$) na frequência nominal de 240 MHz ($\mu\text{s} = \text{ciclos} / 240$).
+> - **Cronometria por Ciclos:** As latências são obtidas em ciclos de clock de CPU via `esp_cpu_get_cycle_count()` e convertidas para microssegundos (µs) na frequência nominal de 240 MHz (µs = ciclos / 240).
 > - **Latência Média vs Cauda ($p_{95}, p_{99}$):** A latência média reflete o processamento contínuo nas folhas em $O(1)$. Os percentis de cauda ($p_{95}$ e $p_{99}$) capturam o impacto transitório do teste estatístico do *Hoeffding Bound* executado a cada `grace_period` amostras.
 
 
-| Dataset | Tarefa | Latência Média | Latência $p_{95}$ | Latência $p_{99}$ | Throughput (Vazão) | Model Footprint | Consumo RAM (SRAM / Heap) | FLOPs / Amostra |
+| Dataset | Tarefa | Latência Média | Latência p95 | Latência p99 | Throughput (Vazão) | Model Footprint | Consumo RAM (SRAM / Heap) | FLOPs / Amostra |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **SEA** | Classificação | **37.36 $\mu$s** | 125.95 $\mu$s | 178.11 $\mu$s | **26,767 amostras/s** | 1,236 B (43 nós) | 112.0 KB (.bss) / **0 B Heap** | **69 FLOPs** |
-| **Electricity** | Classificação | **26.64 $\mu$s** | 50.48 $\mu$s | 70.17 $\mu$s | **37,538 amostras/s** | 2,188 B (77 nós) | 112.0 KB (.bss) / **0 B Heap** | **149 FLOPs** |
-| **Forest Covertype** | Classificação | **541.17 $\mu$s** | 1609.30 $\mu$s | 4134.62 $\mu$s | **1,848 amostras/s** | 2,244 B (79 nós) | 112.0 KB (.bss) / **0 B Heap** | **2,250 FLOPs** |
-| **Airlines** | Classificação | **41.99 $\mu$s** | 53.67 $\mu$s | 935.05 $\mu$s | **23,815 amostras/s** | 676 B (23 nós) | 112.0 KB (.bss) / **0 B Heap** | **133 FLOPs** |
-| **Friedman #1** | Regressão | **66.10 $\mu$s** | 118.65 $\mu$s | 161.13 $\mu$s | **15,129 amostras/s** | 1,180 B (41 nós) | 112.0 KB (.bss) / **0 B Heap** | **138 FLOPs** |
-| **Bikes** | Regressão | **63.42 $\mu$s** | 123.90 $\mu$s | 157.09 $\mu$s | **15,768 amostras/s** | 1,292 B (45 nós) | 112.0 KB (.bss) / **64 B Heap** | **160 FLOPs** |
-| **Appliances Energy** | Regressão | **114.19 $\mu$s** | 234.95 $\mu$s | 305.71 $\mu$s | **8,757 amostras/s** | 1,572 B (55 nós) | 112.0 KB (.bss) / **0 B Heap** | **336 FLOPs** |
-| **NYC Taxi** | Regressão | **40.66 $\mu$s** | 94.04 $\mu$s | 131.65 $\mu$s | **24,594 amostras/s** | 1,572 B (55 nós) | 112.0 KB (.bss) / **0 B Heap** | **105 FLOPs** |
+| **SEA** | Classificação | **37.36 µs** | 125.95 µs | 178.11 µs | **26,767 amostras/s** | 1,236 B (43 nós) | 112.0 KB (.bss) / **0 B Heap** | **69 FLOPs** |
+| **Electricity** | Classificação | **26.64 µs** | 50.48 µs | 70.17 µs | **37,538 amostras/s** | 2,188 B (77 nós) | 112.0 KB (.bss) / **0 B Heap** | **149 FLOPs** |
+| **Forest Covertype** | Classificação | **541.17 µs** | 1609.30 µs | 4134.62 µs | **1,848 amostras/s** | 2,244 B (79 nós) | 112.0 KB (.bss) / **0 B Heap** | **2,250 FLOPs** |
+| **Airlines** | Classificação | **41.99 µs** | 53.67 µs | 935.05 µs | **23,815 amostras/s** | 676 B (23 nós) | 112.0 KB (.bss) / **0 B Heap** | **133 FLOPs** |
+| **Friedman #1** | Regressão | **66.10 µs** | 118.65 µs | 161.13 µs | **15,129 amostras/s** | 1,180 B (41 nós) | 112.0 KB (.bss) / **0 B Heap** | **138 FLOPs** |
+| **Bikes** | Regressão | **63.42 µs** | 123.90 µs | 157.09 µs | **15,768 amostras/s** | 1,292 B (45 nós) | 112.0 KB (.bss) / **64 B Heap** | **160 FLOPs** |
+| **Appliances Energy** | Regressão | **114.19 µs** | 234.95 µs | 305.71 µs | **8,757 amostras/s** | 1,572 B (55 nós) | 112.0 KB (.bss) / **0 B Heap** | **336 FLOPs** |
+| **NYC Taxi** | Regressão | **40.66 µs** | 94.04 µs | 131.65 µs | **24,594 amostras/s** | 1,572 B (55 nós) | 112.0 KB (.bss) / **0 B Heap** | **105 FLOPs** |
 
 ---
 
