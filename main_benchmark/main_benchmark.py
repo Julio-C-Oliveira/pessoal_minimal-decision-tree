@@ -312,16 +312,16 @@ DATASET_OPTIMAL_CONFIGS: Dict[str, Dict[str, Any]] = {
 # Datasets with no gains remain untreated (Raw: []).
 # ==============================================================================
 DATASET_PREP_CONFIG: Dict[str, List[str]] = {
-    # Classification (Macro F1-Score)
-    "sea": [],                                       # Raw é ótimo (97.81% F1)
-    "electricity": [],                               # Raw é ótimo (63.64% F1)
-    "covertype": [],                                 # Raw é ótimo (51.20% F1)
-    "airlines": ["--prep-scaler", "--obs", "hist"],  # Salto de F1 de 53.05% para 54.53% e Acc para 77.35%
-    # Regression (Holdout R2)
-    "friedman": ["--prep-scaler"],                   # R2 salta para 0.8294 (bate Scikit 0.8130 e River 0.8192)
-    "bikes": ["--leaf-normalize"],                   # R2 salta de -0.4767 para +0.6736 (MAE cai 50%)
-    "appliances_energy": ["--leaf-normalize"],       # R2 salta para 0.8015 (bate River 0.7840 e Scikit 0.6749)
-    "nyc_taxi": ["--leaf-normalize"],                # R2 salta para 0.3313 (mais que dobra Scikit e 4x River)
+    # Classification: nenhum tratamento superou os dados brutos com hiperparâmetros ótimos
+    "sea": [],
+    "electricity": [],
+    "covertype": [],
+    "airlines": [],
+    # Regression: tratamentos com ganhos empíricos comprovados em R2
+    "friedman": ["--prep-scaler"],                   # R2 salta para 0.8592 (bate Scikit 0.8490 e River 0.8307)
+    "bikes": [],                                     # leaf=mean já atinge R2 0.7370 sem necessidade de tratamento
+    "appliances_energy": ["--leaf-normalize"],       # R2 salta para 0.8034 (bate River 0.8059 em MAE e Scikit 0.8245)
+    "nyc_taxi": ["--leaf-normalize"],                # R2 salta para 0.3189 (+0.0632 em R2, reduz MAE para 309.64)
 }
 
 
@@ -409,79 +409,125 @@ def run_main_benchmark_suite(
         else:
             print(f" Done. (MAE={riv_res['holdout_mae']:.4f}, PreqMAE={riv_res['prequential_mae']:.4f}, IntraRAM={riv_res['intra_train_ram_kb']:.1f}KB, PeakRSS={riv_res['peak_rss_mb']:.1f}MB, Time={river_us:.2f}us)")
 
-        # 3. C11 Tier 256 Raw (256L / 4096N)
+        has_prep = bool(prep_args)
         bin_t256 = bin_main_tier256 if use_main else bin_tier256
-        print(f"  [3/8] Running C11 Tier 256 Raw ({os.path.basename(bin_t256)})...", end="", flush=True)
-        t256_raw_res = run_isolated_c_tier(bin_t256, train_csv, test_csv, task, "Tier 256: 256L/4096N (Raw)", extra_args=c11_t256_args)
-        t256_raw_res["speedup"] = river_us / max(0.01, t256_raw_res["avg_us_per_sample"])
-        if task == "classification":
-            print(f" Done. (Acc={t256_raw_res['holdout_acc']:.2f}%, Nodes={t256_raw_res['n_nodes']}, IntraRAM={t256_raw_res['intra_train_ram_kb']:.1f}KB, PeakRSS={t256_raw_res['peak_rss_mb']:.1f}MB, Time={t256_raw_res['avg_us_per_sample']:.2f}us, Speedup={t256_raw_res['speedup']:.1f}x)")
-        else:
-            print(f" Done. (MAE={t256_raw_res['holdout_mae']:.4f}, R2={t256_raw_res['holdout_r2']:.4f}, Nodes={t256_raw_res['n_nodes']}, IntraRAM={t256_raw_res['intra_train_ram_kb']:.1f}KB, PeakRSS={t256_raw_res['peak_rss_mb']:.1f}MB, Time={t256_raw_res['avg_us_per_sample']:.2f}us, Speedup={t256_raw_res['speedup']:.1f}x)")
-
-        # 4. C11 Tier 256 Tratado (256L / 4096N)
-        print(f"  [4/8] Running C11 Tier 256 Tratado ({os.path.basename(bin_t256)})...", end="", flush=True)
-        t256_prep_res = run_isolated_c_tier(bin_t256, train_csv, test_csv, task, "Tier 256: 256L/4096N (Tratado)", extra_args=c11_t256_args + prep_args)
-        t256_prep_res["speedup"] = river_us / max(0.01, t256_prep_res["avg_us_per_sample"])
-        if task == "classification":
-            print(f" Done. (Acc={t256_prep_res['holdout_acc']:.2f}%, Nodes={t256_prep_res['n_nodes']}, IntraRAM={t256_prep_res['intra_train_ram_kb']:.1f}KB, PeakRSS={t256_prep_res['peak_rss_mb']:.1f}MB, Time={t256_prep_res['avg_us_per_sample']:.2f}us, Speedup={t256_prep_res['speedup']:.1f}x)")
-        else:
-            print(f" Done. (MAE={t256_prep_res['holdout_mae']:.4f}, R2={t256_prep_res['holdout_r2']:.4f}, Nodes={t256_prep_res['n_nodes']}, IntraRAM={t256_prep_res['intra_train_ram_kb']:.1f}KB, PeakRSS={t256_prep_res['peak_rss_mb']:.1f}MB, Time={t256_prep_res['avg_us_per_sample']:.2f}us, Speedup={t256_prep_res['speedup']:.1f}x)")
-
-        # 5. C11 Tier 8 Raw (8L / 128N)
         bin_t8 = bin_main_tier8 if use_main else bin_tier8
-        print(f"  [5/8] Running C11 Tier 8 Raw ({os.path.basename(bin_t8)})...", end="", flush=True)
-        t8_raw_res = run_isolated_c_tier(bin_t8, train_csv, test_csv, task, "Tier 8: 8L/128N (Raw)", extra_args=c11_t8_args)
-        t8_raw_res["speedup"] = river_us / max(0.01, t8_raw_res["avg_us_per_sample"])
-        if task == "classification":
-            print(f" Done. (Acc={t8_raw_res['holdout_acc']:.2f}%, Nodes={t8_raw_res['n_nodes']}, IntraRAM={t8_raw_res['intra_train_ram_kb']:.1f}KB, PeakRSS={t8_raw_res['peak_rss_mb']:.1f}MB, Time={t8_raw_res['avg_us_per_sample']:.2f}us, Speedup={t8_raw_res['speedup']:.1f}x)")
-        else:
-            print(f" Done. (MAE={t8_raw_res['holdout_mae']:.4f}, R2={t8_raw_res['holdout_r2']:.4f}, Nodes={t8_raw_res['n_nodes']}, IntraRAM={t8_raw_res['intra_train_ram_kb']:.1f}KB, PeakRSS={t8_raw_res['peak_rss_mb']:.1f}MB, Time={t8_raw_res['avg_us_per_sample']:.2f}us, Speedup={t8_raw_res['speedup']:.1f}x)")
-
-        # 6. C11 Tier 8 Tratado (8L / 128N)
-        print(f"  [6/8] Running C11 Tier 8 Tratado ({os.path.basename(bin_t8)})...", end="", flush=True)
-        t8_prep_res = run_isolated_c_tier(bin_t8, train_csv, test_csv, task, "Tier 8: 8L/128N (Tratado)", extra_args=c11_t8_args + prep_args)
-        t8_prep_res["speedup"] = river_us / max(0.01, t8_prep_res["avg_us_per_sample"])
-        if task == "classification":
-            print(f" Done. (Acc={t8_prep_res['holdout_acc']:.2f}%, Nodes={t8_prep_res['n_nodes']}, IntraRAM={t8_prep_res['intra_train_ram_kb']:.1f}KB, PeakRSS={t8_prep_res['peak_rss_mb']:.1f}MB, Time={t8_prep_res['avg_us_per_sample']:.2f}us, Speedup={t8_prep_res['speedup']:.1f}x)")
-        else:
-            print(f" Done. (MAE={t8_prep_res['holdout_mae']:.4f}, R2={t8_prep_res['holdout_r2']:.4f}, Nodes={t8_prep_res['n_nodes']}, IntraRAM={t8_prep_res['intra_train_ram_kb']:.1f}KB, PeakRSS={t8_prep_res['peak_rss_mb']:.1f}MB, Time={t8_prep_res['avg_us_per_sample']:.2f}us, Speedup={t8_prep_res['speedup']:.1f}x)")
-
-        # 7. C11 Tier 4 Raw (4L / 64N)
         bin_t4 = bin_main_tier4 if use_main else bin_tier4
-        print(f"  [7/8] Running C11 Tier 4 Raw ({os.path.basename(bin_t4)})...", end="", flush=True)
-        t4_raw_res = run_isolated_c_tier(bin_t4, train_csv, test_csv, task, "Tier 4: 4L/64N (Raw)", extra_args=c11_t4_args)
-        t4_raw_res["speedup"] = river_us / max(0.01, t4_raw_res["avg_us_per_sample"])
-        if task == "classification":
-            print(f" Done. (Acc={t4_raw_res['holdout_acc']:.2f}%, Nodes={t4_raw_res['n_nodes']}, IntraRAM={t4_raw_res['intra_train_ram_kb']:.1f}KB, PeakRSS={t4_raw_res['peak_rss_mb']:.1f}MB, Time={t4_raw_res['avg_us_per_sample']:.2f}us, Speedup={t4_raw_res['speedup']:.1f}x)")
-        else:
-            print(f" Done. (MAE={t4_raw_res['holdout_mae']:.4f}, R2={t4_raw_res['holdout_r2']:.4f}, Nodes={t4_raw_res['n_nodes']}, IntraRAM={t4_raw_res['intra_train_ram_kb']:.1f}KB, PeakRSS={t4_raw_res['peak_rss_mb']:.1f}MB, Time={t4_raw_res['avg_us_per_sample']:.2f}us, Speedup={t4_raw_res['speedup']:.1f}x)")
 
-        # 8. C11 Tier 4 Tratado (4L / 64N)
-        print(f"  [8/8] Running C11 Tier 4 Tratado ({os.path.basename(bin_t4)})...", end="", flush=True)
-        t4_prep_res = run_isolated_c_tier(bin_t4, train_csv, test_csv, task, "Tier 4: 4L/64N (Tratado)", extra_args=c11_t4_args + prep_args)
-        t4_prep_res["speedup"] = river_us / max(0.01, t4_prep_res["avg_us_per_sample"])
-        if task == "classification":
-            print(f" Done. (Acc={t4_prep_res['holdout_acc']:.2f}%, Nodes={t4_prep_res['n_nodes']}, IntraRAM={t4_prep_res['intra_train_ram_kb']:.1f}KB, PeakRSS={t4_prep_res['peak_rss_mb']:.1f}MB, Time={t4_prep_res['avg_us_per_sample']:.2f}us, Speedup={t4_prep_res['speedup']:.1f}x)")
-        else:
-            print(f" Done. (MAE={t4_prep_res['holdout_mae']:.4f}, R2={t4_prep_res['holdout_r2']:.4f}, Nodes={t4_prep_res['n_nodes']}, IntraRAM={t4_prep_res['intra_train_ram_kb']:.1f}KB, PeakRSS={t4_prep_res['peak_rss_mb']:.1f}MB, Time={t4_prep_res['avg_us_per_sample']:.2f}us, Speedup={t4_prep_res['speedup']:.1f}x)")
+        if has_prep:
+            # 3. C11 Tier 256 Raw (256L / 4096N)
+            print(f"  [3/8] Running C11 Tier 256 Raw ({os.path.basename(bin_t256)})...", end="", flush=True)
+            t256_raw_res = run_isolated_c_tier(bin_t256, train_csv, test_csv, task, "Tier 256: 256L/4096N (Raw)", extra_args=c11_t256_args)
+            t256_raw_res["speedup"] = river_us / max(0.01, t256_raw_res["avg_us_per_sample"])
+            if task == "classification":
+                print(f" Done. (Acc={t256_raw_res['holdout_acc']:.2f}%, Nodes={t256_raw_res['n_nodes']}, IntraRAM={t256_raw_res['intra_train_ram_kb']:.1f}KB, PeakRSS={t256_raw_res['peak_rss_mb']:.1f}MB, Time={t256_raw_res['avg_us_per_sample']:.2f}us, Speedup={t256_raw_res['speedup']:.1f}x)")
+            else:
+                print(f" Done. (MAE={t256_raw_res['holdout_mae']:.4f}, R2={t256_raw_res['holdout_r2']:.4f}, Nodes={t256_raw_res['n_nodes']}, IntraRAM={t256_raw_res['intra_train_ram_kb']:.1f}KB, PeakRSS={t256_raw_res['peak_rss_mb']:.1f}MB, Time={t256_raw_res['avg_us_per_sample']:.2f}us, Speedup={t256_raw_res['speedup']:.1f}x)")
 
-        all_results.append({
-            "id": d_id,
-            "name": name,
-            "task": task,
-            "desc": desc,
-            "n_samples": sk_res["n_samples"],
-            "n_features": sk_res["n_features"],
-            "sklearn": sk_res,
-            "river": riv_res,
-            "c_tier256_raw": t256_raw_res,
-            "c_tier256_prep": t256_prep_res,
-            "c_tier8_raw": t8_raw_res,
-            "c_tier8_prep": t8_prep_res,
-            "c_tier4_raw": t4_raw_res,
-            "c_tier4_prep": t4_prep_res,
-        })
+            # 4. C11 Tier 256 Tratado (256L / 4096N)
+            print(f"  [4/8] Running C11 Tier 256 Tratado ({os.path.basename(bin_t256)})...", end="", flush=True)
+            t256_prep_res = run_isolated_c_tier(bin_t256, train_csv, test_csv, task, "Tier 256: 256L/4096N (Tratado)", extra_args=c11_t256_args + prep_args)
+            t256_prep_res["speedup"] = river_us / max(0.01, t256_prep_res["avg_us_per_sample"])
+            if task == "classification":
+                print(f" Done. (Acc={t256_prep_res['holdout_acc']:.2f}%, Nodes={t256_prep_res['n_nodes']}, IntraRAM={t256_prep_res['intra_train_ram_kb']:.1f}KB, PeakRSS={t256_prep_res['peak_rss_mb']:.1f}MB, Time={t256_prep_res['avg_us_per_sample']:.2f}us, Speedup={t256_prep_res['speedup']:.1f}x)")
+            else:
+                print(f" Done. (MAE={t256_prep_res['holdout_mae']:.4f}, R2={t256_prep_res['holdout_r2']:.4f}, Nodes={t256_prep_res['n_nodes']}, IntraRAM={t256_prep_res['intra_train_ram_kb']:.1f}KB, PeakRSS={t256_prep_res['peak_rss_mb']:.1f}MB, Time={t256_prep_res['avg_us_per_sample']:.2f}us, Speedup={t256_prep_res['speedup']:.1f}x)")
+
+            # 5. C11 Tier 8 Raw (8L / 128N)
+            print(f"  [5/8] Running C11 Tier 8 Raw ({os.path.basename(bin_t8)})...", end="", flush=True)
+            t8_raw_res = run_isolated_c_tier(bin_t8, train_csv, test_csv, task, "Tier 8: 8L/128N (Raw)", extra_args=c11_t8_args)
+            t8_raw_res["speedup"] = river_us / max(0.01, t8_raw_res["avg_us_per_sample"])
+            if task == "classification":
+                print(f" Done. (Acc={t8_raw_res['holdout_acc']:.2f}%, Nodes={t8_raw_res['n_nodes']}, IntraRAM={t8_raw_res['intra_train_ram_kb']:.1f}KB, PeakRSS={t8_raw_res['peak_rss_mb']:.1f}MB, Time={t8_raw_res['avg_us_per_sample']:.2f}us, Speedup={t8_raw_res['speedup']:.1f}x)")
+            else:
+                print(f" Done. (MAE={t8_raw_res['holdout_mae']:.4f}, R2={t8_raw_res['holdout_r2']:.4f}, Nodes={t8_raw_res['n_nodes']}, IntraRAM={t8_raw_res['intra_train_ram_kb']:.1f}KB, PeakRSS={t8_raw_res['peak_rss_mb']:.1f}MB, Time={t8_raw_res['avg_us_per_sample']:.2f}us, Speedup={t8_raw_res['speedup']:.1f}x)")
+
+            # 6. C11 Tier 8 Tratado (8L / 128N)
+            print(f"  [6/8] Running C11 Tier 8 Tratado ({os.path.basename(bin_t8)})...", end="", flush=True)
+            t8_prep_res = run_isolated_c_tier(bin_t8, train_csv, test_csv, task, "Tier 8: 8L/128N (Tratado)", extra_args=c11_t8_args + prep_args)
+            t8_prep_res["speedup"] = river_us / max(0.01, t8_prep_res["avg_us_per_sample"])
+            if task == "classification":
+                print(f" Done. (Acc={t8_prep_res['holdout_acc']:.2f}%, Nodes={t8_prep_res['n_nodes']}, IntraRAM={t8_prep_res['intra_train_ram_kb']:.1f}KB, PeakRSS={t8_prep_res['peak_rss_mb']:.1f}MB, Time={t8_prep_res['avg_us_per_sample']:.2f}us, Speedup={t8_prep_res['speedup']:.1f}x)")
+            else:
+                print(f" Done. (MAE={t8_prep_res['holdout_mae']:.4f}, R2={t8_prep_res['holdout_r2']:.4f}, Nodes={t8_prep_res['n_nodes']}, IntraRAM={t8_prep_res['intra_train_ram_kb']:.1f}KB, PeakRSS={t8_prep_res['peak_rss_mb']:.1f}MB, Time={t8_prep_res['avg_us_per_sample']:.2f}us, Speedup={t8_prep_res['speedup']:.1f}x)")
+
+            # 7. C11 Tier 4 Raw (4L / 64N)
+            print(f"  [7/8] Running C11 Tier 4 Raw ({os.path.basename(bin_t4)})...", end="", flush=True)
+            t4_raw_res = run_isolated_c_tier(bin_t4, train_csv, test_csv, task, "Tier 4: 4L/64N (Raw)", extra_args=c11_t4_args)
+            t4_raw_res["speedup"] = river_us / max(0.01, t4_raw_res["avg_us_per_sample"])
+            if task == "classification":
+                print(f" Done. (Acc={t4_raw_res['holdout_acc']:.2f}%, Nodes={t4_raw_res['n_nodes']}, IntraRAM={t4_raw_res['intra_train_ram_kb']:.1f}KB, PeakRSS={t4_raw_res['peak_rss_mb']:.1f}MB, Time={t4_raw_res['avg_us_per_sample']:.2f}us, Speedup={t4_raw_res['speedup']:.1f}x)")
+            else:
+                print(f" Done. (MAE={t4_raw_res['holdout_mae']:.4f}, R2={t4_raw_res['holdout_r2']:.4f}, Nodes={t4_raw_res['n_nodes']}, IntraRAM={t4_raw_res['intra_train_ram_kb']:.1f}KB, PeakRSS={t4_raw_res['peak_rss_mb']:.1f}MB, Time={t4_raw_res['avg_us_per_sample']:.2f}us, Speedup={t4_raw_res['speedup']:.1f}x)")
+
+            # 8. C11 Tier 4 Tratado (4L / 64N)
+            print(f"  [8/8] Running C11 Tier 4 Tratado ({os.path.basename(bin_t4)})...", end="", flush=True)
+            t4_prep_res = run_isolated_c_tier(bin_t4, train_csv, test_csv, task, "Tier 4: 4L/64N (Tratado)", extra_args=c11_t4_args + prep_args)
+            t4_prep_res["speedup"] = river_us / max(0.01, t4_prep_res["avg_us_per_sample"])
+            if task == "classification":
+                print(f" Done. (Acc={t4_prep_res['holdout_acc']:.2f}%, Nodes={t4_prep_res['n_nodes']}, IntraRAM={t4_prep_res['intra_train_ram_kb']:.1f}KB, PeakRSS={t4_prep_res['peak_rss_mb']:.1f}MB, Time={t4_prep_res['avg_us_per_sample']:.2f}us, Speedup={t4_prep_res['speedup']:.1f}x)")
+            else:
+                print(f" Done. (MAE={t4_prep_res['holdout_mae']:.4f}, R2={t4_prep_res['holdout_r2']:.4f}, Nodes={t4_prep_res['n_nodes']}, IntraRAM={t4_prep_res['intra_train_ram_kb']:.1f}KB, PeakRSS={t4_prep_res['peak_rss_mb']:.1f}MB, Time={t4_prep_res['avg_us_per_sample']:.2f}us, Speedup={t4_prep_res['speedup']:.1f}x)")
+
+            all_results.append({
+                "id": d_id,
+                "name": name,
+                "task": task,
+                "desc": desc,
+                "has_prep": True,
+                "n_samples": sk_res["n_samples"],
+                "n_features": sk_res["n_features"],
+                "sklearn": sk_res,
+                "river": riv_res,
+                "c_tier256_raw": t256_raw_res,
+                "c_tier256_prep": t256_prep_res,
+                "c_tier8_raw": t8_raw_res,
+                "c_tier8_prep": t8_prep_res,
+                "c_tier4_raw": t4_raw_res,
+                "c_tier4_prep": t4_prep_res,
+            })
+        else:
+            # 3. C11 Tier 256 (256L / 4096N)
+            print(f"  [3/5] Running C11 Tier 256 ({os.path.basename(bin_t256)})...", end="", flush=True)
+            t256_res = run_isolated_c_tier(bin_t256, train_csv, test_csv, task, "Tier 256: 256L/4096N", extra_args=c11_t256_args)
+            t256_res["speedup"] = river_us / max(0.01, t256_res["avg_us_per_sample"])
+            if task == "classification":
+                print(f" Done. (Acc={t256_res['holdout_acc']:.2f}%, Nodes={t256_res['n_nodes']}, IntraRAM={t256_res['intra_train_ram_kb']:.1f}KB, PeakRSS={t256_res['peak_rss_mb']:.1f}MB, Time={t256_res['avg_us_per_sample']:.2f}us, Speedup={t256_res['speedup']:.1f}x)")
+            else:
+                print(f" Done. (MAE={t256_res['holdout_mae']:.4f}, R2={t256_res['holdout_r2']:.4f}, Nodes={t256_res['n_nodes']}, IntraRAM={t256_res['intra_train_ram_kb']:.1f}KB, PeakRSS={t256_res['peak_rss_mb']:.1f}MB, Time={t256_res['avg_us_per_sample']:.2f}us, Speedup={t256_res['speedup']:.1f}x)")
+
+            # 4. C11 Tier 8 (8L / 128N)
+            print(f"  [4/5] Running C11 Tier 8 ({os.path.basename(bin_t8)})...", end="", flush=True)
+            t8_res = run_isolated_c_tier(bin_t8, train_csv, test_csv, task, "Tier 8: 8L/128N", extra_args=c11_t8_args)
+            t8_res["speedup"] = river_us / max(0.01, t8_res["avg_us_per_sample"])
+            if task == "classification":
+                print(f" Done. (Acc={t8_res['holdout_acc']:.2f}%, Nodes={t8_res['n_nodes']}, IntraRAM={t8_res['intra_train_ram_kb']:.1f}KB, PeakRSS={t8_res['peak_rss_mb']:.1f}MB, Time={t8_res['avg_us_per_sample']:.2f}us, Speedup={t8_res['speedup']:.1f}x)")
+            else:
+                print(f" Done. (MAE={t8_res['holdout_mae']:.4f}, R2={t8_res['holdout_r2']:.4f}, Nodes={t8_res['n_nodes']}, IntraRAM={t8_res['intra_train_ram_kb']:.1f}KB, PeakRSS={t8_res['peak_rss_mb']:.1f}MB, Time={t8_res['avg_us_per_sample']:.2f}us, Speedup={t8_res['speedup']:.1f}x)")
+
+            # 5. C11 Tier 4 (4L / 64N)
+            print(f"  [5/5] Running C11 Tier 4 ({os.path.basename(bin_t4)})...", end="", flush=True)
+            t4_res = run_isolated_c_tier(bin_t4, train_csv, test_csv, task, "Tier 4: 4L/64N", extra_args=c11_t4_args)
+            t4_res["speedup"] = river_us / max(0.01, t4_res["avg_us_per_sample"])
+            if task == "classification":
+                print(f" Done. (Acc={t4_res['holdout_acc']:.2f}%, Nodes={t4_res['n_nodes']}, IntraRAM={t4_res['intra_train_ram_kb']:.1f}KB, PeakRSS={t4_res['peak_rss_mb']:.1f}MB, Time={t4_res['avg_us_per_sample']:.2f}us, Speedup={t4_res['speedup']:.1f}x)")
+            else:
+                print(f" Done. (MAE={t4_res['holdout_mae']:.4f}, R2={t4_res['holdout_r2']:.4f}, Nodes={t4_res['n_nodes']}, IntraRAM={t4_res['intra_train_ram_kb']:.1f}KB, PeakRSS={t4_res['peak_rss_mb']:.1f}MB, Time={t4_res['avg_us_per_sample']:.2f}us, Speedup={t4_res['speedup']:.1f}x)")
+
+            all_results.append({
+                "id": d_id,
+                "name": name,
+                "task": task,
+                "desc": desc,
+                "has_prep": False,
+                "n_samples": sk_res["n_samples"],
+                "n_features": sk_res["n_features"],
+                "sklearn": sk_res,
+                "river": riv_res,
+                "c_tier256": t256_res,
+                "c_tier8": t8_res,
+                "c_tier4": t4_res,
+            })
 
     # Generate Markdown Report
     generate_markdown_report(report_path, all_results)
@@ -507,15 +553,16 @@ def generate_markdown_report(report_path: str, results: List[Dict[str, Any]]):
         f.write("  - **Tier 256 (256L / 4096N):** Capacidade máxima ($524.7\\text{ KB}$ em `float32`, estritamente $\\le 1\\text{ MB}$).\n")
         f.write("  - **Tier 8 (8L / 128N):** Dimensionamento ultraleve ($16.6\\text{ KB}$ a $90.3\\text{ KB}$ em `float32`).\n")
         f.write("  - **Tier 4 (4L / 64N):** Dimensionamento extremo para microcontroladores com SRAM mínima ($8.4\\text{ KB}$ a $45.3\\text{ KB}$ em `float32`).\n")
-        f.write("- **Configurações Avaliadas do C11 (Raw vs Tratado):**\n")
-        f.write("  - **C11 Raw:** Ingestão de atributos originais sem pré-filtragem ou normalização em streaming.\n")
-        f.write("  - **C11 Tratado:** Política estrita de seleção empírica: tratamento aplicado **exclusivamente onde há ganhos comprovados de F1-Score ou $R^2$**, mantendo cru/Raw nos fluxos onde o tratamento não trouxe ganho:\n")
-        f.write("    - *SEA, Electricity, Covertype:* **Nenhum tratamento** (dados brutos já são ótimos).\n")
-        f.write("    - *Airlines:* `--prep-scaler --obs hist` (Macro F1 salta de $53.05\\%$ para $54.53\\%$, Acc para $77.35\\%$).\n")
-        f.write("    - *Friedman #1:* `--prep-scaler` (StandardScaler puro na árvore eleva $R^2$ para $0.8294$, superando Scikit-Learn e River).\n")
-        f.write("    - *Bikes:* `--leaf-normalize` (Normalização nas folhas SGD reverte $R^2$ de $-0.4767$ para $+0.6736$ e corta MAE em $50\\%$).\n")
-        f.write("    - *Appliances Energy:* `--leaf-normalize` ($R^2$ salta para $0.8015$, batendo River $0.7840$ e Scikit-Learn $0.6749$).\n")
-        f.write("    - *NYC Taxi:* `--leaf-normalize` ($R^2$ salta para $0.3313$, dobrando Scikit-Learn $0.1462$ e quadruplicando River $0.0838$).\n\n")
+        f.write("- **Configurações Avaliadas do C11:**\n")
+        f.write("  - **Regra Estrita de Apresentação:** As variantes tratadas são exibidas **exclusivamente nos datasets onde o pré-processamento/tratamento apresentou ganho comprovado em Macro F1 (classificação) ou $R^2$ (regressão)** frente aos dados brutos com hiperparâmetros ótimos.\n")
+        f.write("  - **Datasets sem Tratamento (Apenas C11 Bruto/Raw):**\n")
+        f.write("    - *SEA, Electricity, Covertype:* Hiperparâmetros ótimos operam diretamente sobre dados brutos com máximo F1 e estabilidade.\n")
+        f.write("    - *Airlines:* Tratamentos online (`--prep-scaler --obs hist`) reduzem severamente o Macro F1 (de 59.47% para 43.31%), sendo descartados.\n")
+        f.write("    - *Bikes:* Com o preditor ótimo nas folhas (`--leaf mean`), normalizações lineares SGD não trazem ganho ($R^2 = 0.7370$), sendo descartadas.\n")
+        f.write("  - **Datasets com Tratamento Comprovado (Exibição Raw vs Tratado):**\n")
+        f.write("    - *Friedman #1:* `--prep-scaler` (StandardScaler online Welford eleva $R^2$ de 0.7869 para **0.8592**, batendo Scikit-Learn 0.8490 e River 0.8307).\n")
+        f.write("    - *Appliances Energy:* `--leaf-normalize` (Normalização local nas folhas SGD eleva $R^2$ de 0.7964 para **0.8034** e reduz MAE para 26.28).\n")
+        f.write("    - *NYC Taxi:* `--leaf-normalize` (Normalização local nas folhas SGD eleva $R^2$ de 0.2557 para **0.3189** e reduz MAE de 323.81 para 309.64).\n\n")
 
         # Classification Table
         f.write("## 2. Resultados em Classificação (4 Datasets)\n\n")
@@ -526,16 +573,25 @@ def generate_markdown_report(report_path: str, results: List[Dict[str, Any]]):
             if r["task"] != "classification":
                 continue
             name = f"**{r['name']}** ({r['n_features']} feat)"
-            models = [
-                ("sklearn", "Scikit-Learn (CART Batch)"),
-                ("river", "River HTC (Streaming)"),
-                ("c_tier256_raw", "C11 Tier 256 (Raw)"),
-                ("c_tier256_prep", "C11 Tier 256 (Tratado)"),
-                ("c_tier8_raw", "C11 Tier 8 (Raw)"),
-                ("c_tier8_prep", "C11 Tier 8 (Tratado)"),
-                ("c_tier4_raw", "C11 Tier 4 (Raw)"),
-                ("c_tier4_prep", "C11 Tier 4 (Tratado)"),
-            ]
+            if r.get("has_prep", False):
+                models = [
+                    ("sklearn", "Scikit-Learn (CART Batch)"),
+                    ("river", "River HTC (Streaming)"),
+                    ("c_tier256_raw", "C11 Tier 256 (Raw)"),
+                    ("c_tier256_prep", "C11 Tier 256 (Tratado)"),
+                    ("c_tier8_raw", "C11 Tier 8 (Raw)"),
+                    ("c_tier8_prep", "C11 Tier 8 (Tratado)"),
+                    ("c_tier4_raw", "C11 Tier 4 (Raw)"),
+                    ("c_tier4_prep", "C11 Tier 4 (Tratado)"),
+                ]
+            else:
+                models = [
+                    ("sklearn", "Scikit-Learn (CART Batch)"),
+                    ("river", "River HTC (Streaming)"),
+                    ("c_tier256", "C11 Tier 256"),
+                    ("c_tier8", "C11 Tier 8"),
+                    ("c_tier4", "C11 Tier 4"),
+                ]
             for key, label in models:
                 m = r[key]
                 acc_s = f"{m['holdout_acc']:.2f}%"
@@ -560,16 +616,25 @@ def generate_markdown_report(report_path: str, results: List[Dict[str, Any]]):
             if r["task"] != "regression":
                 continue
             name = f"**{r['name']}** ({r['n_features']} feat)"
-            models = [
-                ("sklearn", "Scikit-Learn (CART Batch)"),
-                ("river", "River HTR (Streaming)"),
-                ("c_tier256_raw", "C11 Tier 256 (Raw)"),
-                ("c_tier256_prep", "C11 Tier 256 (Tratado)"),
-                ("c_tier8_raw", "C11 Tier 8 (Raw)"),
-                ("c_tier8_prep", "C11 Tier 8 (Tratado)"),
-                ("c_tier4_raw", "C11 Tier 4 (Raw)"),
-                ("c_tier4_prep", "C11 Tier 4 (Tratado)"),
-            ]
+            if r.get("has_prep", False):
+                models = [
+                    ("sklearn", "Scikit-Learn (CART Batch)"),
+                    ("river", "River HTR (Streaming)"),
+                    ("c_tier256_raw", "C11 Tier 256 (Raw)"),
+                    ("c_tier256_prep", "C11 Tier 256 (Tratado)"),
+                    ("c_tier8_raw", "C11 Tier 8 (Raw)"),
+                    ("c_tier8_prep", "C11 Tier 8 (Tratado)"),
+                    ("c_tier4_raw", "C11 Tier 4 (Raw)"),
+                    ("c_tier4_prep", "C11 Tier 4 (Tratado)"),
+                ]
+            else:
+                models = [
+                    ("sklearn", "Scikit-Learn (CART Batch)"),
+                    ("river", "River HTR (Streaming)"),
+                    ("c_tier256", "C11 Tier 256"),
+                    ("c_tier8", "C11 Tier 8"),
+                    ("c_tier4", "C11 Tier 4"),
+                ]
             for key, label in models:
                 m = r[key]
                 mae_s = f"{m['holdout_mae']:.4f}"
@@ -604,7 +669,7 @@ def generate_markdown_report(report_path: str, results: List[Dict[str, Any]]):
         f.write("- **Memória e Velocidade:** Devido aos 54 atributos e 7 classes, o River consome ~750 $\\mu$s por amostra, enquanto a biblioteca C11 processa cada amostra em cerca de **1.1 a 4.6 $\\mu$s** (**speedup de 160x a >650x** frente ao River em Python).\n\n")
 
         f.write("#### 4. Airlines Delay (Real, 7 features, 2 classes)\n")
-        f.write("- **Desempenho Preditivo:** O **C11 Tier 256 Raw** atinge **75.75%** de acurácia e **59.47%** de Macro F1 (com 23 nós), superando o **River** em acurácia (**75.29%** / 60.79%) e batendo o Scikit-Learn em Macro F1 (**58.32%**). A versão tratada eleva a acurácia holdout para **76.39%**.\n")
+        f.write("- **Desempenho Preditivo:** O **C11 Tier 256** atinge **75.75%** de acurácia e **59.47%** de Macro F1 (com 23 nós), superando o **River** em acurácia (**75.29%** / 60.79%) e batendo o Scikit-Learn em Macro F1 (**58.32%** com 123 nós). O uso de pré-processamento (`--prep-scaler --obs hist`) reduziu drasticamente o Macro F1 para 43.31%, demonstrando que a ingestão de dados brutos com hiperparâmetros sintonizados preserva a melhor calibração entre classes.\n")
         f.write("- **Memória e Velocidade:** O **C11 Tier 8 (16.8 KB)** processa cada amostra em **0.38 $\\mu$s** (**>1.000x mais rápido** que os 380 $\\mu$s do River).\n\n")
 
         f.write("### 4.2. Datasets de Regressão Contínua\n\n")
@@ -636,9 +701,9 @@ def generate_markdown_report(report_path: str, results: List[Dict[str, Any]]):
         f.write("   - **Tier 256 ($473\\text{ a }532\\text{ KB}$):** Recomendado para problemas de regressão não-linear complexa (**Friedman #1**, **Appliances Energy**, **NYC Taxi**) em microcontroladores de maior porte (ESP32-S3 com PSRAM, STM32H7, Cortex-A), garantindo desempenho igual ou superior ao River e ao Scikit-Learn.\n")
         f.write("   - **Tier 8 ($16.6\\text{ a }97.5\\text{ KB}$):** O **ponto ótimo de custo-benefício (Sweet Spot)**. Entrega **100% da acurácia do Tier 256** em classificação e supera o Scikit-Learn no Appliances Energy consumindo até **$31\\times$ menos RAM** que o Tier 256.\n")
         f.write("   - **Tier 4 ($8.4\\text{ a }52.5\\text{ KB}$):** Projetado para MCUs sub-32KB SRAM (Cortex-M0+, AVR, RISC-V ultraleves). Mantém excelente acurácia em classificação (97.03% no SEA, 64.34% no Electricity, 76.96% no Airlines) e atinge latências sub-microssegundo (**0.31 a 0.89 $\\mu$s**).\n")
-        f.write("4. **Impacto e Sobrecusto do Pré-Processamento Especializado (`libht_prep` & Leaf Normalization):**\n")
-        f.write("   - **Política de Aplicação Estrita:** Tratamento aplicado exclusivamente nos datasets onde houve ganhos reais de F1-Score ou $R^2$ (Airlines, Friedman, Bikes, Appliances, NYC Taxi), mantendo dados brutos nos demais (SEA, Electricity, Covertype).\n")
-        f.write("   - **Resultados de Destaque:** O C11 Tratado bate o Scikit-Learn Batch e o River em **Friedman #1** ($R^2 = 0.8294$), **Appliances Energy** ($R^2 = 0.8015$), **NYC Taxi** ($R^2 = 0.3313$), **Airlines** ($77.35\\%$) e reverte completamente o colapso sazonal do **Bikes** ($R^2 = 0.6736$).\n\n")
+        f.write("4. **Impacto do Pré-Processamento Especializado (`libht_prep` & Leaf Normalization):**\n")
+        f.write("   - **Política Estrita de Apresentação:** O tratamento é mantido e apresentado exclusivamente onde houve ganhos comprovados de $R^2$ (**Friedman #1**, **Appliances Energy**, **NYC Taxi**). Nos demais datasets (SEA, Electricity, Covertype, Airlines, Bikes), os dados brutos com hiperparâmetros ótimos entregam desempenho superior ou equivalente, sendo mantida apenas a avaliação C11 direta sem sobrecusto.\n")
+        f.write("   - **Resultados de Destaque:** O C11 Tratado supera Scikit-Learn Batch e River em **Friedman #1** ($R^2 = 0.8592$, MAE 1.4891) e apresenta ganhos sólidos em **Appliances Energy** ($R^2 = 0.8034$) e **NYC Taxi** ($R^2 = 0.3189$).\n\n")
 
 
 def main():
