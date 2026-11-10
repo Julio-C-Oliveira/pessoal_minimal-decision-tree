@@ -453,7 +453,7 @@ Toda a documentação detalhada do projeto está organizada na pasta **[`wiki/`]
 
 ```text
 pessoal_minimal-decision-tree/
-├── LICENSE                      # Licença BSD 3-Clause + Avisos de Copyright (River e Scikit-Learn)
+├── LICENSE                      # Licença MPL 2.0 + Avisos de Copyright (River e Scikit-Learn)
 ├── VERSION                      # Versão canônica do projeto (SemVer 2.0.0)
 ├── README.md                    # Visão geral, Quick Start e índice de navegação
 ├── Makefile                     # Root Makefile (compilação, testes e benchmarks)
@@ -468,6 +468,6 @@ pessoal_minimal-decision-tree/
 
 ---
 
-## 7. Licença (`BSD 3-Clause`)
+## 7. Licença (`MPL 2.0`)
 
-Distribuído sob a licença permissiva **[BSD 3-Clause License](LICENSE)** (`SPDX-License-Identifier: BSD-3-Clause`), permitindo uso livre acadêmico, pessoal ou comercial (em código-fonte ou firmware binário) e preservando integralmente os avisos de direitos autorais dos projetos de referência **River** ([`references/river_tree/LICENSE`](references/river_tree/LICENSE)) e **Scikit-Learn** ([`references/sklearn_tree/COPYING`](references/sklearn_tree/COPYING)).
+Distribuído sob a licença de código aberto **[Mozilla Public License 2.0 (MPL 2.0)](LICENSE)** (`SPDX-License-Identifier: MPL-2.0`), permitindo uso livre acadêmico, pessoal ou comercial (inclusive integração a obras maiores e firmwares proprietários, exigindo que modificações diretas nos arquivos cobertos do Kansho permaneçam sob MPL 2.0) e preservando integralmente os avisos de direitos autorais dos projetos de referência **River** ([`references/river_tree/LICENSE`](references/river_tree/LICENSE)) e **Scikit-Learn** ([`references/sklearn_tree/COPYING`](references/sklearn_tree/COPYING)).
