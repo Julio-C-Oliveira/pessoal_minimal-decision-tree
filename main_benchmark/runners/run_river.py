@@ -25,6 +25,8 @@ from river import tree, metrics
 from sklearn.metrics import (
     accuracy_score,
     f1_score,
+    precision_score,
+    recall_score,
     mean_absolute_error,
     mean_squared_error,
     r2_score,
@@ -78,6 +80,12 @@ def main():
     parser.add_argument("--train-csv", required=True)
     parser.add_argument("--test-csv", required=True)
     parser.add_argument("--task", default="classification", choices=["classification", "regression"])
+    parser.add_argument("--grace-period", type=int, default=200)
+    parser.add_argument("--delta", type=float, default=1e-7)
+    parser.add_argument("--tau", type=float, default=0.05)
+    parser.add_argument("--leaf-prediction", default=None)
+    parser.add_argument("--split-criterion", default="info_gain", choices=["info_gain", "gini"])
+    parser.add_argument("--splitter", default="default")
     args = parser.parse_args()
 
     tracemalloc.start()
@@ -89,25 +97,48 @@ def main():
     nominal_attrs = [i for i, t in enumerate(feat_types) if t == 1]
 
     if args.task == "regression":
+        leaf_p = args.leaf_prediction if args.leaf_prediction else "adaptive"
+        if leaf_p not in ["adaptive", "mean", "model"]:
+            leaf_p = "adaptive"
+
+        reg_splitter = None
+        if args.splitter in ["ebst", "EBSTSplitter"]:
+            reg_splitter = tree.splitter.EBSTSplitter()
+        elif args.splitter in ["tebst", "TEBSTSplitter", "default"]:
+            reg_splitter = tree.splitter.TEBSTSplitter()
+
         model = tree.HoeffdingTreeRegressor(
-            grace_period=200,
-            delta=1e-7,
-            tau=0.05,
-            leaf_prediction="adaptive",
+            grace_period=args.grace_period,
+            delta=args.delta,
+            tau=args.tau,
+            leaf_prediction=leaf_p,
             min_samples_split=5,
             binary_split=True,
             nominal_attributes=nominal_attrs if nominal_attrs else None,
+            splitter=reg_splitter,
         )
         mae_metric = metrics.MAE()
     else:
+        leaf_p = args.leaf_prediction if args.leaf_prediction else "nba"
+        if leaf_p == "adaptive":
+            leaf_p = "nba"
+        if leaf_p not in ["nba", "nb", "mc"]:
+            leaf_p = "nba"
+
+        clf_splitter = None
+        if args.splitter in ["histogram", "HistogramSplitter", "ebst"]:
+            clf_splitter = tree.splitter.HistogramSplitter()
+        else:
+            clf_splitter = tree.splitter.GaussianSplitter(n_splits=10)
+
         model = tree.HoeffdingTreeClassifier(
-            grace_period=200,
-            delta=1e-7,
-            tau=0.05,
-            split_criterion="info_gain",
-            leaf_prediction="nba",
+            grace_period=args.grace_period,
+            delta=args.delta,
+            tau=args.tau,
+            split_criterion=args.split_criterion,
+            leaf_prediction=leaf_p,
             nominal_attributes=nominal_attrs if nominal_attrs else None,
-            splitter=tree.splitter.GaussianSplitter(n_splits=10),
+            splitter=clf_splitter,
             binary_split=True,
         )
         acc_metric = metrics.Accuracy()
@@ -186,6 +217,11 @@ def main():
     else:
         res["holdout_acc"] = float(accuracy_score(y_trues, y_preds) * 100.0)
         res["f1_macro"] = float(f1_score(y_trues, y_preds, average="macro", zero_division=0) * 100.0)
+        res["f1_weighted"] = float(f1_score(y_trues, y_preds, average="weighted", zero_division=0) * 100.0)
+        res["precision_macro"] = float(precision_score(y_trues, y_preds, average="macro", zero_division=0) * 100.0)
+        res["precision_weighted"] = float(precision_score(y_trues, y_preds, average="weighted", zero_division=0) * 100.0)
+        res["recall_macro"] = float(recall_score(y_trues, y_preds, average="macro", zero_division=0) * 100.0)
+        res["recall_weighted"] = float(recall_score(y_trues, y_preds, average="weighted", zero_division=0) * 100.0)
         res["prequential_acc"] = float(acc_metric.get() * 100.0)
 
     print(json.dumps(res))

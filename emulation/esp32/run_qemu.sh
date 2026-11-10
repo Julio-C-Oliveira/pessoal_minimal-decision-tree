@@ -140,6 +140,7 @@ cmd_qemu() {
     if [ "${USE_DOCKER}" -eq 1 ]; then
         log_info "Starting ESP32 QEMU via Docker container on port ${target_port}..."
         docker run --rm -it \
+            --entrypoint "" \
             -v "${PROJECT_ROOT}:/project" \
             -w "/project/emulation/esp32" \
             -p "${target_port}:${target_port}" \
@@ -187,6 +188,7 @@ cmd_bench() {
         docker rm -f esp32_qemu_bench >/dev/null 2>&1 || true
         docker run -d --rm \
             --name esp32_qemu_bench \
+            --entrypoint "" \
             -v "${PROJECT_ROOT}:/project" \
             -w "/project/emulation/esp32" \
             -p "${target_port}:${target_port}" \
@@ -236,13 +238,23 @@ cmd_bench() {
         extra_args+=(--max-samples "${max_samp}")
     fi
 
-    log_info "Running ESP32 Stream Benchmark Runner via ${PYTHON_BIN}..."
-    "${PYTHON_BIN}" "${SCRIPT_DIR}/stream_runner.py" \
-        --host 127.0.0.1 \
-        --port "${target_port}" \
-        --suite main \
-        --report "${SCRIPT_DIR}/esp32_emulation_report.md" \
-        ${extra_args[@]+"${extra_args[@]}"}
+    if [ "${USE_DOCKER}" -eq 1 ]; then
+        log_info "Running ESP32 Stream Benchmark Runner via Docker container (esp32_qemu_bench)..."
+        docker exec esp32_qemu_bench python3 "/project/emulation/esp32/stream_runner.py" \
+            --host 127.0.0.1 \
+            --port "${target_port}" \
+            --suite main \
+            --report "/project/emulation/esp32/esp32_emulation_report.md" \
+            ${extra_args[@]+"${extra_args[@]}"}
+    else
+        log_info "Running ESP32 Stream Benchmark Runner via ${PYTHON_BIN}..."
+        "${PYTHON_BIN}" "${SCRIPT_DIR}/stream_runner.py" \
+            --host 127.0.0.1 \
+            --port "${target_port}" \
+            --suite main \
+            --report "${SCRIPT_DIR}/esp32_emulation_report.md" \
+            ${extra_args[@]+"${extra_args[@]}"}
+    fi
 
     log_success "Benchmark completed! Report saved in ${SCRIPT_DIR}/esp32_emulation_report.md"
 }

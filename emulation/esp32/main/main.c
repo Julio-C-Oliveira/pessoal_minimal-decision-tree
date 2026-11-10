@@ -217,6 +217,13 @@ static void handle_init(char *param_str) {
             } else {
                 leaf_pred = HT_LEAF_NBA;
             }
+        } else if (strncmp(token, "crit=", 5) == 0 || strncmp(token, "criterion=", 10) == 0) {
+            char *c = strchr(token, '=') + 1;
+            if (strcmp(c, "gini") == 0) {
+                criterion = HT_CRIT_GINI;
+            } else if (strcmp(c, "info_gain") == 0) {
+                criterion = HT_CRIT_INFO_GAIN;
+            }
         } else if (strncmp(token, "grace=", 6) == 0) {
             grace_period = (uint16_t)atoi(token + 6);
         } else if (strncmp(token, "delta=", 6) == 0) {

@@ -23,6 +23,8 @@ from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
 from sklearn.metrics import (
     accuracy_score,
     f1_score,
+    precision_score,
+    recall_score,
     mean_absolute_error,
     mean_squared_error,
     r2_score,
@@ -62,6 +64,11 @@ def main():
     parser.add_argument("--train-csv", required=True)
     parser.add_argument("--test-csv", required=True)
     parser.add_argument("--task", default="classification", choices=["classification", "regression"])
+    parser.add_argument("--max-depth", type=int, default=None)
+    parser.add_argument("--min-samples-split", type=int, default=2)
+    parser.add_argument("--min-samples-leaf", type=int, default=1)
+    parser.add_argument("--max-features", default=None)
+    parser.add_argument("--criterion", default=None)
     args = parser.parse_args()
 
     tracemalloc.start()
@@ -70,12 +77,32 @@ def main():
     # Full batch ingestion in RAM
     X_train, y_train, n_features = load_csv(args.train_csv)
 
+    max_feat = args.max_features
+    if max_feat in ["None", "none", ""]:
+        max_feat = None
+
     if args.task == "regression":
-        model = DecisionTreeRegressor(random_state=42)
+        crit = args.criterion if args.criterion else "squared_error"
+        model = DecisionTreeRegressor(
+            criterion=crit,
+            max_depth=args.max_depth,
+            min_samples_split=args.min_samples_split,
+            min_samples_leaf=args.min_samples_leaf,
+            max_features=max_feat,
+            random_state=42,
+        )
         model.fit(X_train, y_train)
     else:
         y_train = y_train.astype(np.int32)
-        model = DecisionTreeClassifier(criterion="entropy", random_state=42)
+        crit = args.criterion if args.criterion else "entropy"
+        model = DecisionTreeClassifier(
+            criterion=crit,
+            max_depth=args.max_depth,
+            min_samples_split=args.min_samples_split,
+            min_samples_leaf=args.min_samples_leaf,
+            max_features=max_feat,
+            random_state=42,
+        )
         model.fit(X_train, y_train)
 
     train_time_s = time.perf_counter() - t_train0
@@ -131,6 +158,11 @@ def main():
         y_pred = y_pred.astype(np.int32)
         res["holdout_acc"] = float(accuracy_score(y_test, y_pred) * 100.0)
         res["f1_macro"] = float(f1_score(y_test, y_pred, average="macro", zero_division=0) * 100.0)
+        res["f1_weighted"] = float(f1_score(y_test, y_pred, average="weighted", zero_division=0) * 100.0)
+        res["precision_macro"] = float(precision_score(y_test, y_pred, average="macro", zero_division=0) * 100.0)
+        res["precision_weighted"] = float(precision_score(y_test, y_pred, average="weighted", zero_division=0) * 100.0)
+        res["recall_macro"] = float(recall_score(y_test, y_pred, average="macro", zero_division=0) * 100.0)
+        res["recall_weighted"] = float(recall_score(y_test, y_pred, average="weighted", zero_division=0) * 100.0)
         res["prequential_acc"] = None
 
     print(json.dumps(res))

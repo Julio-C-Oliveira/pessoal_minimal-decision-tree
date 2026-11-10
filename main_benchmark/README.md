@@ -37,9 +37,11 @@ A suíte é dividida balanceadamente entre **Classificação** (4 fluxos) e **Re
 ```
 main_benchmark/
 ├── main_benchmark.py           # Orquestrador principal da avaliação tripla (C11 vs River vs Scikit-Learn)
+├── tune_hyperparams.py         # Orquestrador de busca e sensibilidade de hiperparâmetros (C11 vs River vs Sklearn)
 ├── prepare_datasets.py         # Gerador e formatador padronizado dos 8 datasets
 ├── README.md                   # Este documento explicativo
 ├── main_benchmark_report.md    # Relatório detalhado gerado com tabelas de acurácia, nós, RAM e speedup
+├── hyperparam_report.md        # Relatório de sensibilidade e curvas de Pareto de hiperparâmetros
 ├── runners/                    # Scripts isolados de execução para Scikit-Learn e River
 └── data/                       # Arquivos CSV formatados com metadados para ingestão direta
     ├── sea_train.csv / sea_test.csv
@@ -83,6 +85,27 @@ Para re-gerar ou atualizar os arquivos CSV de dados:
 ./.venv/bin/python main_benchmark/prepare_datasets.py
 ```
 *(Para tentar baixar versões remotas completas do River/OpenML caso haja conexão de rede, utilize `--download`)*.
+
+### Busca e Sensibilidade de Hiperparâmetros (`tune_hyperparams.py`)
+Via Makefile (execução padrão rápida nos datasets de referência):
+```bash
+make bench-tune
+```
+Personalizando datasets, número de iterações ou competidores:
+```bash
+make bench-tune TUNE_ARGS="--dataset sea,friedman --engine all --n-iter 20"
+```
+Ou execução direta via Python:
+```bash
+# Busca aleatória com 30 iterações por motor em todos os datasets:
+./.venv/bin/python main_benchmark/tune_hyperparams.py --dataset all --n-iter 30
+
+# Grid search exaustivo em um dataset específico:
+./.venv/bin/python main_benchmark/tune_hyperparams.py --dataset sea --grid
+
+# Avaliação focada em um motor específico:
+./.venv/bin/python main_benchmark/tune_hyperparams.py --dataset friedman --engine c11 --n-iter 15
+```
 
 ---
 
