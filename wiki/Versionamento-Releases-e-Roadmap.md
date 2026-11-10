@@ -58,7 +58,7 @@ void print_system_info(void) {
 ### Via Linha de Comando / Build
 ```bash
 make version
-# Saida: Minimal Decision Tree (libht) version 0.1.0
+# Saida: kansho (libht) version 0.2.0
 ```
 
 ---
