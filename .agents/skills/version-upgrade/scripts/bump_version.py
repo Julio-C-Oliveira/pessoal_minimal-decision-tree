@@ -339,11 +339,11 @@ def cmd_analyze(repo_root):
     print("\n---")
     if analysis["recommendation"] != "NONE":
         print(f"**Ação Recomendada:** Apresente este parecer ao usuário e pergunte:")
-        print(f"> *\"Você aprova o upgrade de versão de `{curr_str}` para `{prop_str}` ({analysis['recommendation']})? Deseja também gerar a tag Git anotada `v{prop_str}`?\"*")
+        print(f"> *\"Você aprova o upgrade de versão de `{curr_str}` para `{prop_str}` ({analysis['recommendation']})? Deseja também gerar a tag Git anotada `v{prop_str}` e publicá-la no GitHub (`--push`)?\"*")
     else:
         print("**Ação Recomendada:** Nenhuma alteração de versão necessária no momento.")
 
-def cmd_apply(repo_root, target, dry_run=False, no_test=False, commit=False, tag=False, tag_msg=None):
+def cmd_apply(repo_root, target, dry_run=False, no_test=False, commit=False, tag=False, tag_msg=None, push=False):
     data = read_version_files(repo_root)
     curr_maj, curr_min, curr_patch = data["current_tuple"]
     curr_str = data["current_str"]
@@ -432,6 +432,19 @@ def cmd_apply(repo_root, target, dry_run=False, no_test=False, commit=False, tag
         run_cmd(f'git tag -a "{tag_name}" -m "{final_tag_msg}"', cwd=repo_root)
         print(f"[+] Tag {tag_name} criada com sucesso!")
 
+    # Publicação remota no GitHub
+    if push:
+        res_branch = run_cmd("git rev-parse --abbrev-ref HEAD", cwd=repo_root, check=False)
+        branch = res_branch.stdout.strip() or "main"
+        if commit:
+            print(f"[*] Enviando commits locais para o GitHub (git push origin {branch})...")
+            run_cmd(f"git push origin {branch}", cwd=repo_root)
+            print(f"[+] Branch {branch} enviada para o GitHub!")
+        if tag:
+            print(f"[*] Enviando tag {tag_name} para o GitHub (git push origin {tag_name})...")
+            run_cmd(f"git push origin {tag_name}", cwd=repo_root)
+            print(f"[+] Tag {tag_name} enviada e publicada no GitHub!")
+
     print(f"\n[+] Upgrade para v{target_str} concluído com sucesso!")
     print(f"[*] Lembrete: Se aplicável, atualize a seção 4.1 de 'wiki/Versionamento-Releases-e-Roadmap.md' e sincronize via sync-wiki.")
 
@@ -450,6 +463,7 @@ def main():
     parser_apply.add_argument("--commit", action="store_true", help="Gera o commit atômico padronizado")
     parser_apply.add_argument("--tag", action="store_true", help="Cria tag Git anotada correspondente")
     parser_apply.add_argument("--tag-message", "-m", help="Mensagem da tag anotada")
+    parser_apply.add_argument("--push", action="store_true", help="Envia o commit e a tag anotada para o repositório remoto (origin)")
 
     args = parser.parse_args()
     repo_root = get_repo_root()
@@ -464,7 +478,8 @@ def main():
             no_test=args.no_test,
             commit=args.commit,
             tag=args.tag,
-            tag_msg=args.tag_message
+            tag_msg=args.tag_message,
+            push=args.push
         )
 
 if __name__ == "__main__":
