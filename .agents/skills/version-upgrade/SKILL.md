@@ -57,7 +57,7 @@ O comando analisa o histórico Git entre o último commit que tocou em `VERSION`
 
 ### Fase 2: Apresentação e Consulta ao Usuário
 Se a recomendação for diferente de `NONE`, o agente apresenta o parecer ao usuário e pergunta:
-> *"Você aprova o upgrade de versão de `X.Y.Z` para `A.B.C` (TIPO)? Deseja também gerar a tag Git anotada `vA.B.C` e publicá-la no GitHub (`--push`)?"*
+> *"Você aprova o upgrade de versão de `X.Y.Z` para `A.B.C` (TIPO)? Deseja também gerar a tag Git anotada `vA.B.C`, publicá-la no GitHub e criar o GitHub Release (`--push --release`)?"*
 
 ### Fase 3: Aplicação Atômica
 Após a aprovação do usuário, o agente executa o script no modo `apply`:
@@ -66,8 +66,8 @@ Após a aprovação do usuário, o agente executa o script no modo `apply`:
 # Apenas bump com commit atômico e validação de testes
 python3 .agents/skills/version-upgrade/scripts/bump_version.py apply <patch|minor|major|X.Y.Z> --commit
 
-# Bump com commit atômico, criação de tag Git anotada e publicação remota no GitHub
-python3 .agents/skills/version-upgrade/scripts/bump_version.py apply <patch|minor|major|X.Y.Z> --commit --tag --push -m "Release vX.Y.Z: ..."
+# Bump completo: commit atômico, tag anotada, push para o GitHub e criação do GitHub Release
+python3 .agents/skills/version-upgrade/scripts/bump_version.py apply <patch|minor|major|X.Y.Z> --commit --tag --push --release -m "Release vX.Y.Z: ..."
 
 # Simulação (dry-run) para inspecionar os diffs sem alterar arquivos
 python3 .agents/skills/version-upgrade/scripts/bump_version.py apply <patch|minor|major|X.Y.Z> --dry-run
@@ -83,6 +83,7 @@ O modo `apply` realiza as seguintes etapas de forma determinística:
 4. Se a flag `--commit` for informada, gera o commit atômico padronizado: `chore(version): bump version to X.Y.Z`.
 5. Se a flag `--tag` for informada, cria a tag anotada correspondente (`vX.Y.Z`).
 6. Se a flag `--push` for informada, envia os commits da branch e a tag recém-criada para o GitHub (`git push origin <branch>` e `git push origin vX.Y.Z`).
+7. Se a flag `--release` for informada, cria automaticamente a Release oficial no GitHub via `gh release create`, extraindo notas de lançamento da Wiki (`wiki/Versionamento-Releases-e-Roadmap.md`) ou usando os parâmetros `--release-title` e `--release-notes`.
 
 ---
 

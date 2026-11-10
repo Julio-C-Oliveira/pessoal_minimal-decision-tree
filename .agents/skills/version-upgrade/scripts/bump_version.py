@@ -287,6 +287,21 @@ def generate_updated_contents(data, target_version):
         "new_version_str": new_str
     }
 
+def extract_wiki_release_notes(repo_root, version_str):
+    roadmap_file = os.path.join(repo_root, "wiki/Versionamento-Releases-e-Roadmap.md")
+    if not os.path.isfile(roadmap_file):
+        return None
+    with open(roadmap_file, "r", encoding="utf-8") as f:
+        content = f.read()
+
+    pattern = rf"###\s+v?{re.escape(version_str)}\s+([^\n]+)\n(.*?)(?=\n###|\n---|\Z)"
+    m = re.search(pattern, content, re.DOTALL)
+    if m:
+        header_title = m.group(1).strip()
+        body = m.group(2).strip()
+        return header_title, body
+    return None
+
 def show_diff(old_content, new_content, filename):
     diff = difflib.unified_diff(
         old_content.splitlines(keepends=True),
@@ -339,11 +354,14 @@ def cmd_analyze(repo_root):
     print("\n---")
     if analysis["recommendation"] != "NONE":
         print(f"**Ação Recomendada:** Apresente este parecer ao usuário e pergunte:")
-        print(f"> *\"Você aprova o upgrade de versão de `{curr_str}` para `{prop_str}` ({analysis['recommendation']})? Deseja também gerar a tag Git anotada `v{prop_str}` e publicá-la no GitHub (`--push`)?\"*")
+        print(f"> *\"Você aprova o upgrade de versão de `{curr_str}` para `{prop_str}` ({analysis['recommendation']})? Deseja também gerar a tag Git anotada `v{prop_str}`, publicá-la no GitHub e criar a GitHub Release (`--push --release`)?\"*")
     else:
         print("**Ação Recomendada:** Nenhuma alteração de versão necessária no momento.")
 
-def cmd_apply(repo_root, target, dry_run=False, no_test=False, commit=False, tag=False, tag_msg=None, push=False):
+def cmd_apply(repo_root, target, dry_run=False, no_test=False, commit=False, tag=False, tag_msg=None, push=False, release=False, release_title=None, release_notes=None):
+    if release:
+        tag = True
+        push = True
     data = read_version_files(repo_root)
     curr_maj, curr_min, curr_patch = data["current_tuple"]
     curr_str = data["current_str"]
@@ -445,6 +463,34 @@ def cmd_apply(repo_root, target, dry_run=False, no_test=False, commit=False, tag
             run_cmd(f"git push origin {tag_name}", cwd=repo_root)
             print(f"[+] Tag {tag_name} enviada e publicada no GitHub!")
 
+    # Criação de GitHub Release oficial via GitHub CLI
+    if release:
+        res_gh = run_cmd("which gh", cwd=repo_root, check=False)
+        if res_gh.returncode != 0:
+            print("Aviso: GitHub CLI ('gh') não encontrado no PATH. Pulando criação de release.", file=sys.stderr)
+        else:
+            wiki_info = extract_wiki_release_notes(repo_root, target_str)
+            title = release_title
+            notes = release_notes
+            if not title:
+                if wiki_info and wiki_info[0]:
+                    title = f"v{target_str} {wiki_info[0]}"
+                else:
+                    title = f"v{target_str} — Kansho Release"
+            if not notes:
+                if wiki_info and wiki_info[1]:
+                    notes = f"### Kansho (簡樹) {title}\n\n{wiki_info[1]}"
+                else:
+                    notes = f"Release {tag_name}: Kansho embedded Hoeffding Tree in C11"
+
+            print(f"[*] Criando Release no GitHub via 'gh release create'...")
+            cmd_rel = ["gh", "release", "create", tag_name, "--title", title, "--notes", notes]
+            res_rel = subprocess.run(cmd_rel, cwd=repo_root, text=True, capture_output=True)
+            if res_rel.returncode == 0:
+                print(f"[+] Release criada com sucesso no GitHub:\n    {res_rel.stdout.strip()}")
+            else:
+                print(f"Aviso/Erro ao criar release no GitHub:\n{res_rel.stderr}", file=sys.stderr)
+
     print(f"\n[+] Upgrade para v{target_str} concluído com sucesso!")
     print(f"[*] Lembrete: Se aplicável, atualize a seção 4.1 de 'wiki/Versionamento-Releases-e-Roadmap.md' e sincronize via sync-wiki.")
 
@@ -464,6 +510,9 @@ def main():
     parser_apply.add_argument("--tag", action="store_true", help="Cria tag Git anotada correspondente")
     parser_apply.add_argument("--tag-message", "-m", help="Mensagem da tag anotada")
     parser_apply.add_argument("--push", action="store_true", help="Envia o commit e a tag anotada para o repositório remoto (origin)")
+    parser_apply.add_argument("--release", action="store_true", help="Cria e publica a Release oficial correspondente no GitHub via 'gh release create'")
+    parser_apply.add_argument("--release-title", help="Título customizado para a Release no GitHub")
+    parser_apply.add_argument("--release-notes", help="Notas/descrição customizada para a Release no GitHub")
 
     args = parser.parse_args()
     repo_root = get_repo_root()
@@ -479,7 +528,10 @@ def main():
             commit=args.commit,
             tag=args.tag,
             tag_msg=args.tag_message,
-            push=args.push
+            push=args.push,
+            release=args.release,
+            release_title=args.release_title,
+            release_notes=args.release_notes
         )
 
 if __name__ == "__main__":
