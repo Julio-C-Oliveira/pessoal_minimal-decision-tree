@@ -15,20 +15,20 @@ A suíte realiza uma avaliação tripla direta (*apples-to-apples*) comparando:
 A suíte é dividida balanceadamente entre **Classificação** (4 fluxos) e **Regressão Contínua** (4 fluxos), cobrindo dados sintéticos de referência e conjuntos de dados reais com padrões temporais:
 
 ### Classificação (4 fluxos):
-| Dataset | Tipo | Amostras | Features | Classes | Descrição / Desafio |
-| :--- | :---: | :---: | :---: | :---: | :--- |
-| **SEA** | Sintético | $20.000$ | 3 | 2 | Padrão da literatura (Street & Kim, 2001) para avaliar splits e *concept drift* |
-| **Electricity (Elec2)** | Real | $45.312$ | 8 | 2 | Flutuações de preços de energia na Austrália; drift real de mercado e sazonalidade |
-| **Forest Covertype** | Real | $25.000$ | 54 | 7 | Alta dimensionalidade (54 features contínuas/one-hot) e 7 classes florestais |
-| **Airlines** | Real | $25.000$ | 7 | 2 | Previsão de atrasos em voos comerciais comerciais com variáveis temporais |
+| Dataset | Tipo | Amostras Totais | Treino (70%) | Teste (30%) | Features ($D$) | Natureza das Features | Classes do Target ($y$) | Rótulos das Classes / Significado | Desafio do Fluxo |
+| :--- | :---: | :---: | :---: | :---: | :---: | :--- | :---: | :--- | :--- |
+| **SEA** | Sintético | $20.000$ | $14.000$ | $6.000$ | 3 | 3 Contínuas ($f_0, f_1, f_2 \in [0, 10]$) | **2** | $\{0, 1\}$ (fronteira linear $f_0 + f_1 > \theta$) | *Abrupt concept drift* a cada 5.000 amostras ($\theta \in \{8, 9, 7, 9.5\}$); $f_2$ é ruído irrelevante |
+| **Electricity (Elec2)** | Real | $45.312$ | $31.718$ | $13.594$ | 8 | 8 Contínuas (preços e demandas elétricas em NSW/VIC) | **2** | $\{0: \text{DOWN}, 1: \text{UP}\}$ (movimento relativo do preço) | *Concept drift* real de mercado, alta volatilidade de preços e sazonalidade horária/diária |
+| **Forest Covertype** | Real | $25.000$ | $17.500$ | $7.500$ | 54 | 10 Contínuas (topografia) + 4 Binárias (áreas silvestres) + 40 Binárias (tipos de solo) | **7** | $\{1 \dots 7\}$: (1) Spruce-Fir, (2) Lodgepole Pine, (3) Ponderosa Pine, (4) Cottonwood/Willow, (5) Aspen, (6) Douglas-fir, (7) Krummholz | Alta dimensionalidade ($D=54$), espaço esparso (one-hot), desbalanceamento de classes florestais |
+| **Airlines** | Real | $25.000$ | $17.500$ | $7.500$ | 7 | 7 Numéricas/Nominais (companhia, aeroporto origem/destino, dia da semana, hora, duração) | **2** | $\{0: \text{No Delay}, 1: \text{Delayed}\}$ (atraso no voo) | Padrões temporais mistos, desbalanceamento de atrasos sazonais e dependência de rotas |
 
 ### Regressão Contínua (4 fluxos):
-| Dataset | Tipo | Amostras | Features | Alvo ($y$) | Descrição / Desafio |
-| :--- | :---: | :---: | :---: | :---: | :--- |
-| **Friedman #1** | Sintético | $20.000$ | 10 | Contínuo | Benchmark clássico não-linear (Friedman, 1991) com interações trigonométricas |
-| **Bikes** | Real | $17.379$ | 12 | Contínuo | Demanda horária de aluguel de bicicletas com fortes padrões diários e sazonais |
-| **Appliances Energy**| Real | $19.735$ | 28 | Contínuo (Wh)| Telemetria IoT de sensores ambientais em residência de baixo consumo de energia |
-| **NYC Taxi** | Real | $15.000$ | 7 | Contínuo (s) | Duração de corridas de táxi em Nova York a partir de coordenadas espaciais |
+| Dataset | Tipo | Amostras Totais | Treino (70%) | Teste (30%) | Features ($D$) | Natureza das Features | Classes do Target ($y$) | Alvo / Grandeza Física ($y$) | Desafio do Fluxo |
+| :--- | :---: | :---: | :---: | :---: | :---: | :--- | :---: | :--- | :--- |
+| **Friedman #1** | Sintético | $20.000$ | $14.000$ | $6.000$ | 10 | 10 Contínuas uniformes ($f_0 \dots f_9 \in [0, 1]$) | **Contínuo** ($y \in \mathbb{R}$) | Sinal contínuo sintético: $10\sin(\pi x_0 x_1) + 20(x_2 - 0.5)^2 + 10x_3 + 5x_4 + \mathcal{N}(0, 1)$ | Não-linearidades trigonométricas e quadráticas com interação entre variáveis ($x_0, x_1$) e atributos puramente ruído ($x_5 \dots x_9$) |
+| **Bikes (Bike Sharing)** | Real | $17.379$ | $12.165$ | $5.214$ | 12 | 12 Contínuas e temporais (clima, temperatura normalizada, sensação térmica, umidade, vento, calendário) | **Contínuo** ($y \in [1, 977]$) | Contagem horária de aluguel de bicicletas públicas | Fortes ciclos diários e sazonais, dependência climática não-linear e picos de demanda |
+| **Appliances Energy** | Real | $19.735$ | $13.814$ | $5.921$ | 28 | 28 Contínuas (sensores ambientais IoT: temperaturas $T_1 \dots T_9$, umidades $RH_1 \dots RH_9$, pressão, vento, luz) | **Contínuo** ($y \in [10, 1080]\text{ Wh}$) | Consumo energético total dos eletrodomésticos da residência em Watt-hora (Wh) | Sinal ruidoso de sensores IoT com multicolinearidade severa entre cômodos e fortes variações circadianas |
+| **NYC Taxi Trip Duration** | Real | $15.000$ | $10.500$ | $4.500$ | 7 | 7 Contínuas e discretas (coordenadas espaciais pickup/dropoff lon/lat, passageiros, hora, dia da semana) | **Contínuo** ($y \in [1, 86400]\text{ s}$) | Duração total da corrida em segundos ($s$) | Distribuição com cauda longa (*heavy tail*), assimetria espacial e congestionamentos urbanos dependentes do tempo |
 
 ---
 

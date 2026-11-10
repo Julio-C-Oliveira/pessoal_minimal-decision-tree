@@ -564,6 +564,24 @@ def generate_markdown_report(report_path: str, results: List[Dict[str, Any]]):
         f.write("    - *Appliances Energy:* `--leaf-normalize` (Normalização local nas folhas SGD eleva $R^2$ de 0.7964 para **0.8034** e reduz MAE para 26.28).\n")
         f.write("    - *NYC Taxi:* `--leaf-normalize` (Normalização local nas folhas SGD eleva $R^2$ de 0.2557 para **0.3189** e reduz MAE de 323.81 para 309.64).\n\n")
 
+        # Section 1.1: Dataset Characteristics and Metadata
+        f.write("### 1.1 Características e Metadados dos Datasets de Avaliação\n\n")
+        f.write("A suíte analisa balanceadamente 8 fluxos de dados (4 de Classificação e 4 de Regressão Contínua), cobrindo dados sintéticos canônicos e bases reais com sazonalidade e *concept drift*:\n\n")
+        f.write("#### Datasets de Classificação:\n")
+        f.write("| Dataset | Tipo | Amostras Totais | Treino (70%) | Teste (30%) | Features ($D$) | Natureza das Features | Classes do Target ($y$) | Rótulos das Classes / Significado | Desafio do Fluxo |\n")
+        f.write("| :--- | :---: | :---: | :---: | :---: | :---: | :--- | :---: | :--- | :--- |\n")
+        f.write("| **SEA** | Sintético | $20.000$ | $14.000$ | $6.000$ | 3 | 3 Contínuas ($f_0, f_1, f_2 \\in [0, 10]$) | **2** | $\\{0, 1\\}$ (fronteira linear $f_0 + f_1 > \\theta$) | *Abrupt concept drift* a cada 5.000 amostras ($\\theta \\in \\{8, 9, 7, 9.5\\}$); $f_2$ é ruído irrelevante |\n")
+        f.write("| **Electricity (Elec2)** | Real | $45.312$ | $31.718$ | $13.594$ | 8 | 8 Contínuas (preços e demandas elétricas em NSW/VIC) | **2** | $\\{0: \\text{DOWN}, 1: \\text{UP}\\}$ (movimento relativo do preço) | *Concept drift* real de mercado, alta volatilidade de preços e sazonalidade horária/diária |\n")
+        f.write("| **Forest Covertype** | Real | $25.000$ | $17.500$ | $7.500$ | 54 | 10 Contínuas (topografia) + 4 Binárias (áreas silvestres) + 40 Binárias (tipos de solo) | **7** | $\\{1 \\dots 7\\}$: (1) Spruce-Fir, (2) Lodgepole Pine, (3) Ponderosa Pine, (4) Cottonwood/Willow, (5) Aspen, (6) Douglas-fir, (7) Krummholz | Alta dimensionalidade ($D=54$), espaço esparso (one-hot), desbalanceamento de classes florestais |\n")
+        f.write("| **Airlines** | Real | $25.000$ | $17.500$ | $7.500$ | 7 | 7 Numéricas/Nominais (companhia, aeroporto origem/destino, dia da semana, hora, duração) | **2** | $\\{0: \\text{No Delay}, 1: \\text{Delayed}\\}$ (atraso no voo) | Padrões temporais mistos, desbalanceamento de atrasos sazonais e dependência de rotas |\n\n")
+        f.write("#### Datasets de Regressão Contínua:\n")
+        f.write("| Dataset | Tipo | Amostras Totais | Treino (70%) | Teste (30%) | Features ($D$) | Natureza das Features | Classes do Target ($y$) | Alvo / Grandeza Física ($y$) | Desafio do Fluxo |\n")
+        f.write("| :--- | :---: | :---: | :---: | :---: | :---: | :--- | :---: | :--- | :--- |\n")
+        f.write("| **Friedman #1** | Sintético | $20.000$ | $14.000$ | $6.000$ | 10 | 10 Contínuas uniformes ($f_0 \\dots f_9 \\in [0, 1]$) | **Contínuo** ($y \\in \\mathbb{R}$) | Sinal contínuo sintético: $10\\sin(\\pi x_0 x_1) + 20(x_2 - 0.5)^2 + 10x_3 + 5x_4 + \\mathcal{N}(0, 1)$ | Não-linearidades trigonométricas e quadráticas com interação entre variáveis ($x_0, x_1$) e atributos puramente ruído ($x_5 \\dots x_9$) |\n")
+        f.write("| **Bikes (Bike Sharing)** | Real | $17.379$ | $12.165$ | $5.214$ | 12 | 12 Contínuas e temporais (clima, temperatura normalizada, sensação térmica, umidade, vento, calendário) | **Contínuo** ($y \\in [1, 977]$) | Contagem horária de aluguel de bicicletas públicas | Fortes ciclos diários e sazonais, dependência climática não-linear e picos de demanda |\n")
+        f.write("| **Appliances Energy** | Real | $19.735$ | $13.814$ | $5.921$ | 28 | 28 Contínuas (sensores ambientais IoT: temperaturas $T_1 \\dots T_9$, umidades $RH_1 \\dots RH_9$, pressão, vento, luz) | **Contínuo** ($y \\in [10, 1080]\\text{ Wh}$) | Consumo energético total dos eletrodomésticos da residência em Watt-hora (Wh) | Sinal ruidoso de sensores IoT com multicolinearidade severa entre cômodos e fortes variações circadianas |\n")
+        f.write("| **NYC Taxi Trip Duration** | Real | $15.000$ | $10.500$ | $4.500$ | 7 | 7 Contínuas e discretas (coordenadas espaciais pickup/dropoff lon/lat, passageiros, hora, dia da semana) | **Contínuo** ($y \\in [1, 86400]\\text{ s}$) | Duração total da corrida em segundos ($s$) | Distribuição com cauda longa (*heavy tail*), assimetria espacial e congestionamentos urbanos dependentes do tempo |\n\n")
+
         # Classification Table
         f.write("## 2. Resultados em Classificação (4 Datasets)\n\n")
         f.write("| Dataset | Modelo / Tier | Holdout Acc (%) | Macro F1 (%) | Prequential Acc (%) | Total Nós | RAM Intra-Treino (Mod+Heap) | RSS Treino (MB) | RSS Teste (MB) | RSS Total (MB) | Tempo/amostra (µs) | Speedup vs River |\n")
