@@ -533,17 +533,17 @@ def run_main_suite(
     window_size: int = 16,
 ) -> List[Dict[str, Any]]:
     """Runs all 8 datasets from main_benchmark sequentially through emulated Cortex-M3."""
-    # Configurações oficiais do Rank #1 de cada dataset (com tratamentos online incorporados)
+    # Configurações oficiais do Rank #1 do Tier 4 de cada dataset
     datasets = [
         # (d_id, name, task, grace, delta, tau, criterion, leaf, prep_scaler, leaf_normalize)
-        ("sea", "SEA", "classification", 100, 0.01, 0.10, "info_gain", "nba", False, False),
-        ("electricity", "Electricity", "classification", 400, 0.01, 0.10, "gini", "mc", False, False),
+        ("sea", "SEA", "classification", 400, 0.0001, 0.15, "info_gain", "nba", True, False),
+        ("electricity", "Electricity", "classification", 100, 1e-07, 0.05, "info_gain", "nba", True, False),
         ("covertype", "Forest Covertype", "classification", 50, 0.001, 0.10, "gini", "nba", False, False),
-        ("airlines", "Airlines", "classification", 50, 0.0001, 0.05, "gini", "mc", False, False),
-        ("friedman", "Friedman #1 (Tratado)", "regression", 200, 1e-07, 0.01, "variance_reduction", "model", True, False),
-        ("bikes", "Bikes", "regression", 200, 0.01, 0.10, "variance_reduction", "mean", False, False),
-        ("appliances_energy", "Appliances Energy (Tratado)", "regression", 100, 1e-07, 0.01, "variance_reduction", "adaptive", False, True),
-        ("nyc_taxi", "NYC Taxi (Tratado)", "regression", 50, 1e-07, 0.15, "variance_reduction", "adaptive", False, True),
+        ("airlines", "Airlines", "classification", 50, 0.001, 0.10, "gini", "nba", False, False),
+        ("friedman", "Friedman #1", "regression", 200, 1e-07, 0.01, "variance_reduction", "model", True, False),
+        ("bikes", "Bikes", "regression", 200, 1e-07, 0.15, "variance_reduction", "mean", True, False),
+        ("appliances_energy", "Appliances Energy", "regression", 100, 1e-07, 0.01, "variance_reduction", "adaptive", False, True),
+        ("nyc_taxi", "NYC Taxi", "regression", 50, 1e-07, 0.10, "variance_reduction", "adaptive", False, True),
     ]
 
     results = []

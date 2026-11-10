@@ -166,11 +166,14 @@ class Esp32Client:
         delta: float = 1e-7,
         tau: float = 0.05,
         hat: bool = False,
+        prep_scaler: bool = False,
+        leaf_normalize: bool = False,
     ) -> Dict[str, Any]:
         types_str = "".join(str(t) for t in feature_types)
         cmd = (
             f"INIT,task={task},n_features={n_features},n_classes={n_classes},"
-            f"types={types_str},leaf={leaf},crit={criterion},grace={grace},delta={delta},tau={tau},hat={1 if hat else 0}"
+            f"types={types_str},leaf={leaf},crit={criterion},grace={grace},delta={delta},tau={tau},"
+            f"hat={1 if hat else 0},prep_scaler={1 if prep_scaler else 0},leaf_normalize={1 if leaf_normalize else 0}"
         )
         self.send_line(cmd)
         while True:
@@ -429,6 +432,8 @@ def run_dataset_benchmark(
     grace: int = 200,
     delta: float = 1e-7,
     tau: float = 0.05,
+    prep_scaler: bool = False,
+    leaf_normalize: bool = False,
 ) -> Dict[str, Any]:
     """Runs Test-Then-Train prequential evaluation followed by holdout inference."""
     meta, train_rows = parse_csv_stream(train_csv, max_samples=max_train_samples)
@@ -453,6 +458,8 @@ def run_dataset_benchmark(
         grace=grace,
         delta=delta,
         tau=tau,
+        prep_scaler=prep_scaler,
+        leaf_normalize=leaf_normalize,
     )
 
     train_preds, train_pred_us, train_learn_us, train_tot_us = stream_samples_windowed(
@@ -538,17 +545,17 @@ def run_main_suite(
     window_size: int = 16,
 ) -> List[Dict[str, Any]]:
     """Runs all 8 datasets from main_benchmark sequentially through the emulated ESP32."""
-    # Tier 8 configurations from main_benchmark
+    # Tier 8 configurations from main_benchmark (Campeões Rank #1)
     datasets = [
-        # (d_id, name, task, grace, delta, tau, criterion, leaf)
-        ("sea", "SEA", "classification", 100, 0.01, 0.10, "info_gain", "nba"),
-        ("electricity", "Electricity", "classification", 400, 0.01, 0.10, "gini", "mc"),
-        ("covertype", "Forest Covertype", "classification", 50, 0.001, 0.10, "gini", "nba"),
-        ("airlines", "Airlines", "classification", 50, 0.0001, 0.05, "gini", "mc"),
-        ("friedman", "Friedman #1", "regression", 200, 1e-07, 0.01, "variance_reduction", "model"),
-        ("bikes", "Bikes", "regression", 200, 0.01, 0.10, "variance_reduction", "mean"),
-        ("appliances_energy", "Appliances Energy", "regression", 100, 1e-07, 0.01, "variance_reduction", "adaptive"),
-        ("nyc_taxi", "NYC Taxi", "regression", 50, 1e-07, 0.15, "variance_reduction", "adaptive"),
+        # (d_id, name, task, grace, delta, tau, criterion, leaf, prep_scaler, leaf_normalize)
+        ("sea", "SEA", "classification", 100, 0.01, 0.10, "info_gain", "nba", False, False),
+        ("electricity", "Electricity", "classification", 400, 0.01, 0.10, "gini", "mc", False, False),
+        ("covertype", "Forest Covertype", "classification", 50, 0.001, 0.10, "gini", "nba", False, False),
+        ("airlines", "Airlines", "classification", 200, 1e-07, 0.10, "info_gain", "nb", True, False),
+        ("friedman", "Friedman #1", "regression", 200, 1e-07, 0.01, "variance_reduction", "model", True, False),
+        ("bikes", "Bikes", "regression", 50, 0.01, 0.05, "variance_reduction", "mean", True, False),
+        ("appliances_energy", "Appliances Energy", "regression", 200, 0.0001, 0.15, "variance_reduction", "model", False, True),
+        ("nyc_taxi", "NYC Taxi", "regression", 100, 0.0001, 0.05, "variance_reduction", "adaptive", True, False),
     ]
 
     results = []
@@ -558,7 +565,7 @@ def run_main_suite(
     print(" Configurations: Tier 8 configurations from main_benchmark")
     print("=" * 80)
 
-    for d_id, name, task, grace, delta, tau, criterion, leaf in datasets:
+    for d_id, name, task, grace, delta, tau, criterion, leaf, prep_scaler, leaf_normalize in datasets:
         train_csv = os.path.join(data_dir, f"{d_id}_train.csv")
         test_csv = os.path.join(data_dir, f"{d_id}_test.csv")
         if not os.path.exists(train_csv):
@@ -569,7 +576,12 @@ def run_main_suite(
         train_limit = int(max_samples * 0.70) if max_samples else None
         test_limit = int(max_samples * 0.30) if max_samples else None
 
-        print(f"\n>>> Running Dataset: {name} [{task.upper()}] (Tier 8: grace={grace}, delta={delta}, tau={tau}, crit={criterion}, leaf={leaf})")
+        trat_str = []
+        if prep_scaler: trat_str.append("StandardScaler")
+        if leaf_normalize: trat_str.append("LeafNormalize")
+        trat_label = f" | Tratamentos: {', '.join(trat_str)}" if trat_str else ""
+
+        print(f"\n>>> Running Dataset: {name} [{task.upper()}] (Tier 8: grace={grace}, delta={delta}, tau={tau}, crit={criterion}, leaf={leaf}{trat_label})")
         res = run_dataset_benchmark(
             client,
             train_csv=train_csv,
@@ -582,6 +594,8 @@ def run_main_suite(
             grace=grace,
             delta=delta,
             tau=tau,
+            prep_scaler=prep_scaler,
+            leaf_normalize=leaf_normalize,
         )
         res["display_name"] = name
         results.append(res)

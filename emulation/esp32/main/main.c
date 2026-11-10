@@ -33,6 +33,7 @@
 
 #include "ht_tree.h"
 #include "ht_drift.h"
+#include "ht_prep.h"
 
 #define UART_PORT_NUM      UART_NUM_0
 #define UART_BAUD_RATE     115200
@@ -44,6 +45,8 @@
 /* ========================================================================== */
 static ht_tree_t       tree_instance;
 static ht_adwin_pool_t adwin_pool;
+static ht_scaler_t     scaler_instance;
+static bool            use_scaler = false;
 static char            rx_line_buf[MAX_LINE_BUF];
 static char            tx_line_buf[MAX_LINE_BUF];
 static ht_value_t      x_sample[HT_MAX_FEATURES];
@@ -179,6 +182,8 @@ static void handle_init(char *param_str) {
     double decay_rate = 0.95;
     double min_samples_split = 5.0;
     bool enable_hat = false;
+    bool leaf_normalize = false;
+    use_scaler = false;
 
     for (uint32_t f = 0; f < HT_MAX_FEATURES; ++f) {
         current_feat_types[f] = HT_FEAT_NUMERIC;
@@ -238,6 +243,10 @@ static void handle_init(char *param_str) {
             decay_rate = atof(token + 6);
         } else if (strncmp(token, "hat=", 4) == 0) {
             enable_hat = (atoi(token + 4) != 0);
+        } else if (strncmp(token, "leaf_normalize=", 15) == 0) {
+            leaf_normalize = (atoi(token + 15) != 0);
+        } else if (strncmp(token, "prep_scaler=", 12) == 0) {
+            use_scaler = (atoi(token + 12) != 0);
         }
         token = strtok(NULL, ",");
     }
@@ -265,6 +274,7 @@ static void handle_init(char *param_str) {
         params.l2_regularization = (ht_float_t)l2_reg;
         params.model_selector_decay = (ht_float_t)decay_rate;
         params.min_samples_split = (ht_float_t)min_samples_split;
+        params.leaf_sgd_normalize = leaf_normalize;
     } else {
         if (enable_hat) {
             ht_default_hat_params(&params, current_n_features, current_n_classes);
@@ -288,6 +298,16 @@ static void handle_init(char *param_str) {
         status = ht_tree_init_hat(&tree_instance, &params, &adwin_pool);
     } else {
         status = ht_tree_init(&tree_instance, &params);
+    }
+
+    /* Initialize online scaler if requested */
+    if (use_scaler) {
+        ht_scaler_init(&scaler_instance);
+        for (uint8_t f = 0; f < current_n_features; ++f) {
+            if (current_feat_types[f] == HT_FEAT_NUMERIC) {
+                ht_scaler_set_mode(&scaler_instance, f, HT_SCALER_STANDARD);
+            }
+        }
     }
 
     heap_after_init = esp_get_free_heap_size();
@@ -361,6 +381,15 @@ static void handle_train(char *payload) {
     uint8_t   y_cls = 0;
     parse_features_and_target(payload, &y_reg, &y_cls);
 
+    /* Apply online preprocessing scaler if active */
+    if (use_scaler) {
+        for (uint8_t f = 0; f < current_n_features; ++f) {
+            if (current_feat_types[f] == HT_FEAT_NUMERIC) {
+                x_sample[f].num = ht_scaler_learn_transform_one(&scaler_instance, f, x_sample[f].num, 1.0f);
+            }
+        }
+    }
+
     /* 1. Predict (Test-Then-Train) */
     uint32_t c0 = GET_CPU_CYCLES();
     uint8_t pred_cls = 0;
@@ -427,6 +456,15 @@ static void handle_test(char *payload) {
     ht_float_t y_reg = 0.0f;
     uint8_t   y_cls = 0;
     parse_features_and_target(payload, &y_reg, &y_cls);
+
+    /* Apply online preprocessing scaler if active */
+    if (use_scaler) {
+        for (uint8_t f = 0; f < current_n_features; ++f) {
+            if (current_feat_types[f] == HT_FEAT_NUMERIC) {
+                x_sample[f].num = ht_scaler_transform_one(&scaler_instance, f, x_sample[f].num);
+            }
+        }
+    }
 
     uint32_t c0 = GET_CPU_CYCLES();
     uint8_t pred_cls = 0;
