@@ -41,7 +41,8 @@ Este repositório desenvolve **kansho** (簡樹, "árvore simples"): uma **Hoeff
     - **`PATCH` (0.x.+1):** correções de bugs (`fix`), correções de precisão numérica, refatorações internas ou otimizações de performance sem alteração da API pública nem quebra de compatibilidade.
     - **`MINOR` (0.+1.0):** nova funcionalidade retrocompatível (`feat`), novos módulos/algoritmos (ex: novos observadores, novos tipos de split, novas estratégias de drift), expansão de structs ou utilitários da biblioteca.
     - **`MAJOR` (+1.0.0):** alterações incompatíveis na API pública (`BREAKING CHANGE`), mudanças drásticas de layout de memória/estruturas ou marcos de estabilização do projeto (ex: release `1.0.0`).
-  - Quando um upgrade de versão for indicado, ele deve ser executado em um **commit atômico dedicado** (`chore(version): bump version to X.Y.Z`), sincronizando `VERSION`, `code/include/ht_config.h` e `code/tests/test_main.c`, com validação prévia de 100% dos testes.
+  - Quando um upgrade de versão for indicado, **o agente nunca deve executá-lo de forma autônoma sem confirmação prévia**. O agente deve obrigatoriamente apresentar ao usuário a proposta de bump (ex: `0.2.0` -> `0.2.1` ou `0.3.0`), explicando detalhadamente as justificativas técnicas e os critérios SemVer que embasam a recomendação, solicitando sua aprovação explícita.
+  - Uma vez aprovado pelo usuário, o upgrade deve ser executado em um **commit atômico dedicado** (`chore(version): bump version to X.Y.Z`), sincronizando `VERSION`, `code/include/ht_config.h` e `code/tests/test_main.c`, com validação prévia de 100% dos testes.
   - Nunca crie tags Git sem antes validar 100% dos testes unitários e de integração em precisão simples (`float`) e dupla (`double`).
   - Releases no GitHub devem obrigatoriamente usar tags anotadas no padrão `vX.Y.Z` (ex: `git tag -a v0.1.0 -m "Release v0.1.0: ..."`).
 
