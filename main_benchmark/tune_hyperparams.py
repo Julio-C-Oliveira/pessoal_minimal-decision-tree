@@ -16,7 +16,7 @@ Performs systematic exploration across 8 flagship datasets:
 8. NYC Taxi (Real, 7 features, trip duration seconds)
 
 Engines Evaluated:
-1. C11 libht (Algorithm runtime params + static compilation macros: slots, tiers)
+1. Kansho (Algorithm runtime params + static compilation macros: slots, tiers)
 2. River (Hoeffding Tree / HAT with parameter parity + splitters)
 3. Scikit-Learn (CART Batch with max_depth, min_samples_split/leaf, max_features, criterion)
 
@@ -736,7 +736,7 @@ def generate_markdown_report(
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     with open(output_path, "w", encoding="utf-8") as f:
         f.write("# Relatório Consolidado de Otimização e Sensibilidade de Hiperparâmetros\n\n")
-        f.write("Suíte automatizada de exploração de hiperparâmetros comparando **C11 libht**, **River** e **Scikit-Learn** em 8 datasets emblemáticos.\n\n")
+        f.write("Suíte automatizada de exploração de hiperparâmetros comparando **Kansho**, **River** e **Scikit-Learn** em 8 datasets emblemáticos.\n\n")
         f.write("---\n\n")
 
         for d_id, d_name, task, desc, is_high_dim in DATASETS_CONFIG:
@@ -751,7 +751,7 @@ def generate_markdown_report(
             # Group trials by engine / tier
             by_tier: Dict[int, List[Dict[str, Any]]] = {}
             for t in trials:
-                if t.get("engine") == "c11":
+                if t.get("engine") in ("c11", "kansho"):
                     tier = t.get("params", {}).get("tier", 0)
                     if tier not in by_tier:
                         by_tier[tier] = []
@@ -778,12 +778,12 @@ def generate_markdown_report(
             for k in engines:
                 engines[k].sort(key=sort_key, reverse=True)
 
-            # 1. Melhores Modelos por Tier (C11) e Competidores
-            f.write(f"### 1. Melhores Modelos por Tier (C11) e Competidores (Top 3)\n\n")
+            # 1. Melhores Modelos por Tier (Kansho) e Competidores
+            f.write(f"### 1. Melhores Modelos por Tier (Kansho) e Competidores (Top 3)\n\n")
             
-            # C11 per Tier
+            # Kansho per Tier
             for tier in sorted(by_tier.keys()):
-                f.write(f"#### C11 libht (Tier {tier})\n\n")
+                f.write(f"#### Kansho (Tier {tier})\n\n")
                 if task == "classification":
                     f.write("| Rank | Configuração | Acurácia (%) | F1 Macro (%) | RAM (KB) | Latência (µs) |\n")
                     f.write("| :---: | :--- | :---: | :---: | :---: | :---: |\n")
@@ -962,6 +962,11 @@ def run_tuning_suite(
         d for d in DATASETS_CONFIG
         if not selected_datasets or "all" in selected_datasets or d[0] in selected_datasets
     ]
+    norm_engines = [e.strip().lower() for e in selected_engines]
+    kansho_enabled = ("c11" in norm_engines or "kansho" in norm_engines or "all" in norm_engines)
+    river_enabled = ("river" in norm_engines or "all" in norm_engines)
+    sklearn_enabled = ("sklearn" in norm_engines or "all" in norm_engines)
+
     total_planned_trials = 0
     for _, _, task, _, is_high_dim in active_datasets:
         if is_grid:
@@ -969,11 +974,11 @@ def run_tuning_suite(
         else:
             n_c11 = len(sample_stratified_c11_space(task, is_high_dim, trials_per_tier, seed))
 
-        if "c11" in selected_engines or "all" in selected_engines:
+        if kansho_enabled:
             total_planned_trials += n_c11
-        if "river" in selected_engines or "all" in selected_engines:
+        if river_enabled:
             total_planned_trials += len(sample_hyperparameters(get_river_space(task), n_c11, is_grid, seed))
-        if "sklearn" in selected_engines or "all" in selected_engines:
+        if sklearn_enabled:
             total_planned_trials += len(sample_hyperparameters(get_sklearn_space(task), n_c11, is_grid, seed))
 
     tracker = ProgressTracker(total_planned_trials)
@@ -1010,16 +1015,16 @@ def run_tuning_suite(
         y_test, _ = load_test_ground_truth(test_csv, task)
         dataset_trials: List[Dict[str, Any]] = []
 
-        # 1. C11 libht
+        # 1. Kansho (C11)
         if is_grid:
             c11_configs = sample_hyperparameters(get_c11_space(task, is_high_dim), n_iter, is_grid, seed)
         else:
             c11_configs = sample_stratified_c11_space(task, is_high_dim, trials_per_tier, seed)
 
-        if "c11" in selected_engines or "all" in selected_engines:
-            print(f"  [1/3] Iniciando C11 libht ({len(c11_configs)} ensaios, {jobs} workers)...")
+        if kansho_enabled:
+            print(f"  [1/3] Iniciando Kansho ({len(c11_configs)} ensaios, {jobs} workers)...")
             c11_trials = run_engine_trials(
-                "c11",
+                "kansho",
                 lambda cfg: run_trial_c11(train_csv, test_csv, task, cfg, y_test, is_high_dim),
                 c11_configs,
                 task,
@@ -1032,7 +1037,7 @@ def run_tuning_suite(
         n_engine_trials = len(c11_configs)
 
         # 2. River
-        if "river" in selected_engines or "all" in selected_engines:
+        if river_enabled:
             river_space = get_river_space(task)
             river_configs = sample_hyperparameters(river_space, n_engine_trials, is_grid, seed)
             print(f"  [2/3] Iniciando River ({len(river_configs)} ensaios, {jobs} workers)...")
@@ -1048,7 +1053,7 @@ def run_tuning_suite(
             dataset_trials.extend(river_trials)
 
         # 3. Scikit-Learn
-        if "sklearn" in selected_engines or "all" in selected_engines:
+        if sklearn_enabled:
             sklearn_space = get_sklearn_space(task)
             sklearn_configs = sample_hyperparameters(sklearn_space, n_engine_trials, is_grid, seed)
             print(f"  [3/3] Iniciando Scikit-Learn ({len(sklearn_configs)} ensaios, {jobs} workers)...")
@@ -1082,8 +1087,8 @@ def main():
     parser.add_argument("--report", default=os.path.join(os.path.dirname(__file__), "hyperparam_report.md"))
     parser.add_argument("--json", default=os.path.join(os.path.dirname(__file__), "hyperparam_results.json"))
     parser.add_argument("--dataset", default="all", help="Dataset(s) to run (e.g. 'all' or 'sea,friedman').")
-    parser.add_argument("--engine", default="all", help="Engines to run ('all' or 'c11,river,sklearn').")
-    parser.add_argument("--trials-per-tier", type=int, default=30, help="Number of trials per memory tier in C11 (default: 30).")
+    parser.add_argument("--engine", default="all", help="Engines to run ('all' or 'kansho,river,sklearn').")
+    parser.add_argument("--trials-per-tier", type=int, default=30, help="Number of trials per memory tier in Kansho (default: 30).")
     parser.add_argument("--n-iter", type=int, default=30, help="Number of random search iterations per engine (legacy fallback).")
     parser.add_argument("--grid", action="store_true", help="Perform full exhaustive grid search.")
     parser.add_argument("--jobs", type=int, default=12, help="Number of parallel jobs.")

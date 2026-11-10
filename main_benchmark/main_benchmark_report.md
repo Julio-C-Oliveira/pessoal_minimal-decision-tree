@@ -1,6 +1,6 @@
 # Relatório do Main Benchmark: Avaliação Realista de RAM e Multi-Tier C11
 
-Este documento consolida a avaliação experimental dos **8 datasets emblemáticos** (4 de Classificação e 4 de Regressão Contínua) comparando a nossa biblioteca **libht em C11 puro** em três tiers de dimensionamento físico estático contra o estimador batch **Scikit-Learn** e a biblioteca streaming **River**.
+Este documento consolida a avaliação experimental dos **8 datasets emblemáticos** (4 de Classificação e 4 de Regressão Contínua) comparando a biblioteca **Kansho (em C11 puro)** em três tiers de dimensionamento físico estático contra o estimador batch **Scikit-Learn** e a biblioteca streaming **River**.
 
 ## 1. Protocolo Experimental e Metodologia de Memória
 
@@ -8,7 +8,7 @@ Este documento consolida a avaliação experimental dos **8 datasets emblemátic
 - **Diferença de Paradigma na Ingestão de Dados:**
   - **Scikit-Learn (Batch Completo):** Carrega todas as $N$ amostras simultaneamente na RAM para `model.fit(X_train, y_train)` e todo o conjunto de teste para `model.predict(X_test)`.
   - **River (Streaming):** Consome amostra por amostra do fluxo contínuo via gerador linha a linha (`learn_one`).
-  - **C11 libht (Streaming Puro Embarcado):** Consome estritamente **1 amostra por vez** diretamente do CSV através de um buffer estático de $2\text{ KB}$, operando com **0.0 KB de `malloc` em runtime** e sem qualquer acúmulo de dados na RAM.
+  - **Kansho (Streaming Puro Embarcado):** Consome estritamente **1 amostra por vez** diretamente do CSV através de um buffer estático de $2\text{ KB}$, operando com **0.0 KB de `malloc` em runtime** e sem qualquer acúmulo de dados na RAM.
 - **Métricas de Memória:**
   - `RAM Intra-Treino (Modelo + Heap)`: Tamanho físico estrutural do modelo somado ao pico de alocações dinâmicas no heap durante o fit/train.
   - `Peak RSS Treino / Teste / Total (MB)`: Memória física real (Resident Set Size) alocada pelo Sistema Operacional para o processo isolado.
@@ -147,13 +147,13 @@ A suíte analisa balanceadamente 8 fluxos de dados (4 de Classificação e 4 de 
 
 ## 5. Síntese Geral: Eficiência de Memória, Limitações e Escalonamento
 
-1. **Quando usar C11 Streaming (`libht`) vs Scikit-Learn Batch:**
-   - **Vantagem do C11/Streaming:** Fluxos sujeitos a *concept drift* temporal (**Electricity**, **Airlines**) e regressão multivariada contínua bem condicionada (**Appliances Energy**, **NYC Taxi**, **Friedman #1**), onde o *Hoeffding Bound* atua como um poderoso regularizador natural contra o sobreajuste massivo do CART Batch, além de cenários embarcados onde reter o dataset em RAM ($>130\text{ MB}$ RSS) é fisicamente impossível.
+1. **Quando usar Kansho Streaming vs Scikit-Learn Batch:**
+   - **Vantagem do Kansho (Streaming):** Fluxos sujeitos a *concept drift* temporal (**Electricity**, **Airlines**) e regressão multivariada contínua bem condicionada (**Appliances Energy**, **NYC Taxi**, **Friedman #1**), onde o *Hoeffding Bound* atua como um poderoso regularizador natural contra o sobreajuste massivo do CART Batch, além de cenários embarcados onde reter o dataset em RAM ($>130\text{ MB}$ RSS) é fisicamente impossível.
    - **Vantagem do Scikit-Learn Batch:** Problemas estáticos com acesso ilimitado a memória e tempo de CPU offline, onde árvores com milhares de divisões complexas podem ser geradas sem restrições estáticas de SRAM.
 2. **Impacto do Paradigma Batch vs Streaming no Peak RSS do SO:**
    - **Scikit-Learn:** **$129.5\text{ MB}$ a $137.0\text{ MB}$** de Peak RSS no SO.
    - **River:** **$129.7\text{ MB}$ a $175.9\text{ MB}$** de Peak RSS no SO (devido ao runtime Python e objetos dinâmicos).
-   - **C11 (`libht`):** **$2.7\text{ MB}$ a $3.3\text{ MB}$** de Peak RSS total no SO (**redução de $>40\times$** no processo inteiro e **0.0 KB** de heap dinâmico).
+   - **Kansho:** **$2.7\text{ MB}$ a $3.3\text{ MB}$** de Peak RSS total no SO (**redução de $>40\times$** no processo inteiro e **0.0 KB** de heap dinâmico).
 3. **Guia Prático de Escolha entre os Tiers C11:**
    - **Tier 256 ($473\text{ a }532\text{ KB}$):** Recomendado para problemas de regressão não-linear complexa (**Friedman #1**, **Appliances Energy**, **NYC Taxi**) em microcontroladores de maior porte (ESP32-S3 com PSRAM, STM32H7, Cortex-A), garantindo desempenho igual ou superior ao River e ao Scikit-Learn.
    - **Tier 8 ($16.6\text{ a }97.5\text{ KB}$):** O **ponto ótimo de custo-benefício (Sweet Spot)**. Entrega **100% da acurácia do Tier 256** em classificação e supera o Scikit-Learn no Appliances Energy consumindo até **$31\times$ menos RAM** que o Tier 256.

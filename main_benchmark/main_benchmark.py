@@ -18,9 +18,9 @@ Executes comprehensive multi-tier evaluation across 8 flagship datasets:
 Competitors Evaluated in Isolated Subprocesses:
 1. Scikit-Learn (CART Batch Completo) - Receives full N training samples at once
 2. River (Streaming Online 1-a-1) - Streams line by line from disk
-3. C11 libht Tier 256 (256 Folhas / 4096 Nós, <= 1 MB) - Streams 1-a-1 (zero malloc)
-4. C11 libht Tier 8 (8 Folhas / 128 Nós, <= 1 MB) - Streams 1-a-1 (zero malloc)
-5. C11 libht Tier 4 (4 Folhas / 64 Nós, <= 1 MB) - Streams 1-a-1 (zero malloc)
+3. Kansho Tier 256 (256 Folhas / 4096 Nós, <= 1 MB) - Streams 1-a-1 (zero malloc)
+4. Kansho Tier 8 (8 Folhas / 128 Nós, <= 1 MB) - Streams 1-a-1 (zero malloc)
+5. Kansho Tier 4 (4 Folhas / 64 Nós, <= 1 MB) - Streams 1-a-1 (zero malloc)
 
 Measures:
 - Holdout & Prequential Metrics (Accuracy/F1 or MAE/RMSE/R2)
@@ -538,14 +538,14 @@ def generate_markdown_report(report_path: str, results: List[Dict[str, Any]]):
     os.makedirs(os.path.dirname(report_path), exist_ok=True)
     with open(report_path, "w", encoding="utf-8") as f:
         f.write("# Relatório do Main Benchmark: Avaliação Realista de RAM e Multi-Tier C11\n\n")
-        f.write("Este documento consolida a avaliação experimental dos **8 datasets emblemáticos** (4 de Classificação e 4 de Regressão Contínua) comparando a nossa biblioteca **libht em C11 puro** em três tiers de dimensionamento físico estático contra o estimador batch **Scikit-Learn** e a biblioteca streaming **River**.\n\n")
+        f.write("Este documento consolida a avaliação experimental dos **8 datasets emblemáticos** (4 de Classificação e 4 de Regressão Contínua) comparando a biblioteca **Kansho (em C11 puro)** em três tiers de dimensionamento físico estático contra o estimador batch **Scikit-Learn** e a biblioteca streaming **River**.\n\n")
 
         f.write("## 1. Protocolo Experimental e Metodologia de Memória\n\n")
         f.write("- **Volume de Amostras Equivalente ($N$):** As três soluções analisam rigorosamente a mesma quantidade total de amostras de treino ao longo do experimento.\n")
         f.write("- **Diferença de Paradigma na Ingestão de Dados:**\n")
         f.write("  - **Scikit-Learn (Batch Completo):** Carrega todas as $N$ amostras simultaneamente na RAM para `model.fit(X_train, y_train)` e todo o conjunto de teste para `model.predict(X_test)`.\n")
         f.write("  - **River (Streaming):** Consome amostra por amostra do fluxo contínuo via gerador linha a linha (`learn_one`).\n")
-        f.write("  - **C11 libht (Streaming Puro Embarcado):** Consome estritamente **1 amostra por vez** diretamente do CSV através de um buffer estático de $2\\text{ KB}$, operando com **0.0 KB de `malloc` em runtime** e sem qualquer acúmulo de dados na RAM.\n")
+        f.write("  - **Kansho (Streaming Puro Embarcado):** Consome estritamente **1 amostra por vez** diretamente do CSV através de um buffer estático de $2\\text{ KB}$, operando com **0.0 KB de `malloc` em runtime** e sem qualquer acúmulo de dados na RAM.\n")
         f.write("- **Métricas de Memória:**\n")
         f.write("  - `RAM Intra-Treino (Modelo + Heap)`: Tamanho físico estrutural do modelo somado ao pico de alocações dinâmicas no heap durante o fit/train.\n")
         f.write("  - `Peak RSS Treino / Teste / Total (MB)`: Memória física real (Resident Set Size) alocada pelo Sistema Operacional para o processo isolado.\n")
@@ -708,13 +708,13 @@ def generate_markdown_report(report_path: str, results: List[Dict[str, Any]]):
 
         # Section 5: Global Memory & Synthesis
         f.write("## 5. Síntese Geral: Eficiência de Memória, Limitações e Escalonamento\n\n")
-        f.write("1. **Quando usar C11 Streaming (`libht`) vs Scikit-Learn Batch:**\n")
-        f.write("   - **Vantagem do C11/Streaming:** Fluxos sujeitos a *concept drift* temporal (**Electricity**, **Airlines**) e regressão multivariada contínua bem condicionada (**Appliances Energy**, **NYC Taxi**, **Friedman #1**), onde o *Hoeffding Bound* atua como um poderoso regularizador natural contra o sobreajuste massivo do CART Batch, além de cenários embarcados onde reter o dataset em RAM ($>130\\text{ MB}$ RSS) é fisicamente impossível.\n")
+        f.write("1. **Quando usar Kansho Streaming vs Scikit-Learn Batch:**\n")
+        f.write("   - **Vantagem do Kansho (Streaming):** Fluxos sujeitos a *concept drift* temporal (**Electricity**, **Airlines**) e regressão multivariada contínua bem condicionada (**Appliances Energy**, **NYC Taxi**, **Friedman #1**), onde o *Hoeffding Bound* atua como um poderoso regularizador natural contra o sobreajuste massivo do CART Batch, além de cenários embarcados onde reter o dataset em RAM ($>130\\text{ MB}$ RSS) é fisicamente impossível.\n")
         f.write("   - **Vantagem do Scikit-Learn Batch:** Problemas estáticos com acesso ilimitado a memória e tempo de CPU offline, onde árvores com milhares de divisões complexas podem ser geradas sem restrições estáticas de SRAM.\n")
         f.write("2. **Impacto do Paradigma Batch vs Streaming no Peak RSS do SO:**\n")
         f.write("   - **Scikit-Learn:** **$129.5\\text{ MB}$ a $137.0\\text{ MB}$** de Peak RSS no SO.\n")
         f.write("   - **River:** **$129.7\\text{ MB}$ a $175.9\\text{ MB}$** de Peak RSS no SO (devido ao runtime Python e objetos dinâmicos).\n")
-        f.write("   - **C11 (`libht`):** **$2.7\\text{ MB}$ a $3.3\\text{ MB}$** de Peak RSS total no SO (**redução de $>40\\times$** no processo inteiro e **0.0 KB** de heap dinâmico).\n")
+        f.write("   - **Kansho:** **$2.7\\text{ MB}$ a $3.3\\text{ MB}$** de Peak RSS total no SO (**redução de $>40\\times$** no processo inteiro e **0.0 KB** de heap dinâmico).\n")
         f.write("3. **Guia Prático de Escolha entre os Tiers C11:**\n")
         f.write("   - **Tier 256 ($473\\text{ a }532\\text{ KB}$):** Recomendado para problemas de regressão não-linear complexa (**Friedman #1**, **Appliances Energy**, **NYC Taxi**) em microcontroladores de maior porte (ESP32-S3 com PSRAM, STM32H7, Cortex-A), garantindo desempenho igual ou superior ao River e ao Scikit-Learn.\n")
         f.write("   - **Tier 8 ($16.6\\text{ a }97.5\\text{ KB}$):** O **ponto ótimo de custo-benefício (Sweet Spot)**. Entrega **100% da acurácia do Tier 256** em classificação e supera o Scikit-Learn no Appliances Energy consumindo até **$31\\times$ menos RAM** que o Tier 256.\n")
