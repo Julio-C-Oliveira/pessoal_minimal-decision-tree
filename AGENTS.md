@@ -36,7 +36,12 @@ Este repositório desenvolve **kansho** (簡樹, "árvore simples"): uma **Hoeff
   - `chore:` build (`Makefile`, `code/Makefile`), materiais de referência (`references/`) ou configuração de agentes (`AGENTS.md`, `.agents/`)
 - **Versionamento Semântico e Releases (SemVer 2.0.0):**
   - O projeto adota estritamente Semantic Versioning (`MAJOR.MINOR.PATCH`).
-  - A fonte única de verdade é mantida sincronizada em duas pontas: o arquivo `VERSION` (na raiz do projeto, para Make/scripts) e as macros `HT_VERSION_MAJOR`, `HT_VERSION_MINOR`, `HT_VERSION_PATCH`, `HT_VERSION_STRING` em `code/include/ht_config.h` (para o código C11).
+  - A fonte única de verdade é mantida sincronizada em duas pontas: o arquivo `VERSION` (na raiz do projeto, para Make/scripts) e as macros `HT_VERSION_MAJOR`, `HT_VERSION_MINOR`, `HT_VERSION_PATCH`, `HT_VERSION_STRING` em `code/include/ht_config.h` (para o código C11), além das asserções de consistência em `code/tests/test_main.c`.
+  - **Avaliação Obrigatória de Upgrade de Versão:** Após **cada commit realizado** (ou entrega de bloco lógico/etapa), o agente deve avaliar obrigatoriamente se as alterações acumuladas justificam ou demandam um upgrade de versão SemVer:
+    - **`PATCH` (0.x.+1):** correções de bugs (`fix`), correções de precisão numérica, refatorações internas ou otimizações de performance sem alteração da API pública nem quebra de compatibilidade.
+    - **`MINOR` (0.+1.0):** nova funcionalidade retrocompatível (`feat`), novos módulos/algoritmos (ex: novos observadores, novos tipos de split, novas estratégias de drift), expansão de structs ou utilitários da biblioteca.
+    - **`MAJOR` (+1.0.0):** alterações incompatíveis na API pública (`BREAKING CHANGE`), mudanças drásticas de layout de memória/estruturas ou marcos de estabilização do projeto (ex: release `1.0.0`).
+  - Quando um upgrade de versão for indicado, ele deve ser executado em um **commit atômico dedicado** (`chore(version): bump version to X.Y.Z`), sincronizando `VERSION`, `code/include/ht_config.h` e `code/tests/test_main.c`, com validação prévia de 100% dos testes.
   - Nunca crie tags Git sem antes validar 100% dos testes unitários e de integração em precisão simples (`float`) e dupla (`double`).
   - Releases no GitHub devem obrigatoriamente usar tags anotadas no padrão `vX.Y.Z` (ex: `git tag -a v0.1.0 -m "Release v0.1.0: ..."`).
 
