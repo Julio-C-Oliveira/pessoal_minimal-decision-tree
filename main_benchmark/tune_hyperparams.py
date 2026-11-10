@@ -51,6 +51,21 @@ CODE_DIR = os.path.join(PROJECT_ROOT, "code")
 BUILD_DIR = os.path.join(CODE_DIR, "build")
 BENCH_SRC = os.path.join(PROJECT_ROOT, "benchmarks", "bench_c_runner.c")
 
+PYTHON_BIN = sys.executable
+VENV_PYTHON = os.path.join(PROJECT_ROOT, ".venv", "bin", "python3")
+if os.path.exists(VENV_PYTHON):
+    PYTHON_BIN = VENV_PYTHON
+
+# Memory Tiers: Tier -> (Leaves, Nodes)
+TIER_MAP = {
+    4: (4, 64),
+    8: (8, 128),
+    16: (16, 256),
+    64: (64, 1024),
+    128: (128, 2048),
+    256: (256, 4096),
+}
+
 DATASETS_CONFIG = [
     # id, name, task, desc, is_high_dim
     ("sea", "SEA", "classification", "SEA (Synthetic, 3 continuous, 2 classes)", False),
@@ -94,8 +109,10 @@ def ensure_c11_binary(tier: int, slots: int, is_high_dim: bool) -> str:
             os.path.join(CODE_DIR, "src", "ht_observer.c"),
             os.path.join(CODE_DIR, "src", "ht_criterion.c"),
             os.path.join(CODE_DIR, "src", "ht_drift.c"),
+            os.path.join(CODE_DIR, "src", "ht_prep.c"),
             os.path.join(CODE_DIR, "include", "ht_config.h"),
             os.path.join(CODE_DIR, "include", "ht_memory.h"),
+            os.path.join(CODE_DIR, "include", "ht_prep.h"),
         ]
 
         needs_compile = not os.path.exists(bin_path)
@@ -108,26 +125,9 @@ def ensure_c11_binary(tier: int, slots: int, is_high_dim: bool) -> str:
 
         if needs_compile:
             print(f"    [Compiling C11 binary: {bin_name}]...", end="", flush=True)
-            # Node and active leaf capacity logic per tier and slot count (ensuring <= 1 MB)
-            if tier == 4:
-                leaves = 4
-                nodes = 64
-            elif tier == 8:
-                leaves = 8
-                nodes = 128
-            else:
-                if is_high_dim:
-                    leaves = 40
-                    nodes = 1024
-                elif slots >= 32:
-                    leaves = 100
-                    nodes = 1024
-                elif slots >= 16:
-                    leaves = 192
-                    nodes = 2048
-                else:
-                    leaves = 256
-                    nodes = 2048
+            
+            # Use TIER_MAP, default to 40/1024 for unknown tiers if necessary, or error
+            leaves, nodes = TIER_MAP.get(tier, (40, 1024))
 
             macros = [
                 f"-DHT_MAX_ACTIVE_LEAVES={leaves}",
@@ -143,6 +143,7 @@ def ensure_c11_binary(tier: int, slots: int, is_high_dim: bool) -> str:
                 os.path.join(CODE_DIR, "src", "ht_criterion.c"),
                 os.path.join(CODE_DIR, "src", "ht_tree.c"),
                 os.path.join(CODE_DIR, "src", "ht_drift.c"),
+                os.path.join(CODE_DIR, "src", "ht_prep.c"),
                 BENCH_SRC,
             ]
 
@@ -281,6 +282,16 @@ def run_trial_c11(
         "--delta", str(params.get("delta", 1e-7)),
         "--tau", str(params.get("tau", 0.05)),
     ]
+    
+    # New params
+    if params.get("prep_scaler") == "standard":
+        cmd.append("--prep-scaler")
+    if params.get("leaf_normalize", False):
+        cmd.append("--leaf-normalize")
+    if params.get("obs_splitter"):
+        cmd.extend(["--obs", params["obs_splitter"]])
+    if params.get("filter_hampel", False):
+        cmd.append("--filter-hampel")
 
     if task == "regression":
         cmd.append("--regression")
@@ -358,7 +369,7 @@ def run_trial_river(
 ) -> Dict[str, Any]:
     runner_script = os.path.join(os.path.dirname(__file__), "runners", "run_river.py")
     cmd = [
-        sys.executable,
+        PYTHON_BIN,
         runner_script,
         "--train-csv", train_csv,
         "--test-csv", test_csv,
@@ -369,6 +380,10 @@ def run_trial_river(
         "--leaf-prediction", str(params.get("leaf_prediction", "adaptive")),
         "--splitter", str(params.get("splitter", "default")),
     ]
+    # Parity: pipeline
+    if params.get("prep_scaler") == "standard":
+        cmd.append("--use-scaler")
+        
     if task == "classification":
         cmd.extend(["--split-criterion", str(params.get("split_criterion", "info_gain"))])
 
@@ -387,7 +402,7 @@ def run_trial_sklearn(
 ) -> Dict[str, Any]:
     runner_script = os.path.join(os.path.dirname(__file__), "runners", "run_sklearn.py")
     cmd = [
-        sys.executable,
+        PYTHON_BIN,
         runner_script,
         "--train-csv", train_csv,
         "--test-csv", test_csv,
@@ -395,6 +410,10 @@ def run_trial_sklearn(
         "--min-samples-split", str(params.get("min_samples_split", 2)),
         "--min-samples-leaf", str(params.get("min_samples_leaf", 1)),
     ]
+    # Parity: pipeline
+    if params.get("prep_scaler") == "standard":
+        cmd.append("--use-scaler")
+        
     if params.get("max_depth") is not None:
         cmd.extend(["--max-depth", str(params["max_depth"])])
     if params.get("max_features") is not None:
@@ -418,7 +437,10 @@ def get_c11_space(task: str) -> Dict[str, List[Any]]:
         "grace_period": [50, 100, 200, 400],
         "delta": [1e-2, 1e-3, 1e-4, 1e-7],
         "tau": [0.01, 0.05, 0.10, 0.15],
-        "tier": [4, 8, 256],
+        "tier": [4, 8, 16, 64, 128, 256],
+        "prep_scaler": [None, "standard"],
+        "obs_splitter": ["gaussian", "histogram"],
+        "filter_hampel": [False, True],
     }
     if task == "classification":
         space["split_criterion"] = ["info_gain", "gini"]
@@ -426,6 +448,7 @@ def get_c11_space(task: str) -> Dict[str, List[Any]]:
     else:
         space["leaf_prediction"] = ["adaptive", "model", "mean"]
         space["reg_num_slots"] = [8, 16, 32]
+        space["leaf_normalize"] = [False, True]
     return space
 
 
@@ -434,6 +457,7 @@ def get_river_space(task: str) -> Dict[str, List[Any]]:
         "grace_period": [50, 100, 200, 400],
         "delta": [1e-2, 1e-3, 1e-4, 1e-7],
         "tau": [0.01, 0.05, 0.10, 0.15],
+        "prep_scaler": [None, "standard"],
     }
     if task == "classification":
         space["leaf_prediction"] = ["nba", "nb", "mc"]
@@ -451,6 +475,7 @@ def get_sklearn_space(task: str) -> Dict[str, List[Any]]:
         "min_samples_split": [10, 50, 100, 500],
         "min_samples_leaf": [5, 20, 50, 100],
         "max_features": [None, "sqrt", "log2"],
+        "prep_scaler": [None, "standard"],
     }
     if task == "classification":
         space["criterion"] = ["entropy", "gini"]
@@ -526,124 +551,132 @@ def generate_markdown_report(
             f.write(f"- **Total de Experimentos (Trials):** {len(trials)}\n\n")
 
             # Group trials by engine / tier
-            by_engine: Dict[str, List[Dict[str, Any]]] = {
-                "c11_global": [],
-                "c11_t8": [],
-                "river": [],
-                "sklearn": [],
-            }
+            by_tier: Dict[int, List[Dict[str, Any]]] = {}
             for t in trials:
-                eng = t.get("engine", "c11")
-                if eng == "c11":
-                    by_engine["c11_global"].append(t)
-                    if t.get("params", {}).get("tier") == 8:
-                        by_engine["c11_t8"].append(t)
-                else:
-                    by_engine[eng].append(t)
+                if t.get("engine") == "c11":
+                    tier = t.get("params", {}).get("tier", 0)
+                    if tier not in by_tier:
+                        by_tier[tier] = []
+                    by_tier[tier].append(t)
+            
+            # Engines
+            engines = {"river": [], "sklearn": []}
+            for t in trials:
+                eng = t.get("engine")
+                if eng in engines:
+                    engines[eng].append(t)
 
             # Sort trials:
-            # - Classificação: 1º F1 Score (macro), 2º Acurácia (desempate)
-            # - Regressão: 1º R² (maior melhor), 2º RMSE (menor melhor como desempate)
-            if task == "classification":
-                for k in by_engine:
-                    by_engine[k].sort(
-                        key=lambda x: (x.get("f1_macro", 0.0), x.get("holdout_acc", 0.0)),
-                        reverse=True,
-                    )
-            else:
-                for k in by_engine:
-                    by_engine[k].sort(
-                        key=lambda x: (x.get("holdout_r2", -1e9), -x.get("holdout_rmse", 1e9)),
-                        reverse=True,
-                    )
+            # - Classificação: 1º F1 Score (macro), 2º Acurácia (desempate: latência)
+            # - Regressão: 1º R² (maior melhor), 2º RMSE (menor melhor como desempate: latência)
+            def sort_key(x):
+                if task == "classification":
+                    return (x.get("f1_macro", 0.0), x.get("holdout_acc", 0.0), -x.get("avg_us_per_sample", 0.0))
+                else:
+                    return (x.get("holdout_r2", -1e9), -x.get("holdout_rmse", 1e9), -x.get("avg_us_per_sample", 0.0))
 
-            engines_to_show = [
-                ("c11_global", "C11 libht (Global)"),
-                ("c11_t8", "C11 libht (Tier 8)"),
-                ("river", "River"),
-                ("sklearn", "Scikit-Learn"),
-            ]
+            for k in by_tier:
+                by_tier[k].sort(key=sort_key, reverse=True)
+            for k in engines:
+                engines[k].sort(key=sort_key, reverse=True)
 
-            # 1. Top Models Table per Engine
-            f.write(f"### 1. Melhores Modelos por Competidor (Top 3)\n\n")
-            if task == "classification":
-                f.write("| Engine | Rank | Configuração / Hiperparâmetros | Acurácia (%) | Prec. Macro (%) | Rec. Macro (%) | F1 Macro (%) | RAM (KB) | Latência (µs) |\n")
-                f.write("| :--- | :---: | :--- | :---: | :---: | :---: | :---: | :---: | :---: |\n")
-                for eng, label in engines_to_show:
-                    for rank, t in enumerate(by_engine[eng][:3], start=1):
+            # 1. Melhores Modelos por Tier (C11) e Competidores
+            f.write(f"### 1. Melhores Modelos por Tier (C11) e Competidores (Top 3)\n\n")
+            
+            # C11 per Tier
+            for tier in sorted(by_tier.keys()):
+                f.write(f"#### C11 libht (Tier {tier})\n\n")
+                if task == "classification":
+                    f.write("| Rank | Configuração | Acurácia (%) | F1 Macro (%) | RAM (KB) | Latência (µs) |\n")
+                    f.write("| :---: | :--- | :---: | :---: | :---: | :---: |\n")
+                    for rank, t in enumerate(by_tier[tier][:3], start=1):
                         p_str = ", ".join(f"`{k}={v}`" for k, v in t["params"].items())
-                        f.write(
-                            f"| {label} | #{rank} | {p_str} | "
-                            f"{t.get('holdout_acc', 0.0):.2f}% | "
-                            f"{t.get('precision_macro', 0.0):.2f}% | "
-                            f"{t.get('recall_macro', 0.0):.2f}% | "
-                            f"{t.get('f1_macro', 0.0):.2f}% | "
-                            f"{t.get('intra_train_ram_kb', 0.0):.1f} KB | "
-                            f"{t.get('avg_us_per_sample', 0.0):.2f} µs |\n"
-                        )
-            else:
-                f.write("| Engine | Rank | Configuração / Hiperparâmetros | MAE | RMSE | R² | RAM (KB) | Latência (µs) |\n")
-                f.write("| :--- | :---: | :--- | :---: | :---: | :---: | :---: | :---: |\n")
-                for eng, label in engines_to_show:
-                    for rank, t in enumerate(by_engine[eng][:3], start=1):
+                        f.write(f"| #{rank} | {p_str} | {t.get('holdout_acc', 0.0):.2f}% | {t.get('f1_macro', 0.0):.2f}% | {t.get('intra_train_ram_kb', 0.0):.1f} KB | {t.get('avg_us_per_sample', 0.0):.2f} µs |\n")
+                else:
+                    f.write("| Rank | Configuração | MAE | R² | RAM (KB) | Latência (µs) |\n")
+                    f.write("| :---: | :--- | :---: | :---: | :---: | :---: |\n")
+                    for rank, t in enumerate(by_tier[tier][:3], start=1):
                         p_str = ", ".join(f"`{k}={v}`" for k, v in t["params"].items())
-                        f.write(
-                            f"| {label} | #{rank} | {p_str} | "
-                            f"{t.get('holdout_mae', 0.0):.4f} | "
-                            f"{t.get('holdout_rmse', 0.0):.4f} | "
-                            f"{t.get('holdout_r2', 0.0):.4f} | "
-                            f"{t.get('intra_train_ram_kb', 0.0):.1f} KB | "
-                            f"{t.get('avg_us_per_sample', 0.0):.2f} µs |\n"
-                        )
-            f.write("\n")
+                        f.write(f"| #{rank} | {p_str} | {t.get('holdout_mae', 0.0):.4f} | {t.get('holdout_r2', 0.0):.4f} | {t.get('intra_train_ram_kb', 0.0):.1f} KB | {t.get('avg_us_per_sample', 0.0):.2f} µs |\n")
+                f.write("\n")
+                
+            # Competitors
+            for eng in ["river", "sklearn"]:
+                f.write(f"#### {eng.capitalize()}\n\n")
+                if task == "classification":
+                    f.write("| Rank | Configuração | Acurácia (%) | F1 Macro (%) | Latência (µs) |\n")
+                    f.write("| :---: | :--- | :---: | :---: | :---: |\n")
+                    for rank, t in enumerate(engines[eng][:3], start=1):
+                        p_str = ", ".join(f"`{k}={v}`" for k, v in t["params"].items())
+                        f.write(f"| #{rank} | {p_str} | {t.get('holdout_acc', 0.0):.2f}% | {t.get('f1_macro', 0.0):.2f}% | {t.get('avg_us_per_sample', 0.0):.2f} µs |\n")
+                else:
+                    f.write("| Rank | Configuração | MAE | R² | Latência (µs) |\n")
+                    f.write("| :---: | :--- | :---: | :---: | :---: |\n")
+                    for rank, t in enumerate(engines[eng][:3], start=1):
+                        p_str = ", ".join(f"`{k}={v}`" for k, v in t["params"].items())
+                        f.write(f"| #{rank} | {p_str} | {t.get('holdout_mae', 0.0):.4f} | {t.get('holdout_r2', 0.0):.4f} | {t.get('avg_us_per_sample', 0.0):.2f} µs |\n")
+                f.write("\n")
 
-            # 2. Pareto Frontier (Accuracy / R2 vs RAM vs Latency)
-            f.write("### 2. Fronteira de Pareto (Acurácia/R² vs Memória vs Latência)\n\n")
-            f.write("Configurações não-dominadas que maximizam acurácia / minimizam erro consumindo o menor orçamento de RAM e CPU:\n\n")
-            if task == "classification":
-                f.write("| Engine | Configuração Chave | Acurácia (%) | F1 Macro (%) | RAM Intra-Treino | Latência por Amostra |\n")
-                f.write("| :--- | :--- | :---: | :---: | :---: | :---: |\n")
-                for eng, label in engines_to_show:
-                    if by_engine[eng]:
-                        best_t = by_engine[eng][0]
-                        cfg = f"`grace_period={best_t['params'].get('grace_period')}`, `delta={best_t['params'].get('delta')}`" if "grace_period" in best_t['params'] else f"`max_depth={best_t['params'].get('max_depth')}`"
-                        f.write(
-                            f"| {label} | {cfg} | {best_t.get('holdout_acc', 0.0):.2f}% | "
-                            f"{best_t.get('f1_macro', 0.0):.2f}% | {best_t.get('intra_train_ram_kb', 0.0):.1f} KB | "
-                            f"{best_t.get('avg_us_per_sample', 0.0):.2f} µs |\n"
-                        )
-            else:
-                f.write("| Engine | Configuração Chave | MAE | R² | RAM Intra-Treino | Latência por Amostra |\n")
-                f.write("| :--- | :--- | :---: | :---: | :---: | :---: |\n")
-                for eng, label in engines_to_show:
-                    if by_engine[eng]:
-                        best_t = by_engine[eng][0]
-                        cfg = f"`grace_period={best_t['params'].get('grace_period')}`, `slots={best_t['params'].get('reg_num_slots')}`" if "grace_period" in best_t['params'] else f"`max_depth={best_t['params'].get('max_depth')}`"
-                        f.write(
-                            f"| {label} | {cfg} | {best_t.get('holdout_mae', 0.0):.4f} | "
-                            f"{best_t.get('holdout_r2', 0.0):.4f} | {best_t.get('intra_train_ram_kb', 0.0):.1f} KB | "
-                            f"{best_t.get('avg_us_per_sample', 0.0):.2f} µs |\n"
-                        )
-            f.write("\n")
-
-            # 3. Sensitivity Analysis
-            f.write("### 3. Análise de Sensibilidade dos Hiperparâmetros\n\n")
-            f.write("- **Frequência de Split (`grace_period`):** Períodos menores (50-100) aceleram a taxa de crescimento da árvore em fluxos dinâmicos, mas aumentam a sobrecarga de testes de divisão; períodos maiores (200-400) garantem divisões com maior evidência estatística e menor latência por amostra.\n")
-            if task == "classification":
-                f.write("- **Critério de Divisão (`split_criterion`):** `HT_CRIT_INFO_GAIN` demonstra maior sensibilidade para distinguir classes raras, enquanto `HT_CRIT_GINI` favorece particionamento balanceado em nós rasos.\n")
-                f.write("- **Estratégia das Folhas (`leaf_prediction`):** O classificador `HT_LEAF_NBA` (Adaptive) supera sistematicamente `HT_LEAF_MC` e `HT_LEAF_NB` isolados por chavear dinamicamente para Naive Bayes apenas quando sua taxa de acerto acumulada é superior à da classe majoritária.\n")
-            else:
-                f.write("- **Slots de Observação Contínua (`HT_REG_NUM_SLOTS`):** 16 e 32 slots melhoram sensivelmente a aproximação de distribuições contínuas multimodais em relação a 8 slots, com acréscimo insignificante de consumo de RAM estática na BSS.\n")
-                f.write("- **Estratégia das Folhas (`leaf_prediction`):** `HT_LEAF_ADAPTIVE` com preditor SGD linear atinge $R^2$ significativamente superior a `HT_LEAF_MEAN` em superfícies suaves com tendências lineares locais.\n")
-            f.write("- **Tiers de Memória (`HT_MAX_ACTIVE_LEAVES`):** Tier 8 e Tier 4 mantêm desempenho altamente competitivo, fornecendo reduções de RAM de até 30x a 60x comparados ao Tier 256 e aos competidores em Python.\n\n")
-            f.write("---\n\n")
+            f.write("\n---\n\n")
 
         # Global Summary
-        f.write("## 4. Síntese e Diretrizes de Engenharia\n\n")
-        f.write("1. **Equilíbrio Ótimo para Sistemas Embarcados:**\n")
-        f.write("   - `grace_period = 200`, `delta = 1e-4`, `tau = 0.05`, `leaf_prediction = HT_LEAF_NBA` (classificação) e `HT_LEAF_ADAPTIVE` com 16 slots (regressão) estabelecem o ponto de operação com maior robustez e menor dispersão de métricas.\n")
-        f.write("2. **Curva de Pareto:**\n")
-        f.write("   - O **C11 Tier 8** consolida-se como o *Sweet Spot* ideal para microcontroladores com 32-64 KB de RAM, entregando >95% da acurácia máxima com tempo de inferência sub-microssegundo.\n")
+        f.write("## 2. Síntese e Diretrizes de Engenharia\n\n")
+        f.write("1. **Análise por Tier:** O ranking estratificado revela que configurações ideais para 256 folhas frequentemente diferem daqueles necessários para evitar subajuste em 4 ou 8 folhas.\n")
+        f.write("2. **Eficiência:** O uso de latência como desempate garante que configurações computacionalmente custosas que entreguem ganhos marginais de acurácia sejam penalizadas.\n")
+
+
+# ==============================================================================
+# Progress Evaluation & Tracking
+# ==============================================================================
+
+class ProgressTracker:
+    """Thread-safe progress evaluator for multi-core hyperparameter tuning."""
+    def __init__(self, total_trials: int):
+        self.total_trials = total_trials
+        self.completed = 0
+        self.start_time = time.time()
+        self.lock = threading.Lock()
+
+    @staticmethod
+    def _format_time(seconds: float) -> str:
+        if seconds < 0 or math.isinf(seconds) or math.isnan(seconds):
+            return "--:--"
+        m, s = divmod(int(seconds), 60)
+        h, m = divmod(m, 60)
+        if h > 0:
+            return f"{h:02d}:{m:02d}:{s:02d}"
+        return f"{m:02d}:{s:02d}"
+
+    def update(
+        self,
+        engine_name: str,
+        dataset_name: str,
+        engine_idx: int,
+        engine_total: int,
+        metric_str: str,
+        extra_str: str = "",
+    ):
+        with self.lock:
+            self.completed += 1
+            now = time.time()
+            elapsed = now - self.start_time
+            rate = self.completed / elapsed if elapsed > 0 else 0.0
+            remaining = (self.total_trials - self.completed) / rate if rate > 0 else 0.0
+
+            pct_global = (self.completed / max(1, self.total_trials)) * 100.0
+            bar_len = 20
+            filled = int(bar_len * self.completed // max(1, self.total_trials))
+            bar = "█" * filled + "░" * (bar_len - filled)
+
+            elapsed_str = self._format_time(elapsed)
+            eta_str = self._format_time(remaining)
+
+            print(
+                f"[{bar}] {pct_global:5.1f}% | Global: {self.completed:4d}/{self.total_trials} | "
+                f"[{elapsed_str}<{eta_str}, {rate:.2f} it/s] | "
+                f"[{dataset_name} | {engine_name.upper()} {engine_idx:3d}/{engine_total}] {metric_str} {extra_str}",
+                flush=True,
+            )
 
 
 def run_engine_trials(
@@ -652,11 +685,14 @@ def run_engine_trials(
     configs: List[Dict[str, Any]],
     task: str,
     jobs: int,
+    dataset_name: str = "",
+    tracker: Optional[ProgressTracker] = None,
 ) -> List[Dict[str, Any]]:
     results: List[Dict[str, Any]] = []
     total = len(configs)
     completed = 0
     lock = threading.Lock()
+    t_start = time.time()
 
     def worker(idx_cfg):
         nonlocal completed
@@ -665,15 +701,30 @@ def run_engine_trials(
             res = trial_fn(cfg)
             with lock:
                 completed += 1
-                metric_val = f"Acc={res.get('holdout_acc', 0.0):.2f}%" if task == "classification" else f"MAE={res.get('holdout_mae', 0.0):.4f}, R2={res.get('holdout_r2', 0.0):.4f}"
-                print(f"    [{engine_name.upper()}] {completed:4d}/{total}: {metric_val}, RAM={res['intra_train_ram_kb']:.1f}KB, Time={res['avg_us_per_sample']:.2f}us | {cfg}", flush=True)
+                metric_val = (
+                    f"Acc={res.get('holdout_acc', 0.0):.2f}%"
+                    if task == "classification"
+                    else f"MAE={res.get('holdout_mae', 0.0):.4f}, R2={res.get('holdout_r2', 0.0):.4f}"
+                )
+                extra = f"RAM={res.get('intra_train_ram_kb', 0.0):.1f}KB, Time={res.get('avg_us_per_sample', 0.0):.2f}us | {cfg}"
+            
+            if tracker is not None:
+                tracker.update(engine_name, dataset_name, completed, total, metric_val, extra)
+            else:
+                with lock:
+                    print(f"    [{engine_name.upper()}] {completed:4d}/{total}: {metric_val}, {extra}", flush=True)
             return res
         except Exception as e:
             with lock:
                 completed += 1
-                print(f"    [{engine_name.upper()}] {completed:4d}/{total}: ERROR ({e}) | {cfg}", flush=True)
+                err_msg = f"ERROR ({e}) | {cfg}"
+            if tracker is not None:
+                tracker.update(engine_name, dataset_name, completed, total, err_msg)
+            else:
+                with lock:
+                    print(f"    [{engine_name.upper()}] {completed:4d}/{total}: {err_msg}", flush=True)
             return None
-
+        
     if jobs > 1:
         with concurrent.futures.ThreadPoolExecutor(max_workers=jobs) as executor:
             for r in executor.map(worker, enumerate(configs, start=1)):
@@ -684,6 +735,10 @@ def run_engine_trials(
             r = worker(idx_cfg)
             if r is not None:
                 results.append(r)
+
+    elapsed_engine = time.time() - t_start
+    throughput = len(results) / max(0.001, elapsed_engine)
+    print(f"  [✔] {engine_name.upper()} em {dataset_name} concluído: {len(results)}/{total} ensaios válidos em {elapsed_engine:.1f}s ({throughput:.2f} it/s)\n", flush=True)
 
     return results
 
@@ -703,12 +758,29 @@ def run_tuning_suite(
     seed: int,
     jobs: int,
 ):
+    # Pre-calculate total planned trials across datasets and engines
+    active_datasets = [
+        d for d in DATASETS_CONFIG
+        if not selected_datasets or "all" in selected_datasets or d[0] in selected_datasets
+    ]
+    total_planned_trials = 0
+    for _, _, task, _, _ in active_datasets:
+        if "c11" in selected_engines or "all" in selected_engines:
+            total_planned_trials += len(sample_hyperparameters(get_c11_space(task), n_iter, is_grid, seed))
+        if "river" in selected_engines or "all" in selected_engines:
+            total_planned_trials += len(sample_hyperparameters(get_river_space(task), n_iter, is_grid, seed))
+        if "sklearn" in selected_engines or "all" in selected_engines:
+            total_planned_trials += len(sample_hyperparameters(get_sklearn_space(task), n_iter, is_grid, seed))
+
+    tracker = ProgressTracker(total_planned_trials)
+
     print("================================================================================")
     print(" HYPERPARAMETER TUNING & SENSITIVITY ANALYSIS SUITE")
-    print(f" Datasets:     {', '.join(selected_datasets)}")
+    print(f" Datasets:     {', '.join(selected_datasets)} ({len(active_datasets)} selecionados)")
     print(f" Engines:      {', '.join(selected_engines)}")
     print(f" Mode:         {'Cartesian Grid Search' if is_grid else f'Random Search ({n_iter} iterations)'}")
-    print(f" Parallelism:  {jobs} job(s)")
+    print(f" Parallelism:  {jobs} job(s) / núcleo(s)")
+    print(f" Total Trials: {total_planned_trials} ensaios planejados")
     print(f" Report Dest:  {output_report}")
     print(f" JSON Dest:    {output_json}")
     print("================================================================================")
@@ -729,7 +801,7 @@ def run_tuning_suite(
         if not os.path.exists(train_csv) or not os.path.exists(test_csv):
             print(f"  Dataset files not found for {d_id}. Running prepare_datasets.py...")
             prep_script = os.path.join(os.path.dirname(__file__), "prepare_datasets.py")
-            subprocess.run([sys.executable, prep_script, "--outdir", data_dir, "--dataset", d_id], check=True)
+            subprocess.run([PYTHON_BIN, prep_script, "--outdir", data_dir, "--dataset", d_id], check=True)
 
         y_test, _ = load_test_ground_truth(test_csv, task)
         dataset_trials: List[Dict[str, Any]] = []
@@ -738,13 +810,15 @@ def run_tuning_suite(
         if "c11" in selected_engines or "all" in selected_engines:
             c11_space = get_c11_space(task)
             c11_configs = sample_hyperparameters(c11_space, n_iter, is_grid, seed)
-            print(f"  [1/3] Running C11 libht ({len(c11_configs)} trials, {jobs} workers)...")
+            print(f"  [1/3] Iniciando C11 libht ({len(c11_configs)} ensaios, {jobs} workers)...")
             c11_trials = run_engine_trials(
                 "c11",
                 lambda cfg: run_trial_c11(train_csv, test_csv, task, cfg, y_test, is_high_dim),
                 c11_configs,
                 task,
                 jobs,
+                dataset_name=d_name,
+                tracker=tracker,
             )
             dataset_trials.extend(c11_trials)
 
@@ -752,13 +826,15 @@ def run_tuning_suite(
         if "river" in selected_engines or "all" in selected_engines:
             river_space = get_river_space(task)
             river_configs = sample_hyperparameters(river_space, n_iter, is_grid, seed)
-            print(f"  [2/3] Running River ({len(river_configs)} trials, {jobs} workers)...")
+            print(f"  [2/3] Iniciando River ({len(river_configs)} ensaios, {jobs} workers)...")
             river_trials = run_engine_trials(
                 "river",
                 lambda cfg: run_trial_river(train_csv, test_csv, task, cfg),
                 river_configs,
                 task,
                 jobs,
+                dataset_name=d_name,
+                tracker=tracker,
             )
             dataset_trials.extend(river_trials)
 
@@ -766,13 +842,15 @@ def run_tuning_suite(
         if "sklearn" in selected_engines or "all" in selected_engines:
             sklearn_space = get_sklearn_space(task)
             sklearn_configs = sample_hyperparameters(sklearn_space, n_iter, is_grid, seed)
-            print(f"  [3/3] Running Scikit-Learn ({len(sklearn_configs)} trials, {jobs} workers)...")
+            print(f"  [3/3] Iniciando Scikit-Learn ({len(sklearn_configs)} ensaios, {jobs} workers)...")
             sklearn_trials = run_engine_trials(
                 "sklearn",
                 lambda cfg: run_trial_sklearn(train_csv, test_csv, task, cfg),
                 sklearn_configs,
                 task,
                 jobs,
+                dataset_name=d_name,
+                tracker=tracker,
             )
             dataset_trials.extend(sklearn_trials)
 
@@ -798,32 +876,23 @@ def main():
     parser.add_argument("--engine", default="all", help="Engines to run ('all' or 'c11,river,sklearn').")
     parser.add_argument("--n-iter", type=int, default=30, help="Number of random search iterations per engine.")
     parser.add_argument("--grid", action="store_true", help="Perform full exhaustive grid search.")
-    parser.add_argument("--seed", type=int, default=42, help="Random seed for sampling reproducibility.")
-    parser.add_argument("--jobs", "-j", type=int, default=1, help="Parallel workers count (default: 1 sequential).")
-    parser.add_argument("--render-only", action="store_true", help="Re-generate markdown report from existing json results file.")
+    parser.add_argument("--jobs", type=int, default=12, help="Number of parallel jobs.")
+    
     args = parser.parse_args()
-
-    if args.render_only:
-        print(f"Loading existing results from {args.json}...")
-        with open(args.json, "r", encoding="utf-8") as f:
-            all_results = json.load(f)
-        generate_markdown_report(all_results, args.report)
-        print(f"Markdown report re-generated successfully: {args.report}")
-        return
-
-    selected_ds = [s.strip().lower() for s in args.dataset.split(",") if s.strip()]
-    selected_eng = [e.strip().lower() for e in args.engine.split(",") if e.strip()]
+    
+    datasets = args.dataset.split(",")
+    engines = args.engine.split(",")
 
     run_tuning_suite(
-        data_dir=args.data_dir,
-        output_report=args.report,
-        output_json=args.json,
-        selected_datasets=selected_ds,
-        selected_engines=selected_eng,
-        n_iter=args.n_iter,
-        is_grid=args.grid,
-        seed=args.seed,
-        jobs=args.jobs,
+        args.data_dir,
+        args.report,
+        args.json,
+        datasets,
+        engines,
+        args.n_iter,
+        args.grid,
+        42,
+        args.jobs,
     )
 
 

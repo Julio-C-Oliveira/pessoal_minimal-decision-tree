@@ -21,7 +21,7 @@ import time
 import tracemalloc
 import numpy as np
 import river
-from river import tree, metrics
+from river import tree, metrics, compose, preprocessing
 from sklearn.metrics import (
     accuracy_score,
     f1_score,
@@ -86,6 +86,7 @@ def main():
     parser.add_argument("--leaf-prediction", default=None)
     parser.add_argument("--split-criterion", default="info_gain", choices=["info_gain", "gini"])
     parser.add_argument("--splitter", default="default")
+    parser.add_argument("--use-scaler", action="store_true")
     args = parser.parse_args()
 
     tracemalloc.start()
@@ -142,6 +143,9 @@ def main():
             binary_split=True,
         )
         acc_metric = metrics.Accuracy()
+
+    if args.use_scaler:
+        model = compose.Pipeline(preprocessing.StandardScaler(), model)
 
     # Streaming Training (1 sample per iteration)
     train_samples = 0

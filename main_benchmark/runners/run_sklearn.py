@@ -20,6 +20,8 @@ import time
 import tracemalloc
 import numpy as np
 from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import (
     accuracy_score,
     f1_score,
@@ -69,6 +71,7 @@ def main():
     parser.add_argument("--min-samples-leaf", type=int, default=1)
     parser.add_argument("--max-features", default=None)
     parser.add_argument("--criterion", default=None)
+    parser.add_argument("--use-scaler", action="store_true")
     args = parser.parse_args()
 
     tracemalloc.start()
@@ -91,7 +94,6 @@ def main():
             max_features=max_feat,
             random_state=42,
         )
-        model.fit(X_train, y_train)
     else:
         y_train = y_train.astype(np.int32)
         crit = args.criterion if args.criterion else "entropy"
@@ -103,7 +105,11 @@ def main():
             max_features=max_feat,
             random_state=42,
         )
-        model.fit(X_train, y_train)
+
+    if args.use_scaler:
+        model = Pipeline([('scaler', StandardScaler()), ('tree', model)])
+
+    model.fit(X_train, y_train)
 
     train_time_s = time.perf_counter() - t_train0
     _, peak_heap_bytes = tracemalloc.get_traced_memory()
@@ -120,7 +126,8 @@ def main():
     peak_rss_mb = get_peak_rss_mb()
     test_rss_mb = peak_rss_mb
 
-    tree_ = model.tree_
+    tree_estimator = model.named_steps["tree"] if hasattr(model, "named_steps") else model
+    tree_ = tree_estimator.tree_
     model_struct_bytes = (
         tree_.node_count * 96
         + tree_.value.nbytes
