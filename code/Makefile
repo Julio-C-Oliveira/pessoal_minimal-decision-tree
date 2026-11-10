@@ -24,7 +24,7 @@ VERSION ?= $(shell cat ../VERSION 2>/dev/null || cat VERSION 2>/dev/null || echo
 .PHONY: all lib test clean bench bench-triple bench-drift bench-regression bench-memory bench-main bench-prep bench-esp32 bench-tune directories version
 
 version:
-	@echo "Minimal Decision Tree (libht) version $(VERSION)"
+	@echo "kansho (libht) version $(VERSION)"
 
 all: lib test
 
