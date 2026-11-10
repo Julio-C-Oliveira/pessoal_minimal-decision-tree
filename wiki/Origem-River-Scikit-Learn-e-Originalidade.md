@@ -12,12 +12,14 @@ flowchart TD
         R1["Algoritmos de Streaming:<br/>VFDT (Domingos & Hulten, 2000)<br/>HAT (Bifet & Gavaldà, 2009)<br/>FIMT-DD / HAT-R (Ikonomovska et al., 2011)"]
         R2["Mecânica de Split em Fluxo:<br/>Hoeffding Bound (ε), Grace Period,<br/>Tie-Breaking (τ), Min Branch Frac,<br/>Pureza Máxima (max_share_to_split)"]
         R3["Modelos Incrementais:<br/>Observadores Welford / Categóricos,<br/>Naive Bayes Adaptive (NBA),<br/>Detector de Drift ADWIN2"]
+        R4["Pré-Processamento em Fluxo:<br/>Pipelines lineares (operador |),<br/>StandardScaler e MinMaxScaler"]
     end
 
     subgraph SKLEARN["Scikit-Learn (Cython/C) — references/sklearn_tree/"]
         S1["Data-Oriented Design:<br/>Nós contíguos em arrays planos,<br/>Indexação inteira livre de ponteiros C"]
         S2["Otimizações Numéricas de Baixo Nível:<br/>Gini com 1 única divisão (fatoração W²),<br/>Log2 nativo IEEE 754, Proxy Impurity"]
         S3["Robustez de Engenharia:<br/>Divisão média segura (evita overflow),<br/>Roteamento iterativo sem recursão,<br/>Zeramento de padding para serialização"]
+        S4["Inspiração de Transformadores:<br/>Conceitos de QuantileTransformer,<br/>KBinsDiscretizer e RobustScaler (MAD)"]
     end
 
     subgraph ORIGINAL["Inovações Originais (kansho em C11)"]
@@ -28,6 +30,7 @@ flowchart TD
         O5["Precisão Configurável ht_float_t:<br/>float 32-bit (MCU FPU) vs double 64-bit"]
         O6["Fusão Física Classificação/Regressão:<br/>Unificação de espaço via union de custo zero"]
         O7["ADWIN2 e HAT Iterativos Estáticos:<br/>Pool contíguo de buckets, poda sem recursão"]
+        O8["Micro-Pipelines Zero-Malloc (libht_prep):<br/>Filtro Hampel MAD (outliers em sensores),<br/>Space-Saving (Heavy Hitters alta cardinalidade),<br/>Ben-Haim & Tom-Tov (CDF/bins sem heap),<br/>Z-Score Híbrido com Credibilidade nas folhas"]
     end
 
     RIVER --> |"Teoria e Fluxo Estatístico"| MDT["kansho (C11 Puro)"]
@@ -68,6 +71,10 @@ O [`online-ml/river`](https://github.com/online-ml/river) é a principal referê
 ### 2.5 Tratamento de Valores Ausentes (`NaN`)
 - **Roteamento pelo Caminho Mais Comum (`most_common_path`):** Em caso de valor ausente no atributo de corte de um nó interno, a amostra é direcionada ao filho mais populoso com base na comparação imediata de peso $W_{\text{left}}$ vs $W_{\text{right}}$ ([`branch.py#L62-L67`](../references/river_tree/nodes/branch.py#L62-L67)).
 
+### 2.6 Pré-Processamento em Fluxo e Pipelines de Streaming
+- **Pipelines de Composição Amostra a Amostra (`river.compose.Pipeline`):** O River consagrou o encadeamento funcional em streaming utilizando o operador `|` (ex: `preprocessing.StandardScaler() | tree.HoeffdingTreeClassifier()`), onde cada transformador atualiza seu estado estatístico incremental a cada tupla antes de alimentar o estimador.
+- **Normalização Online no Fluxo:** O River disponibiliza classes como `preprocessing.StandardScaler` (baseado no algoritmo de Welford) e `preprocessing.MinMaxScaler` (rastreando extremos em fluxo). Inspirados por esse fluxo contínuo, adaptamos os algoritmos de padronização para execução direta e determinística em microcontroladores.
+
 ---
 
 ## 3. O que foi Extraído do Scikit-Learn (`references/sklearn_tree/`)
@@ -98,6 +105,10 @@ O [`scikit-learn`](https://github.com/scikit-learn/scikit-learn) (`sklearn/tree`
 
 ### 3.5 Registro de Candidatos na Stack
 - **`SplitRecord` Alocado na Pilha:** O Scikit-Learn define uma struct leve na stack ([`_splitter.pxd#L14-L44`](../references/sklearn_tree/_splitter.pxd#L14-L44)) para rastrear o melhor corte durante a iteração. Inspirados nisso, criamos `ht_split_candidate_t` (apenas $44\text{ B}$ em `float32`), dispensando qualquer alocação dinâmica durante a avaliação do limite de Hoeffding.
+
+### 3.6 Inspiração em Transformadores Não-Paramétricos e Estimadores Robustos
+- **Discretização e Transformação de Quantis (`QuantileTransformer` e `KBinsDiscretizer`):** No Scikit-Learn, transformadores como `KBinsDiscretizer` e `QuantileTransformer` mapeiam distribuições complexas, caudas longas ou multimodais para representações uniformes através do cálculo de percentis empíricos. Embora a abordagem do Scikit-Learn exija matrizes densas em lote e ordenação em memória de custo $O(N \log N)$, sua utilidade estatística inspirou a implementação do histograma streaming de Ben-Haim & Tom-Tov no kansho em $O(1)$ de RAM.
+- **Estimativa Robusta de Dispersão via MAD (`RobustScaler`):** O Scikit-Learn utiliza a mediana e o Desvio Absoluto Mediano ($\operatorname{MAD}$) no `RobustScaler` para mitigar o impacto de *outliers* extremos em dados numéricos. Adaptamos a robustez do MAD com o fator assintótico $1{,}4826$ para o contexto de filtragem de espículas em tempo real sobre janelas móveis circulares no módulo `ht_prep`.
 
 ---
 
@@ -190,6 +201,42 @@ sequenceDiagram
 - Código restrito a 5 cabeçalhos padrão da ISO C11: `<stdint.h>`, `<stddef.h>`, `<stdbool.h>`, `<math.h>`, `<string.h>`.
 - Total portabilidade para compiladores cruzados como `arm-none-eabi-gcc`, `xtensa-esp32-elf-gcc`, `riscv-none-embed-gcc`, Clang e MSVC.
 
+### 4.11 Micro-Pipelines de Pré-Processamento Zero-Malloc (`libht_prep` e `ht_prep_pipeline_t`)
+No River, pipelines de streaming (`pipe = scaler | model`) instanciam múltiplos objetos encadeados no heap de Python gerenciados pelo Garbage Collector. No Scikit-Learn, transformadores alocam matrizes intermediárias completas em cada chamada a `fit_transform()`.
+- **Inovação no kansho:** Desenvolvemos a biblioteca embarcada `libht_prep` ([`code/include/ht_prep.h`](../code/include/ht_prep.h)), um micro-pipeline contíguo de pré-processamento alocado inteiramente na memória estática (`.bss`) ou stack via struct `ht_prep_pipeline_t`:
+  - **Pegada Física Estática Ultracompacta:** Ocupa apenas **$\approx 4{,}6\text{ KB}$ em `float32`** ($\approx 8{,}4\text{ KB}$ em `double64`), mesmo configurado com todos os 4 estágios ativos para até 16 atributos.
+  - **Anexação Transparente à Árvore:** Pode ser acoplado à árvore via `ht_tree_set_prep_pipeline(&tree, &pipe)`. Com isso, tanto `ht_tree_learn_one` quanto `ht_tree_predict` realizam o pré-processamento dos atributos de forma nativa e transparente antes de alimentar o roteamento ou os observadores de divisão, com **zero chamadas a `malloc`** e **zero cópias extras de dados**.
+
+### 4.12 Filtro Mediano Móvel de Hampel com MAD para Sensores Físicos (`ht_filter_hampel_t`)
+Em ambientes embarcados (sensores industriais, ADCs de microcontroladores e telemetria automotiva), leituras espúrias, ruídos transientes e espículas temporárias frequentemente corrompem observadores de split e desestabilizam regressores.
+- **Nossa Inovação:** Implementação de um identificador de Hampel totalmente estático sobre buffer circular de tamanho ímpar $W = 7$ amostras por atributo:
+  - **Cálculo da Mediana e MAD em Stack:** Utiliza *insertion sort* em array temporário na pilha ($7$ elementos, ordenação em $\le 21$ comparações em $O(W \log W)$), eliminando qualquer buffer dinâmico.
+  - **Ponto de Ruptura de $50\%$:** O Desvio Absoluto Mediano ($\operatorname{MAD}$) multiplicado pelo fator assintótico $1{,}4826 \approx \frac{1}{\Phi^{-1}(0{,}75)}$ garante que até metade da janela possa estar contaminada por ruído severo sem corromper a estimativa da dispersão.
+  - **Substituição In-Place Anticascata:** Quando $|x_t - \tilde{x}_t| > 3{,}0 \cdot \max(\operatorname{MAD}_t, 10^{-6})$, o valor espúrio é substituído pela mediana local $\tilde{x}_t$ tanto na emissão quanto no buffer circular, expurgando o efeito propagador do ruído nas predições seguintes.
+
+### 4.13 Codificador Categórico para Alta Cardinalidade Space-Saving (`ht_encoder_freq_t`)
+Atributos nominais de alta cardinalidade (ex: identificadores de dispositivos, códigos de erro, IPs ou strings categóricas infinitas) são proibitivos em microcontroladores, pois observadores categóricos padrão exigem matrizes $C \times V$ que esgotariam a SRAM.
+- **Nossa Inovação:** Adaptamos o algoritmo de *Heavy Hitters* **Space-Saving** de **Metwally, Agrawal & El Abbadi (2005)** para uma tabela estática de $K = 16$ slots (`ht_encoder_freq_t`):
+  - **Garantia Teórica de Erro Mínimo:** A contagem acumulada dos elementos mais frequentes possui erro máximo rigorosamente limitado por $\frac{N_{\text{total}}}{K}$.
+  - **Modo Razão de Frequência Contínua (`HT_ENC_FREQ_RATIO`):** Converte a categoria de entrada em sua frequência empírica $f(k) = \frac{\text{count}_k}{N_{\text{total}}} \in [0, 1]$, permitindo que a Hoeffding Tree trate atributos nominais de cardinalidade arbitrária como variáveis contínuas suaves.
+  - **Modo Top-$K$ com Bucket Sentinela (`HT_ENC_TOP_K_CAT`):** Mapeia os $K_{\text{target}}-1$ itens dominantes para rótulos compactos ($0 \dots K-2$) e reúne toda a cauda residual no bucket sentinela *"Outros"* ($K-1$), garantindo compatibilidade estrita com `HT_MAX_CATEGORIES = 5`.
+
+### 4.14 Discretização Não-Paramétrica e Observador de Histograma de Ben-Haim & Tom-Tov (`ht_quantizer_t` e `ht_hist_obs_t`)
+O observador numérico tradicional baseado na aproximação Gaussiana de Welford assume que cada atributo contínuo se comporta de forma unimodal $P(x \mid y) \sim \mathcal{N}(\mu, \sigma^2)$. Em distribuições multimodais, assimétricas ou com caudas pesadas, pontos de corte ótimos são facilmente mascarados.
+- **Nossa Inovação:** Implementamos o algoritmo de histograma dinâmico streaming de **Ben-Haim & Tom-Tov (2010)** em duas frentes complementares:
+  1. **Quantizador Não-Paramétrico no Micro-Pipeline (`ht_quantizer_t`):** Mantém até $B = 16$ centróides ordenados com fusão gulosa em $O(B)$ e estima a densidade acumulada contínua $\hat{F}(x) \in [0, 1]$ via interpolação linear trapezoidal. Suporta transformação uniforme (estilo *QuantileTransformer*) e discretização equi-provável em $K$ bins (estilo *KBinsDiscretizer*).
+  2. **Observador de Histograma nas Folhas (`ht_hist_obs_t`):** Projetado com precisão cirúrgica de memória para caber **rigorosamente dentro da union existente `ht_feature_obs_t` de 80 bytes em `float32`** (4 bins $\times$ 20 bytes). Isso viabiliza divisões não-paramétricas multi-classe diretamente na Hoeffding Tree com **zero acréscimo de memória** no estado de aprendizado (`sizeof(ht_leaf_stats_t) = 1.360\text{ B}` inalterado).
+
+### 4.15 Normalização Online Híbrida com Credibilidade nas Folhas SGD (Regressão Contínua)
+Em regressão em streaming com regressores lineares nas folhas (`HT_LEAF_MODEL` e `HT_LEAF_ADAPTIVE`), variáveis em escalas heterogêneas (ex: temperaturas em $[0, 1]$ versus horas em $[0, 23]$ e vazões em $[0, 1000]$) degradam a taxa de convergência da Descida de Gradiente Estocástico (SGD).
+- **O Dilema da Herança Pós-Split:** Quando uma folha mãe sofre split, os filhos herdam seus pesos lineares $\mathbf{w}$ para evitar descontinuidade de predição. Se a normalização fosse calculada exclusivamente com amostras da folha recém-nascida ($N=0$), a primeira amostra geraria um salto abrupto de escala, corrompendo imediatamente os pesos herdados da mãe.
+- **Nossa Inovação:** Desenvolvemos uma normalização Z-score híbrida em duas camadas com fusão de credibilidade:
+  - **Prior Global da Árvore:** Acumulador de Welford global mantido na struct `ht_tree_t` (custo insignificante de apenas $192\text{ B}$ para 16 atributos).
+  - **Suficiência Local das Folhas sem Custo de Memória:** A média e variância locais da folha são derivadas em tempo $O(1)$ a partir dos 5 slots de quantização de Chan já residentes em `ht_leaf_stats_t`.
+  - **Ponderação por Credibilidade ($\kappa = 10{,}0$):**
+    $$\alpha = \frac{N_{\text{slots}}}{N_{\text{slots}} + \kappa}, \qquad \mu_f = \alpha \mu_{\text{slots}} + (1 - \alpha) \mu_{\text{tree}}, \qquad \sigma_f^2 = \alpha \sigma_{\text{slots}}^2 + (1 - \alpha) \sigma_{\text{tree}}^2$$
+  - **Resultado:** No instante do split ($N_{\text{slots}} = 0$), $\alpha = 0$, garantindo continuidade matemática perfeita de escala com a mãe. Conforme a folha amadurece ($N_{\text{slots}} \gg \kappa$), o Z-score especializa-se gradualmente no hiperplano local da folha. **Custo adicional em RAM no pool de folhas: exatamente 0 bytes.**
+
 ---
 
 ## 5. Matriz Comparativa Tripla: River vs Scikit-Learn vs kansho
@@ -211,6 +258,11 @@ sequenceDiagram
 | **Precisão de Ponto Flutuante** | `double` (64-bit padrão Python) | `double` (64-bit) / `float32` | **Configurável via `ht_float_t` (32 ou 64-bit)** | Autoral |
 | **Serialização de Modelo** | `pickle` (opaco, dependente de Python) | `pickle` / `__getstate__` | **Binária direta (`fwrite`/`fread` Flash/disco)** | Autoral + **Sklearn** (padding zero) |
 | **Classificação e Regressão** | Classes separadas (`HTC` vs `HTR`) | Classes separadas (`DTC` vs `DTR`) | **Unificação por `union` C11 (zero sobrecarga)** | Autoral |
+| **Pré-Processamento em Streaming** | Encadeamento via `Pipeline` (`\|`) no heap | Em lote via `Pipeline` e NumPy ($O(N)$) | **Micro-pipeline integrado `libht_prep` zero-malloc ($\approx 4{,}6\text{ KB}$ em `.bss`)** | **River** (streaming) + Autoral (zero-malloc) |
+| **Filtragem de Outliers em Sensores** | Inexistente na árvore (requer módulos externos) | `RobustScaler` / filtros em lote offline | **Filtro Hampel MAD circular estático ($W=7$, ordenação na stack)** | **Scikit-Learn** (conceito MAD) + Autoral (estático) |
+| **Alta Cardinalidade Categórica** | Dicionários dinâmicos de tamanho variável | `OneHotEncoder` / matrizes esparsas batch | **Space-Saving determinístico ($K=16$ slots Heavy Hitters)** | Autoral (Metwally et al. adaptado para MCU) |
+| **Observadores Numéricos de Split** | Gaussiano Welford unimodal contínuo | Histogramas exatos em batch (`HistGradientBoosting`) | **Gaussiano Welford + Histograma Ben-Haim & Tom-Tov em 80 B** | **River** (Gaussiano) + Autoral (Ben-Haim em union) |
+| **Normalização Local para Regressão SGD** | Normalização apenas a montante via scaler global | Pré-processamento global offline | **Z-Score Híbrido com Credibilidade (fusão árvore/slots sem custo)** | Autoral (herança suave de pesos pós-split) |
 
 ---
 
