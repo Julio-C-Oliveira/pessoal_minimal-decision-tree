@@ -60,7 +60,6 @@ if os.path.exists(VENV_PYTHON):
 TIER_MAP = {
     1: (1, 16),
     2: (2, 32),
-    3: (3, 64),
     4: (4, 64),
     8: (8, 128),
     16: (16, 256),
@@ -473,7 +472,7 @@ def get_c11_space(task: str, is_high_dim: bool = False, target_tier: Optional[in
     if target_tier is not None and target_tier > 0:
         tiers = [target_tier]
     else:
-        tiers = [1, 2, 3, 4, 8, 16, 40] if is_high_dim else [1, 2, 3, 4, 8, 16, 64, 128, 256]
+        tiers = [1, 2, 4, 8, 16, 40] if is_high_dim else [1, 2, 4, 8, 16, 64, 128, 256]
     space: Dict[str, List[Any]] = {
         "grace_period": [50, 100, 200, 400],
         "delta": [1e-2, 1e-3, 1e-4, 1e-7],
