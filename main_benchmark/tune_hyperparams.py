@@ -58,6 +58,8 @@ if os.path.exists(VENV_PYTHON):
 
 # Memory Tiers: Tier -> (Leaves, Nodes)
 TIER_MAP = {
+    1: (1, 16),
+    2: (2, 32),
     3: (3, 64),
     4: (4, 64),
     8: (8, 128),
@@ -117,9 +119,9 @@ def calculate_safe_capacity(tier: int, slots: int, is_high_dim: bool) -> Tuple[i
     total_bytes = (nodes * (node_size + 2)) + (leaves * (leaf_size + 2)) + 64
 
     # Safety clamp ensuring pool never exceeds 980 KB:
-    while total_bytes > (980 * 1024) and leaves > 3:
-        leaves = max(3, int(leaves * 0.8))
-        nodes = max(48, leaves * 16)
+    while total_bytes > (980 * 1024) and leaves > 1:
+        leaves = max(1, int(leaves * 0.8))
+        nodes = max(16, leaves * 16)
         total_bytes = (nodes * (node_size + 2)) + (leaves * (leaf_size + 2)) + 64
 
     return leaves, nodes
@@ -471,7 +473,7 @@ def get_c11_space(task: str, is_high_dim: bool = False, target_tier: Optional[in
     if target_tier is not None and target_tier > 0:
         tiers = [target_tier]
     else:
-        tiers = [3, 4, 8, 16, 40] if is_high_dim else [3, 4, 8, 16, 64, 128, 256]
+        tiers = [1, 2, 3, 4, 8, 16, 40] if is_high_dim else [1, 2, 3, 4, 8, 16, 64, 128, 256]
     space: Dict[str, List[Any]] = {
         "grace_period": [50, 100, 200, 400],
         "delta": [1e-2, 1e-3, 1e-4, 1e-7],
