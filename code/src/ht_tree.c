@@ -446,7 +446,7 @@ static ht_status_t ht_tree_attempt_split_reg(ht_tree_t *tree, uint16_t leaf_idx,
             return HT_OK;
         }
 
-        if (tree->memory.free_nodes_top < 2) {
+        if (ht_node_available(&tree->memory) < 2) {
             return HT_ERR_OUT_OF_NODES;
         }
 
@@ -640,7 +640,7 @@ static ht_status_t ht_tree_attempt_split(ht_tree_t *tree, uint16_t leaf_idx, uin
         }
 
         /* Need 2 free nodes in the pool */
-        if (tree->memory.free_nodes_top < 2) {
+        if (ht_node_available(&tree->memory) < 2) {
             return HT_ERR_OUT_OF_NODES;
         }
 
@@ -2225,11 +2225,12 @@ ht_status_t ht_tree_load(ht_tree_t *tree,
     }
 
     /* Reconstruct memory pool free lists */
-    tree->memory.free_nodes_top = 0;
+    tree->memory.free_nodes_head = HT_INVALID_IDX;
     tree->memory.nodes_allocated = 0;
     for (int32_t i = (int32_t)HT_MAX_NODES - 1; i >= 0; --i) {
         if (!(tree->memory.node_pool[i].flags & HT_NODE_IN_USE)) {
-            tree->memory.free_nodes[tree->memory.free_nodes_top++] = (uint16_t)i;
+            tree->memory.node_pool[i].next_free = tree->memory.free_nodes_head;
+            tree->memory.free_nodes_head = (uint16_t)i;
         } else {
             tree->memory.nodes_allocated++;
         }
@@ -2248,11 +2249,13 @@ ht_status_t ht_tree_load(ht_tree_t *tree,
         }
     }
 
-    tree->memory.free_stats_top = 0;
+    tree->memory.free_stats_head = HT_INVALID_IDX;
     tree->memory.stats_allocated = 0;
     for (int32_t i = (int32_t)HT_MAX_ACTIVE_LEAVES - 1; i >= 0; --i) {
         if (!stats_in_use[i]) {
-            tree->memory.free_stats[tree->memory.free_stats_top++] = (uint16_t)i;
+            tree->memory.stats_pool[i].last_split_attempt_at = (ht_float_t)-1.0;
+            tree->memory.stats_pool[i].next_free = tree->memory.free_stats_head;
+            tree->memory.free_stats_head = (uint16_t)i;
         } else {
             tree->memory.stats_allocated++;
         }

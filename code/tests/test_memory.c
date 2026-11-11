@@ -361,6 +361,7 @@ static void test_memory_unified_structures_and_sizes(void) {
     HT_ASSERT_EQ(sizeof(ht_reg_categorical_obs_t), 60);
     HT_ASSERT_EQ(sizeof(ht_feature_obs_t), 80);
     HT_ASSERT_EQ(sizeof(ht_leaf_stats_t), 1360);
+    HT_ASSERT_EQ(sizeof(ht_memory_pool_t), 462856);
 #else
     HT_ASSERT_EQ(sizeof(ht_node_t), 48);
     HT_ASSERT_EQ(sizeof(ht_var_stat_t), 24);
@@ -369,9 +370,74 @@ static void test_memory_unified_structures_and_sizes(void) {
     HT_ASSERT_EQ(sizeof(ht_reg_categorical_obs_t), 120);
     HT_ASSERT_EQ(sizeof(ht_feature_obs_t), 160);
     HT_ASSERT_EQ(sizeof(ht_leaf_stats_t), 2720);
+    HT_ASSERT_EQ(sizeof(ht_memory_pool_t), 892936);
 #endif
 
     HT_ASSERT(sizeof(ht_memory_pool_t) <= (1024 * 1024));
+}
+
+static void test_intrusive_free_lists_order_and_recycling(void) {
+    ht_memory_init(&s_test_pool);
+
+    /* Initially, free_nodes_head must be 0 and free_stats_head must be 0 */
+    HT_ASSERT_EQ(s_test_pool.free_nodes_head, 0);
+    HT_ASSERT_EQ(s_test_pool.free_stats_head, 0);
+
+    /* First allocation yields 0, next yields 1, next yields 2 */
+    uint16_t n0 = ht_node_alloc(&s_test_pool);
+    uint16_t n1 = ht_node_alloc(&s_test_pool);
+    uint16_t n2 = ht_node_alloc(&s_test_pool);
+    HT_ASSERT_EQ(n0, 0);
+    HT_ASSERT_EQ(n1, 1);
+    HT_ASSERT_EQ(n2, 2);
+    HT_ASSERT_EQ(s_test_pool.free_nodes_head, 3);
+    HT_ASSERT_EQ(ht_node_available(&s_test_pool), HT_MAX_NODES - 3);
+
+    /* Free n1 (1) -> head becomes 1 */
+    ht_node_free(&s_test_pool, n1);
+    HT_ASSERT_EQ(s_test_pool.free_nodes_head, 1);
+    HT_ASSERT_EQ(s_test_pool.node_pool[1].next_free, 3);
+
+    /* Free n0 (0) -> head becomes 0, its next_free is 1 */
+    ht_node_free(&s_test_pool, n0);
+    HT_ASSERT_EQ(s_test_pool.free_nodes_head, 0);
+    HT_ASSERT_EQ(s_test_pool.node_pool[0].next_free, 1);
+
+    /* Reallocating pops 0, then 1, then 3 */
+    uint16_t r0 = ht_node_alloc(&s_test_pool);
+    uint16_t r1 = ht_node_alloc(&s_test_pool);
+    uint16_t r3 = ht_node_alloc(&s_test_pool);
+    HT_ASSERT_EQ(r0, 0);
+    HT_ASSERT_EQ(r1, 1);
+    HT_ASSERT_EQ(r3, 3);
+
+    /* Clean up allocated nodes */
+    ht_node_free(&s_test_pool, n2);
+    ht_node_free(&s_test_pool, r0);
+    ht_node_free(&s_test_pool, r1);
+    ht_node_free(&s_test_pool, r3);
+    HT_ASSERT_EQ(ht_node_count(&s_test_pool), 0);
+    HT_ASSERT_EQ(ht_node_available(&s_test_pool), HT_MAX_NODES);
+
+    /* Stats pool intrusive list verification */
+    uint16_t s0 = ht_stats_alloc(&s_test_pool);
+    uint16_t s1 = ht_stats_alloc(&s_test_pool);
+    HT_ASSERT_EQ(s0, 0);
+    HT_ASSERT_EQ(s1, 1);
+    HT_ASSERT_EQ(s_test_pool.free_stats_head, 2);
+
+    ht_stats_free(&s_test_pool, s0);
+    HT_ASSERT_EQ(s_test_pool.free_stats_head, 0);
+    HT_ASSERT_EQ(s_test_pool.stats_pool[0].next_free, 2);
+
+    uint16_t s_realloc = ht_stats_alloc(&s_test_pool);
+    HT_ASSERT_EQ(s_realloc, 0);
+    HT_ASSERT_EQ(s_test_pool.free_stats_head, 2);
+
+    ht_stats_free(&s_test_pool, s1);
+    ht_stats_free(&s_test_pool, s_realloc);
+    HT_ASSERT_EQ(ht_stats_count(&s_test_pool), 0);
+    HT_ASSERT_EQ(ht_stats_available(&s_test_pool), HT_MAX_ACTIVE_LEAVES);
 }
 
 static void test_node_unified_regression_stats(void) {
@@ -476,6 +542,7 @@ void test_memory_run(void) {
     HT_RUN_TEST(test_memory_double_free_protection);
     HT_RUN_TEST(test_memory_bytes_used_calculation);
     HT_RUN_TEST(test_memory_stress_recycling_100k);
+    HT_RUN_TEST(test_intrusive_free_lists_order_and_recycling);
     HT_RUN_TEST(test_memory_unified_structures_and_sizes);
     HT_RUN_TEST(test_node_unified_regression_stats);
     HT_RUN_TEST(test_leaf_stats_regression_observers_and_weights);

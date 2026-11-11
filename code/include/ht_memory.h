@@ -81,7 +81,10 @@ typedef struct {
         ht_float_t threshold;
         int32_t    cat_val;
     } split_val;
-    uint16_t left_child;
+    union {
+        uint16_t left_child; /**< Left child index if IN_USE; next free node if FREE */
+        uint16_t next_free;  /**< Intrusive free-list next index when node is free */
+    };
     uint16_t right_child;
     uint16_t stats_idx;
     uint8_t  feature_idx;
@@ -156,6 +159,7 @@ typedef struct {
     union {
         ht_float_t mc_correct_weight;
         ht_float_t fmse_mean;
+        uint16_t   next_free; /**< Intrusive free-list next index when stats block is free */
     };
     union {
         ht_float_t nb_correct_weight;
@@ -168,16 +172,17 @@ typedef struct {
 
 /**
  * @brief Deterministic slab/pool allocator managing node and leaf statistics pools.
+ *
+ * Employs intrusive free lists directly inside inactive node/stats buffers, eliminating
+ * external index arrays (free_nodes[] and free_stats[]) to save 8.7 KB of SRAM.
  */
 typedef struct {
     ht_node_t       node_pool[HT_MAX_NODES];
     ht_leaf_stats_t stats_pool[HT_MAX_ACTIVE_LEAVES];
-    uint16_t        free_nodes[HT_MAX_NODES];
-    uint16_t        free_stats[HT_MAX_ACTIVE_LEAVES];
-    uint16_t        free_nodes_top;
-    uint16_t        free_stats_top;
-    uint16_t        nodes_allocated;
-    uint16_t        stats_allocated;
+    uint16_t        free_nodes_head; /**< Head index of intrusive free-nodes list */
+    uint16_t        free_stats_head; /**< Head index of intrusive free-stats list */
+    uint16_t        nodes_allocated; /**< Number of currently active nodes */
+    uint16_t        stats_allocated; /**< Number of currently active leaf stats blocks */
 } ht_memory_pool_t;
 
 /* Compile-time static assertions for exact memory layout in default configuration */
@@ -206,6 +211,13 @@ _Static_assert(sizeof(ht_hist_bin_t) == 40, "ht_hist_bin_t must be exactly 40 by
 _Static_assert(sizeof(ht_hist_obs_t) == 160, "ht_hist_obs_t must be exactly 160 bytes in float64 mode");
 _Static_assert(sizeof(ht_feature_obs_t) == 160, "ht_feature_obs_t must be 160 bytes in float64 mode");
 _Static_assert(sizeof(ht_leaf_stats_t) == 2720, "ht_leaf_stats_t must be exactly 2720 bytes in float64 mode");
+#endif
+#endif
+#if HT_MAX_CLASSES == 4 && HT_MAX_FEATURES == 16 && HT_REG_NUM_SLOTS == 5 && HT_MAX_NODES == 4096 && HT_MAX_ACTIVE_LEAVES == 256
+#ifndef HT_USE_DOUBLE
+_Static_assert(sizeof(ht_memory_pool_t) == 462856, "ht_memory_pool_t must be exactly 462856 bytes in float32 mode (H1 intrusive free-lists)");
+#else
+_Static_assert(sizeof(ht_memory_pool_t) == 892936, "ht_memory_pool_t must be exactly 892936 bytes in float64 mode (H1 intrusive free-lists)");
 #endif
 #endif
 _Static_assert(sizeof(ht_memory_pool_t) <= (1024 * 1024), "ht_memory_pool_t exceeds 1 MB RAM budget!");

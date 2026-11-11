@@ -456,7 +456,7 @@ static void test_tree_leaf_deactivation_pool_exhaustion_stress(void) {
         if (idx == HT_INVALID_IDX) break;
         dummy_stats[dummy_count++] = idx;
     }
-    HT_ASSERT_EQ(tree.memory.free_stats_top, 0);
+    HT_ASSERT_EQ(ht_stats_available(&tree.memory), 0);
 
     /* Stream separable samples to trigger split */
     ht_value_t x[HT_MAX_FEATURES];
