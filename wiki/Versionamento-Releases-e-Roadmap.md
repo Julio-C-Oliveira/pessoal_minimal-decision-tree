@@ -58,7 +58,7 @@ void print_system_info(void) {
 ### Via Linha de Comando / Build
 ```bash
 make version
-# Saida: kansho (libht) version 0.2.0
+# Saida: kansho (libht) version 0.3.0
 ```
 
 ---
@@ -91,13 +91,24 @@ Para lançar uma nova versão oficial no GitHub:
    git push origin main
    git push origin v0.1.0
    ```
-5. No GitHub, acesse a aba **Releases** $\rightarrow$ **Draft a new release** e selecione a tag `v0.2.0` recém-enviada para gerar as notas de lançamento e os pacotes `.tar.gz` e `.zip` correspondentes.
+5. No GitHub, acesse a aba **Releases** $\rightarrow$ **Draft a new release** e selecione a tag `v0.3.0` recém-enviada para gerar as notas de lançamento e os pacotes `.tar.gz` e `.zip` correspondentes.
 
 ---
 
 ## 4.1 Histórico de Releases (Changelog)
 
-### v0.2.0 (2026-11-09) — Micro-Pipelines de Pré-Processamento Zero-Malloc e Observadores Não-Paramétricos
+### v0.3.0 (2026-11-11) — Otimização Extrema de Memória SRAM (Free-lists Intrusivas e Topologia Assimétrica)
+- **Free-lists Intrusivas em `ht_memory_pool_t` (Hipótese 1 / Entrega 7.2):**
+  - Eliminação completa dos vetores externos de pilha `free_nodes[HT_MAX_NODES]` e `free_stats[HT_MAX_ACTIVE_LEAVES]`, gravando os ponteiros intrusivos `next_free` diretamente dentro das estruturas inativas (`node_pool[idx].free_state.next_free` e `stats_pool[idx].next_free`).
+  - Economia imediata de **$8.704\text{ bytes}$ ($8,50\text{ KB}$)** de SRAM estática em `float32` e `double64`, preservando complexidade estritamente constante $O(1)$ em alocação e liberação.
+- **Topologia Assimétrica de Nós em `ht_node_t` (Hipótese 2 / Entrega 7.3):**
+  - Redesenho de `ht_node_t` como união mutuamente exclusiva entre estado de folha (`class_counts` / `reg_stats`, `stats_idx`) e estado de nó interno de decisão (`split_val`, `left_child`, `right_child`, `feature_idx`).
+  - Redução física de `sizeof(ht_node_t)` de $28\text{ B}$ para **$20\text{ B}$** por nó em `float32` (configuração padrão de 4 classes), gerando economia direta de **$32.768\text{ bytes}$ ($32,0\text{ KB}$)** no `node_pool` ($4.096$ nós).
+  - Introdução da macro de alinhamento dinâmico `HT_NODE_FLAGS_OFFSET`, garantindo posicionamento seguro de `flags` no boundary de multi-classes sem sobreposição de memória.
+- **Main Benchmark Atualizado com 8 Datasets:**
+  - Resultados consolidados com hiperparâmetros ótimos comprovando paridade preditiva e superioridade contra `River HTC/HTR` com speedups de **$53\times$ a $1.479\times$** por amostra.
+  - Consumo intra-treino rigorosamente contido em $\le 1\text{ MB}$ de RAM mesmo em datasets de alta dimensionalidade como Forest Covertype ($703,8\text{ KB}$ vs $57,8\text{ MB}$ do River).
+- **Suíte de Testes:** 115 testes unitários e de integração aprovados (226.035 asserções) com 0 warnings em `float32` e `double64`.
 - **Biblioteca de Pré-Processamento Embarcada (`libht_prep`):**
   - `ht_scaler_t`: Normalização online Z-score (Welford incremental) e Min-Max em $O(1)$ de RAM e tempo.
   - `ht_filter_hampel_t`: Filtro mediano deslizante com Desvio Absoluto da Mediana (MAD, $3\sigma$) com buffer circular estático para rejeição determinística de espículas (*outliers*) de sensores industriais.
