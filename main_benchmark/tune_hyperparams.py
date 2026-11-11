@@ -966,15 +966,96 @@ def extract_report_configs(
     selected_datasets: List[str],
     selected_engines: List[str],
     top_k: int = 3,
+    report_path: Optional[str] = None,
 ) -> Dict[str, Dict[str, List[Dict[str, Any]]]]:
     """
-    Extracts the Top-K configurations per tier / engine currently published in the report.
-    Returns: {d_id: {'kansho': [params, ...], 'river': [params, ...], 'sklearn': [params, ...]}}
+    Extracts configurations to replay.
+    If report_path is provided and exists, parses the exact configurations published
+    in the Markdown report tables 1:1, ensuring exact parity with the published report.
+    Otherwise, falls back to sorting top_k from all_results.
     """
-    extracted: Dict[str, Dict[str, List[Dict[str, Any]]]] = {}
+    dataset_map = {
+        "SEA": "sea",
+        "Electricity": "electricity",
+        "Forest Covertype": "covertype",
+        "Airlines": "airlines",
+        "Friedman #1": "friedman",
+        "Bikes": "bikes",
+        "Appliances Energy": "appliances_energy",
+        "NYC Taxi": "nyc_taxi",
+    }
     kansho_enabled = ("c11" in selected_engines or "kansho" in selected_engines or "all" in selected_engines)
     river_enabled = ("river" in selected_engines or "all" in selected_engines)
     sklearn_enabled = ("sklearn" in selected_engines or "all" in selected_engines)
+
+    if report_path and os.path.exists(report_path):
+        with open(report_path, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+
+        current_dataset = None
+        current_engine = "kansho"
+        extracted_from_md: Dict[str, Dict[str, List[Dict[str, Any]]]] = {}
+
+        for line in lines:
+            line_s = line.rstrip("\r\n")
+            if line_s.startswith("## Dataset:"):
+                current_dataset = None
+                for name, did in dataset_map.items():
+                    if name in line_s:
+                        current_dataset = did
+                        break
+                if current_dataset:
+                    extracted_from_md[current_dataset] = {"kansho": [], "river": [], "sklearn": []}
+                current_engine = "kansho"
+            elif line_s.startswith("#### Kansho"):
+                current_engine = "kansho"
+            elif line_s.startswith("#### River"):
+                current_engine = "river"
+            elif line_s.startswith("#### Sklearn"):
+                current_engine = "sklearn"
+            elif line_s.startswith("| #") and current_dataset:
+                parts = [p.strip() for p in line_s.split("|")]
+                if len(parts) >= 3:
+                    cfg_str = parts[2]
+                    tokens = [t.strip().strip("`") for t in cfg_str.split(",") if "=" in t]
+                    d: Dict[str, Any] = {}
+                    for tok in tokens:
+                        if "=" not in tok:
+                            continue
+                        k, v = tok.split("=", 1)
+                        k = k.strip()
+                        v = v.strip()
+                        if v == "None":
+                            d[k] = None
+                        elif v == "True":
+                            d[k] = True
+                        elif v == "False":
+                            d[k] = False
+                        else:
+                            try:
+                                d[k] = int(v) if v.isdigit() or (v.startswith("-") and v[1:].isdigit()) else float(v)
+                            except ValueError:
+                                d[k] = v
+                    if d:
+                        eng_key = current_engine
+                        if eng_key == "kansho" and not kansho_enabled:
+                            continue
+                        if eng_key == "river" and not river_enabled:
+                            continue
+                        if eng_key == "sklearn" and not sklearn_enabled:
+                            continue
+                        extracted_from_md[current_dataset][eng_key].append(d)
+
+        # Filter by selected_datasets
+        filtered: Dict[str, Dict[str, List[Dict[str, Any]]]] = {}
+        for did, eng_dict in extracted_from_md.items():
+            if selected_datasets and did not in selected_datasets and "all" not in selected_datasets:
+                continue
+            filtered[did] = eng_dict
+        if any(len(cfgs) > 0 for d in filtered.values() for cfgs in d.values()):
+            return filtered
+
+    extracted: Dict[str, Dict[str, List[Dict[str, Any]]]] = {}
 
     for d_id, d_name, task, desc, is_high_dim in DATASETS_CONFIG:
         if selected_datasets and d_id not in selected_datasets and "all" not in selected_datasets:
@@ -1182,6 +1263,7 @@ def run_tuning_suite(
             selected_datasets=selected_datasets,
             selected_engines=norm_engines,
             top_k=3,
+            report_path=output_report,
         )
 
         def make_param_key(engine: str, params: Dict[str, Any]) -> Tuple:
