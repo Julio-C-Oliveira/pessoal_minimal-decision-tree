@@ -95,6 +95,7 @@ typedef struct {
             } split_val;
             uint16_t left_child;
             uint16_t right_child;
+            uint16_t drift_idx;  /**< Dedicated slot in ht_drift_pool_t (0..127), or HT_INVALID_IDX */
             uint8_t  feature_idx;
         };
         /* Free list link when node is inactive */

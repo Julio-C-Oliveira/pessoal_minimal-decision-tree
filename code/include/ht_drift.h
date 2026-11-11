@@ -80,15 +80,46 @@ _Static_assert(sizeof(ht_adwin_t) == 764, "ht_adwin_t must be exactly 764 bytes 
 _Static_assert(sizeof(ht_adwin_t) == 1504, "ht_adwin_t must be exactly 1504 bytes in float64");
 #endif
 
+#ifndef HT_MAX_DRIFT_NODES
+#define HT_MAX_DRIFT_NODES HT_MAX_ADWIN_DETECTORS
+#endif
+
 /**
- * @brief Deterministic pool allocator for multiple ADWIN detector instances.
+ * @brief Node concept drift monitoring and alternate subtree metadata for HAT.
  */
 typedef struct {
-    ht_adwin_t pool[HT_MAX_ADWIN_DETECTORS];
-    uint16_t   free_indices[HT_MAX_ADWIN_DETECTORS];
-    uint32_t   in_use_mask[(HT_MAX_ADWIN_DETECTORS + 31U) / 32U];
-    uint16_t   free_top;
-    uint16_t   allocated_count;
+    ht_float_t mean_error;   /**< Online error rate / absolute error mean tracked at this node */
+    ht_float_t error_m2;     /**< Centered sum of squared errors M2 for bilateral Z-test */
+    uint32_t   error_count;  /**< Number of error updates observed */
+    uint16_t   adwin_idx;    /**< Index in ht_adwin_pool_t, or HT_INVALID_IDX */
+    uint16_t   alt_tree_idx; /**< Root of alternate subtree in node_pool, or HT_INVALID_IDX */
+    uint16_t   node_idx;     /**< Owning node index in node_pool */
+    uint16_t   next_free;    /**< Intrusive link for free-list when inactive */
+} ht_node_drift_t;
+
+/**
+ * @brief Dedicated static pool allocator for node drift monitoring structures.
+ *
+ * Sized at HT_MAX_DRIFT_NODES (128 entries = 2.5 KB in float32 / 4 KB in double64).
+ * Replaces the monolithic node_drift[HT_MAX_NODES] array (65.5 KB / 98.3 KB)
+ * saving ~63 KB of SRAM in HAT mode and full 65.5 KB in pure VFDT mode.
+ */
+typedef struct {
+    ht_node_drift_t pool[HT_MAX_DRIFT_NODES];
+    uint16_t        free_head;
+    uint16_t        allocated_count;
+} ht_drift_pool_t;
+
+/**
+ * @brief Deterministic pool allocator for multiple ADWIN detector instances and drift nodes.
+ */
+typedef struct {
+    ht_adwin_t      pool[HT_MAX_ADWIN_DETECTORS];
+    ht_drift_pool_t drift_pool;
+    uint16_t        free_indices[HT_MAX_ADWIN_DETECTORS];
+    uint32_t        in_use_mask[(HT_MAX_ADWIN_DETECTORS + 31U) / 32U];
+    uint16_t        free_top;
+    uint16_t        allocated_count;
 } ht_adwin_pool_t;
 
 _Static_assert(sizeof(ht_adwin_pool_t) <= (256 * 1024), "ht_adwin_pool_t must stay within budget");
@@ -390,6 +421,45 @@ ht_hat_action_t ht_hat_evaluate_reg_alternate(ht_float_t e_old,
                                               uint32_t n_alt,
                                               uint32_t min_obs,
                                               ht_float_t alpha);
+
+/* --- Public Drift Pool API --- */
+
+/**
+ * @brief Initializes a dedicated static drift pool with intrusive free-list.
+ */
+ht_status_t ht_drift_pool_init(ht_drift_pool_t *pool);
+
+/**
+ * @brief Allocates an entry from the drift pool in O(1) time.
+ *
+ * @return Allocated entry index, or HT_INVALID_IDX if pool is exhausted.
+ */
+uint16_t ht_drift_pool_alloc(ht_drift_pool_t *pool);
+
+/**
+ * @brief Releases a drift pool entry in O(1) time.
+ */
+ht_status_t ht_drift_pool_free(ht_drift_pool_t *pool, uint16_t idx);
+
+/**
+ * @brief Retrieves a mutable pointer to a drift pool entry.
+ */
+ht_node_drift_t *ht_drift_pool_get(ht_drift_pool_t *pool, uint16_t idx);
+
+/**
+ * @brief Retrieves a const pointer to a drift pool entry.
+ */
+const ht_node_drift_t *ht_drift_pool_get_const(const ht_drift_pool_t *pool, uint16_t idx);
+
+/**
+ * @brief Resets all entries in the drift pool back to their free state.
+ */
+void ht_drift_pool_reset(ht_drift_pool_t *pool);
+
+/**
+ * @brief Returns total bytes occupied by the drift pool.
+ */
+size_t ht_drift_pool_bytes_used(const ht_drift_pool_t *pool);
 
 #ifdef __cplusplus
 }

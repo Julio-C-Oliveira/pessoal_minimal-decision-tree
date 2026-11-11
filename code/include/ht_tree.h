@@ -72,17 +72,6 @@ typedef struct {
 struct ht_prep_pipeline;
 
 /**
- * @brief Node concept drift monitoring and alternate subtree metadata for HAT.
- */
-typedef struct {
-    ht_float_t mean_error;   /**< Online error rate / absolute error mean tracked at this node */
-    ht_float_t error_m2;     /**< Centered sum of squared errors M2 for bilateral Z-test */
-    uint32_t   error_count;  /**< Number of error updates observed */
-    uint16_t   adwin_idx;    /**< Index in ht_adwin_pool_t, or HT_INVALID_IDX */
-    uint16_t   alt_tree_idx; /**< Root of alternate subtree in node_pool, or HT_INVALID_IDX */
-} ht_node_drift_t;
-
-/**
  * @brief Complete Hoeffding Tree structure.
  *
  * Contiguously bundles static memory pools, schema parameters, criterion vtable,
@@ -93,9 +82,9 @@ typedef struct {
     ht_config_params_t           params;
     const ht_criterion_vtable_t *criterion_vtable;
     ht_adwin_pool_t             *adwin_pool;
+    ht_drift_pool_t             *drift_pool;
     struct ht_prep_pipeline     *prep_pipeline;
     ht_var_stat_t                feat_stats[HT_MAX_FEATURES];
-    ht_node_drift_t              node_drift[HT_MAX_NODES];
     ht_float_t                   train_weight_seen;
     uint32_t                     rng_state;
     uint16_t                     root_idx;
@@ -332,6 +321,38 @@ ht_status_t ht_tree_init_hat(ht_tree_t *tree,
  * @return HT_OK on success, or negative error code.
  */
 ht_status_t ht_tree_set_adwin_pool(ht_tree_t *tree, ht_adwin_pool_t *adwin_pool);
+
+/**
+ * @brief Sets or detaches a dedicated concept drift metadata pool.
+ *
+ * Automatically configured when calling ht_tree_set_adwin_pool or ht_tree_init_hat.
+ *
+ * @param tree Pointer to tree instance.
+ * @param drift_pool Pointer to ht_drift_pool_t (or NULL).
+ * @return HT_OK on success, or negative error code.
+ */
+ht_status_t ht_tree_set_drift_pool(ht_tree_t *tree, ht_drift_pool_t *drift_pool);
+
+/**
+ * @brief Retrieves or dynamically allocates drift metadata for a given tree node.
+ *
+ * Uses direct O(1) branch indexing or active leaf slot lookup.
+ *
+ * @param tree Pointer to tree instance.
+ * @param node_idx Node pool index.
+ * @return Pointer to ht_node_drift_t, or NULL if pools are exhausted or HAT disabled.
+ */
+ht_node_drift_t *ht_tree_node_drift(ht_tree_t *tree, uint16_t node_idx);
+
+/**
+ * @brief Read-only accessor for node drift metadata without allocating.
+ */
+const ht_node_drift_t *ht_tree_node_drift_const(const ht_tree_t *tree, uint16_t node_idx);
+
+/**
+ * @brief Releases drift metadata and any associated ADWIN detector back to static pools.
+ */
+void ht_tree_node_drift_free(ht_tree_t *tree, uint16_t node_idx);
 
 /**
  * @brief Attaches (or detaches) an optional data preprocessing micro-pipeline to the tree.

@@ -362,6 +362,8 @@ ht_status_t ht_adwin_pool_init(ht_adwin_pool_t *pool) {
     pool->free_top = HT_MAX_ADWIN_DETECTORS;
     pool->allocated_count = 0U;
 
+    ht_drift_pool_init(&pool->drift_pool);
+
     return HT_OK;
 }
 
@@ -428,6 +430,98 @@ size_t ht_adwin_pool_bytes_used(const ht_adwin_pool_t *pool) {
         return 0U;
     }
     return sizeof(ht_adwin_pool_t);
+}
+
+/* --- Dedicated Drift Pool Implementation --- */
+
+ht_status_t ht_drift_pool_init(ht_drift_pool_t *pool) {
+    if (pool == NULL) {
+        return HT_ERR_INVALID_ARG;
+    }
+
+    memset(pool, 0, sizeof(*pool));
+    for (uint16_t i = 0; i < HT_MAX_DRIFT_NODES; ++i) {
+        pool->pool[i].adwin_idx = HT_INVALID_IDX;
+        pool->pool[i].alt_tree_idx = HT_INVALID_IDX;
+        pool->pool[i].node_idx = HT_INVALID_IDX;
+        pool->pool[i].mean_error = (ht_float_t)0.0;
+        pool->pool[i].error_m2 = (ht_float_t)0.0;
+        pool->pool[i].error_count = 0U;
+        pool->pool[i].next_free = (uint16_t)(i + 1U);
+    }
+    pool->pool[HT_MAX_DRIFT_NODES - 1U].next_free = HT_INVALID_IDX;
+    pool->free_head = 0U;
+    pool->allocated_count = 0U;
+
+    return HT_OK;
+}
+
+uint16_t ht_drift_pool_alloc(ht_drift_pool_t *pool) {
+    if (pool == NULL || pool->free_head == HT_INVALID_IDX) {
+        return HT_INVALID_IDX;
+    }
+
+    uint16_t idx = pool->free_head;
+    pool->free_head = pool->pool[idx].next_free;
+    pool->allocated_count++;
+
+    pool->pool[idx].adwin_idx = HT_INVALID_IDX;
+    pool->pool[idx].alt_tree_idx = HT_INVALID_IDX;
+    pool->pool[idx].node_idx = HT_INVALID_IDX;
+    pool->pool[idx].mean_error = (ht_float_t)0.0;
+    pool->pool[idx].error_m2 = (ht_float_t)0.0;
+    pool->pool[idx].error_count = 0U;
+    pool->pool[idx].next_free = HT_INVALID_IDX;
+
+    return idx;
+}
+
+ht_status_t ht_drift_pool_free(ht_drift_pool_t *pool, uint16_t idx) {
+    if (pool == NULL || idx >= HT_MAX_DRIFT_NODES) {
+        return HT_ERR_INVALID_ARG;
+    }
+
+    pool->pool[idx].adwin_idx = HT_INVALID_IDX;
+    pool->pool[idx].alt_tree_idx = HT_INVALID_IDX;
+    pool->pool[idx].node_idx = HT_INVALID_IDX;
+    pool->pool[idx].mean_error = (ht_float_t)0.0;
+    pool->pool[idx].error_m2 = (ht_float_t)0.0;
+    pool->pool[idx].error_count = 0U;
+    pool->pool[idx].next_free = pool->free_head;
+    pool->free_head = idx;
+
+    if (pool->allocated_count > 0U) {
+        pool->allocated_count--;
+    }
+
+    return HT_OK;
+}
+
+ht_node_drift_t *ht_drift_pool_get(ht_drift_pool_t *pool, uint16_t idx) {
+    if (pool == NULL || idx >= HT_MAX_DRIFT_NODES) {
+        return NULL;
+    }
+    return &pool->pool[idx];
+}
+
+const ht_node_drift_t *ht_drift_pool_get_const(const ht_drift_pool_t *pool, uint16_t idx) {
+    if (pool == NULL || idx >= HT_MAX_DRIFT_NODES) {
+        return NULL;
+    }
+    return &pool->pool[idx];
+}
+
+void ht_drift_pool_reset(ht_drift_pool_t *pool) {
+    if (pool != NULL) {
+        ht_drift_pool_init(pool);
+    }
+}
+
+size_t ht_drift_pool_bytes_used(const ht_drift_pool_t *pool) {
+    if (pool == NULL) {
+        return 0U;
+    }
+    return sizeof(ht_drift_pool_t);
 }
 
 /* --- HAT Concept Drift Helpers Implementation --- */

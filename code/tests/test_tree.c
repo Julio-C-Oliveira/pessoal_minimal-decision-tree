@@ -853,40 +853,45 @@ static void test_tree_hat_reg_alternate_tree_switch_and_prune(void) {
     uint16_t alt_stats = ht_stats_alloc(&tree.memory);
     tree.memory.node_pool[alt_root].stats_idx = alt_stats;
     ht_var_init(&tree.memory.node_pool[alt_root].reg_stats);
-    tree.node_drift[alt_root].adwin_idx = ht_adwin_pool_alloc(&ad_pool, NULL);
-    tree.node_drift[tree.root_idx].alt_tree_idx = alt_root;
+    ht_node_drift_t *alt_nd = ht_tree_node_drift(&tree, alt_root);
+    HT_ASSERT_NOT_NULL(alt_nd);
+    alt_nd->adwin_idx = ht_adwin_pool_alloc(&ad_pool, NULL);
+
+    ht_node_drift_t *root_nd = ht_tree_node_drift(&tree, tree.root_idx);
+    HT_ASSERT_NOT_NULL(root_nd);
+    root_nd->alt_tree_idx = alt_root;
     tree.n_alternate_trees++;
 
     /* 2. Configure alt tree with lower error than main tree (Switch case) */
-    tree.node_drift[tree.root_idx].mean_error = (ht_float_t)10.0;
-    tree.node_drift[tree.root_idx].error_m2 = (ht_float_t)5.0;
-    tree.node_drift[tree.root_idx].error_count = 50U;
+    root_nd->mean_error = (ht_float_t)10.0;
+    root_nd->error_m2 = (ht_float_t)5.0;
+    root_nd->error_count = 50U;
 
-    tree.node_drift[alt_root].mean_error = (ht_float_t)1.0;
-    tree.node_drift[alt_root].error_m2 = (ht_float_t)2.0;
-    tree.node_drift[alt_root].error_count = 50U;
+    alt_nd->mean_error = (ht_float_t)1.0;
+    alt_nd->error_m2 = (ht_float_t)2.0;
+    alt_nd->error_count = 50U;
 
     ht_hat_action_t act = ht_hat_evaluate_reg_alternate(
-        tree.node_drift[tree.root_idx].mean_error,
-        tree.node_drift[tree.root_idx].error_m2 / (ht_float_t)49.0,
-        tree.node_drift[tree.root_idx].error_count,
-        tree.node_drift[alt_root].mean_error,
-        tree.node_drift[alt_root].error_m2 / (ht_float_t)49.0,
-        tree.node_drift[alt_root].error_count,
+        root_nd->mean_error,
+        root_nd->error_m2 / (ht_float_t)49.0,
+        root_nd->error_count,
+        alt_nd->mean_error,
+        alt_nd->error_m2 / (ht_float_t)49.0,
+        alt_nd->error_count,
         tree.params.drift_window_threshold,
         tree.params.switch_significance
     );
     HT_ASSERT_EQ(act, HT_HAT_ACTION_SWITCH);
 
     /* 3. Configure alt tree with higher error (Prune case) */
-    tree.node_drift[alt_root].mean_error = (ht_float_t)25.0;
+    alt_nd->mean_error = (ht_float_t)25.0;
     act = ht_hat_evaluate_reg_alternate(
-        tree.node_drift[tree.root_idx].mean_error,
-        tree.node_drift[tree.root_idx].error_m2 / (ht_float_t)49.0,
-        tree.node_drift[tree.root_idx].error_count,
-        tree.node_drift[alt_root].mean_error,
-        tree.node_drift[alt_root].error_m2 / (ht_float_t)49.0,
-        tree.node_drift[alt_root].error_count,
+        root_nd->mean_error,
+        root_nd->error_m2 / (ht_float_t)49.0,
+        root_nd->error_count,
+        alt_nd->mean_error,
+        alt_nd->error_m2 / (ht_float_t)49.0,
+        alt_nd->error_count,
         tree.params.drift_window_threshold,
         tree.params.switch_significance
     );
