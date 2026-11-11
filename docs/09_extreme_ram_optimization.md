@@ -232,6 +232,14 @@ Existem duas abordagens altamente vantajosas:
 - **Em HAT (`enable_hat == true`):** Redução de $65.536\text{ B}$ para $2.048\text{ B}$ (**economia líquida de $63.488\text{ B}$ = $62,0\text{ KB}$**).
 - **Impacto em Acurácia/Funcionalidades:** **$0,0\%$**. Os testes de drift e switch de subárvores continuam operando normalmente nos nós que possuem detector.
 
+> [!WARNING]
+> **Post-Mortem / Justificativa da Falha na Tentativa da Entrega 7.4 (Commit `7128ca6` no branch `backup/fase7-tentativas`):**
+> A tentativa inicial de desacoplar o `node_drift` alocou o pool dentro de `ht_adwin_pool_t`, mas sofreu de duas falhas críticas de projeto:
+> 1. **Violação de Determinismo $O(1)$:** Como `ht_node_t` alocou `drift_idx` apenas em nós de ramo, as folhas ativas ficaram sem campo de índice. A implementação introduziu um loop de busca linear $O(N)$ (`for (i = 0; i < 128; i++)`) em `ht_tree_node_drift`, executado a **cada amostra processada em treino HAT**.
+> 2. **Pilha Externa de Índices:** Reintroduziu vetores externos (`free_indices[128]` e `in_use_mask`), contrariando o padrão de free-lists intrusivas da Hipótese 1.
+> 3. **Ausência de Validação N3:** O benchmark de paridade em drift com economia $\ge 62\text{ KB}$ não foi executado.
+> *Solução Correta para Retomada:* O `drift_idx` da folha ativa deve ser armazenado diretamente em `ht_leaf_stats_t`, permitindo acesso $O(1)$ imediato via `stats_pool[node->stats_idx].drift_idx` sem nenhum loop.
+
 ---
 
 ### Hipótese 4: Union de Cabeçalho em `ht_leaf_stats_t` (Eliminação do Overhead de SGD na Classificação)
@@ -321,7 +329,14 @@ typedef struct {
 - Para $256$ folhas ativas:
   $$256 \times 384\text{ bytes} = 98.304\text{ bytes } (\mathbf{96,0\text{ KB}}\text{ em float32})$$
   $$256 \times 768\text{ bytes} = 196.608\text{ bytes } (\mathbf{192,0\text{ KB}}\text{ em double64})$$
-- **Impacto em Acurácia/Funcionalidades:** **$0,0\%$**. A discretização de cortes em $10$ intervalos no range $[\min, \max]$ e as probabilidades Naive Bayes permanecem matematicamente idênticas.
+- **Impacto em Acurácia/Funcionalidades:** **Falha empírica grave (premissa refutada)**.
+
+> [!WARNING]
+> **Post-Mortem / Justificativa da Falha na Tentativa da Entrega 7.5 (Commit `8095979`, revertida no commit `ec59602`):**
+> A tentativa de implementar as Hipóteses 4 e 5 falhou pelos seguintes motivos empíricos e arquiteturais:
+> 1. **Vazamento de Cauda Gaussiana (Refutação da H5):** Ao eliminar `min_val` e `max_val` em nível de classe e deixar apenas a bounding box global, removeu-se a regra de truncamento do River (`GaussianSplitter`). Em variáveis concentradas ou binárias esparsas (como as 44 variáveis one-hot do Forest Covertype), a cauda da normal vazou probabilidades incorretas para classes sem variância, distorcendo o cálculo de Gini/Entropia e colapsando a acurácia de $61,43\%$ para $<50\%$. A H5 foi **completamente revertida no commit `ec59602`**, restaurando limites por classe ($80\text{ B}$).
+> 2. **Inocuidade da Union em Arrays Estáticos (Limitação da H4):** Em C11 estático, `sizeof(union)` é o tamanho do seu maior membro ($76\text{ bytes}$ de regressão). Assim, cada folha em classificação pura continuou alocando 76 bytes, gerando economia quase nula ($2\text{ KB}$ em vez de $17,4\text{ KB}$).
+> *Conclusão:* A economia nas folhas só é fisicamente viável sem perda de acurácia através do **Dynamic Feature Stride Slab (Hipótese 6)**.
 
 ---
 
