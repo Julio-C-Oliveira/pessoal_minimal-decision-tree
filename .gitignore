@@ -20,3 +20,4 @@ venv/
 benchmarks/data/
 *.csv
 *.backup.json
+*.backup.md

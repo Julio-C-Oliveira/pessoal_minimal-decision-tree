@@ -7,7 +7,7 @@ Suíte automatizada de exploração de hiperparâmetros comparando **Kansho**, *
 ## Dataset: SEA (Classification)
 
 - **Descrição:** SEA (Synthetic, 3 continuous, 2 classes)
-- **Total de Experimentos (Trials):** 30
+- **Total de Experimentos (Trials):** 528
 
 ### 1. Melhores Modelos por Tier (Kansho) e Competidores (Top 3)
 
@@ -16,8 +16,8 @@ Suíte automatizada de exploração de hiperparâmetros comparando **Kansho**, *
 | Rank | Configuração | Acurácia (%) | F1 Macro (%) | RAM (KB) | Latência (µs) |
 | :---: | :--- | :---: | :---: | :---: | :---: |
 | #1 | `tier=1`, `grace_period=50`, `delta=0.001`, `tau=0.01`, `prep_scaler=None`, `obs_splitter=histogram`, `filter_hampel=False`, `split_criterion=info_gain`, `leaf_prediction=nba` | 94.87% | 93.83% | 4.8 KB | 0.77 µs |
-| #2 | `tier=1`, `grace_period=200`, `delta=0.0001`, `tau=0.01`, `prep_scaler=standard`, `obs_splitter=histogram`, `filter_hampel=False`, `split_criterion=gini`, `leaf_prediction=nba` | 94.73% | 93.66% | 11.3 KB | 0.96 µs |
-| #3 | `tier=1`, `grace_period=50`, `delta=1e-07`, `tau=0.01`, `prep_scaler=standard`, `obs_splitter=histogram`, `filter_hampel=False`, `split_criterion=info_gain`, `leaf_prediction=nba` | 94.73% | 93.66% | 11.3 KB | 0.96 µs |
+| #2 | `tier=1`, `grace_period=50`, `delta=1e-07`, `tau=0.01`, `prep_scaler=standard`, `obs_splitter=histogram`, `filter_hampel=False`, `split_criterion=info_gain`, `leaf_prediction=nba` | 94.73% | 93.66% | 11.3 KB | 0.96 µs |
+| #3 | `tier=1`, `grace_period=200`, `delta=0.0001`, `tau=0.01`, `prep_scaler=standard`, `obs_splitter=histogram`, `filter_hampel=False`, `split_criterion=gini`, `leaf_prediction=nba` | 94.73% | 93.66% | 11.3 KB | 0.96 µs |
 
 #### Kansho (Tier 2: 2 nós ativos, 1 utilizado, 32 nós no max)
 
@@ -27,15 +27,15 @@ Suíte automatizada de exploração de hiperparâmetros comparando **Kansho**, *
 | #2 | `tier=2`, `grace_period=50`, `delta=1e-07`, `tau=0.01`, `prep_scaler=standard`, `obs_splitter=histogram`, `filter_hampel=False`, `split_criterion=info_gain`, `leaf_prediction=nba` | 94.73% | 93.66% | 15.7 KB | 0.70 µs |
 | #3 | `tier=2`, `grace_period=200`, `delta=0.0001`, `tau=0.01`, `prep_scaler=standard`, `obs_splitter=histogram`, `filter_hampel=False`, `split_criterion=gini`, `leaf_prediction=nba` | 94.73% | 93.66% | 15.7 KB | 0.94 µs |
 
-#### Kansho (Tier 4: 4 nós ativos, 25 utilizados, 64 nós no max)
+#### Kansho (Tier 4: 4 nós ativos, 21 utilizados, 64 nós no max)
 
 | Rank | Configuração | Acurácia (%) | F1 Macro (%) | RAM (KB) | Latência (µs) |
 | :---: | :--- | :---: | :---: | :---: | :---: |
-| #1 | `tier=4`, `grace_period=50`, `delta=0.001`, `tau=0.05`, `prep_scaler=None`, `obs_splitter=gaussian`, `filter_hampel=False`, `split_criterion=info_gain`, `leaf_prediction=nba` | 97.33% | 96.91% | 18.0 KB | 0.23 µs |
-| #2 | `tier=4`, `grace_period=400`, `delta=0.0001`, `tau=0.15`, `prep_scaler=standard`, `obs_splitter=histogram`, `filter_hampel=False`, `split_criterion=info_gain`, `leaf_prediction=nba` | 97.30% | 96.88% | 24.5 KB | 0.34 µs |
+| #1 | `tier=4`, `grace_period=400`, `delta=0.0001`, `tau=0.15`, `prep_scaler=standard`, `obs_splitter=histogram`, `filter_hampel=False`, `split_criterion=info_gain`, `leaf_prediction=nba` | 97.30% | 96.88% | 24.5 KB | 0.34 µs |
+| #2 | `tier=4`, `grace_period=50`, `delta=0.001`, `tau=0.05`, `prep_scaler=None`, `obs_splitter=gaussian`, `filter_hampel=False`, `split_criterion=info_gain`, `leaf_prediction=nba` | 97.33% | 96.91% | 18.0 KB | 0.23 µs |
 | #3 | `tier=4`, `grace_period=50`, `delta=0.01`, `tau=0.1`, `prep_scaler=None`, `obs_splitter=gaussian`, `filter_hampel=False`, `split_criterion=info_gain`, `leaf_prediction=mc` | 96.20% | 95.53% | 18.0 KB | 0.12 µs |
 
-#### Kansho (Tier 8: 8 nós ativos, 41 utilizados, 128 nós no max)
+#### Kansho (Tier 8: 8 nós ativos, 43 utilizados, 128 nós no max)
 
 | Rank | Configuração | Acurácia (%) | F1 Macro (%) | RAM (KB) | Latência (µs) |
 | :---: | :--- | :---: | :---: | :---: | :---: |
@@ -43,7 +43,7 @@ Suíte automatizada de exploração de hiperparâmetros comparando **Kansho**, *
 | #2 | `tier=8`, `grace_period=50`, `delta=0.001`, `tau=0.1`, `split_criterion=gini`, `leaf_prediction=nba`, `prep_scaler=None`, `obs_splitter=gaussian`, `filter_hampel=False` | 98.58% | 98.37% | 35.5 KB | 0.17 µs |
 | #3 | `tier=8`, `grace_period=50`, `delta=0.001`, `tau=0.15`, `prep_scaler=standard`, `obs_splitter=histogram`, `filter_hampel=False`, `split_criterion=gini`, `leaf_prediction=nb` | 98.42% | 98.17% | 42.1 KB | 0.29 µs |
 
-#### Kansho (Tier 16: 16 nós ativos, 49 utilizados, 256 nós no max)
+#### Kansho (Tier 16: 16 nós ativos, 45 utilizados, 256 nós no max)
 
 | Rank | Configuração | Acurácia (%) | F1 Macro (%) | RAM (KB) | Latência (µs) |
 | :---: | :--- | :---: | :---: | :---: | :---: |
@@ -51,15 +51,15 @@ Suíte automatizada de exploração de hiperparâmetros comparando **Kansho**, *
 | #2 | `tier=16`, `grace_period=100`, `delta=1e-07`, `tau=0.15`, `prep_scaler=standard`, `obs_splitter=gaussian`, `filter_hampel=False`, `split_criterion=gini`, `leaf_prediction=nba` | 98.95% | 98.79% | 77.2 KB | 1.24 µs |
 | #3 | `tier=16`, `grace_period=50`, `delta=0.01`, `tau=0.15`, `prep_scaler=None`, `obs_splitter=histogram`, `filter_hampel=False`, `split_criterion=info_gain`, `leaf_prediction=nb` | 98.25% | 97.99% | 70.6 KB | 0.74 µs |
 
-#### Kansho (Tier 64: 64 nós ativos, 49 utilizados, 1024 nós no max)
+#### Kansho (Tier 64: 64 nós ativos, 45 utilizados, 1024 nós no max)
 
 | Rank | Configuração | Acurácia (%) | F1 Macro (%) | RAM (KB) | Latência (µs) |
 | :---: | :--- | :---: | :---: | :---: | :---: |
-| #1 | `tier=64`, `grace_period=100`, `delta=0.01`, `tau=0.1`, `prep_scaler=standard`, `obs_splitter=gaussian`, `filter_hampel=False`, `split_criterion=gini`, `leaf_prediction=nb` | 99.12% | 98.99% | 288.0 KB | 0.81 µs |
-| #2 | `tier=64`, `grace_period=100`, `delta=0.01`, `tau=0.1`, `split_criterion=info_gain`, `leaf_prediction=nba`, `prep_scaler=None`, `obs_splitter=gaussian`, `filter_hampel=False` | 99.10% | 98.97% | 281.4 KB | 0.68 µs |
+| #1 | `tier=64`, `grace_period=100`, `delta=0.01`, `tau=0.1`, `split_criterion=info_gain`, `leaf_prediction=nba`, `prep_scaler=None`, `obs_splitter=gaussian`, `filter_hampel=False` | 99.10% | 98.97% | 281.4 KB | 0.68 µs |
+| #2 | `tier=64`, `grace_period=100`, `delta=0.01`, `tau=0.1`, `prep_scaler=standard`, `obs_splitter=gaussian`, `filter_hampel=False`, `split_criterion=gini`, `leaf_prediction=nb` | 99.12% | 98.99% | 288.0 KB | 0.81 µs |
 | #3 | `tier=64`, `grace_period=50`, `delta=0.001`, `tau=0.1`, `prep_scaler=standard`, `obs_splitter=histogram`, `filter_hampel=False`, `split_criterion=info_gain`, `leaf_prediction=nb` | 98.38% | 98.14% | 288.0 KB | 1.13 µs |
 
-#### Kansho (Tier 128: 128 nós ativos, 49 utilizados, 2048 nós no max)
+#### Kansho (Tier 128: 128 nós ativos, 45 utilizados, 2048 nós no max)
 
 | Rank | Configuração | Acurácia (%) | F1 Macro (%) | RAM (KB) | Latência (µs) |
 | :---: | :--- | :---: | :---: | :---: | :---: |
@@ -67,7 +67,7 @@ Suíte automatizada de exploração de hiperparâmetros comparando **Kansho**, *
 | #2 | `tier=128`, `grace_period=400`, `delta=1e-07`, `tau=0.05`, `prep_scaler=standard`, `obs_splitter=gaussian`, `filter_hampel=False`, `split_criterion=gini`, `leaf_prediction=nba` | 98.30% | 98.03% | 569.0 KB | 1.50 µs |
 | #3 | `tier=128`, `grace_period=50`, `delta=0.01`, `tau=0.15`, `prep_scaler=None`, `obs_splitter=histogram`, `filter_hampel=False`, `split_criterion=info_gain`, `leaf_prediction=nb` | 98.20% | 97.94% | 562.4 KB | 1.12 µs |
 
-#### Kansho (Tier 256: 256 nós ativos, 49 utilizados, 4096 nós no max)
+#### Kansho (Tier 256: 256 nós ativos, 45 utilizados, 4096 nós no max)
 
 | Rank | Configuração | Acurácia (%) | F1 Macro (%) | RAM (KB) | Latência (µs) |
 | :---: | :--- | :---: | :---: | :---: | :---: |
@@ -97,7 +97,7 @@ Suíte automatizada de exploração de hiperparâmetros comparando **Kansho**, *
 ## Dataset: Electricity (Classification)
 
 - **Descrição:** Electricity / Elec2 (Real, 8 continuous, 2 classes)
-- **Total de Experimentos (Trials):** 30
+- **Total de Experimentos (Trials):** 528
 
 ### 1. Melhores Modelos por Tier (Kansho) e Competidores (Top 3)
 
@@ -125,13 +125,13 @@ Suíte automatizada de exploração de hiperparâmetros comparando **Kansho**, *
 | #2 | `tier=4`, `grace_period=200`, `delta=0.0001`, `tau=0.01`, `prep_scaler=standard`, `obs_splitter=histogram`, `filter_hampel=False`, `split_criterion=gini`, `leaf_prediction=nba` | 64.33% | 63.77% | 24.5 KB | 2.20 µs |
 | #3 | `tier=4`, `grace_period=50`, `delta=1e-07`, `tau=0.01`, `prep_scaler=standard`, `obs_splitter=histogram`, `filter_hampel=False`, `split_criterion=info_gain`, `leaf_prediction=nba` | 64.32% | 63.76% | 24.5 KB | 1.96 µs |
 
-#### Kansho (Tier 8: 8 nós ativos, 3 utilizados, 128 nós no max)
+#### Kansho (Tier 8: 8 nós ativos, 79 utilizados, 128 nós no max)
 
 | Rank | Configuração | Acurácia (%) | F1 Macro (%) | RAM (KB) | Latência (µs) |
 | :---: | :--- | :---: | :---: | :---: | :---: |
-| #1 | `tier=8`, `grace_period=200`, `delta=1e-07`, `tau=0.01`, `prep_scaler=standard`, `obs_splitter=histogram`, `filter_hampel=False`, `split_criterion=gini`, `leaf_prediction=mc` | 64.29% | 63.94% | 42.1 KB | 1.03 µs |
-| #2 | `tier=8`, `grace_period=100`, `delta=0.0001`, `tau=0.1`, `prep_scaler=None`, `obs_splitter=histogram`, `filter_hampel=False`, `split_criterion=gini`, `leaf_prediction=mc` | 64.44% | 63.75% | 35.5 KB | 0.63 µs |
-| #3 | `tier=8`, `grace_period=400`, `delta=0.01`, `tau=0.1`, `split_criterion=gini`, `leaf_prediction=mc`, `prep_scaler=None`, `obs_splitter=gaussian`, `filter_hampel=False` | 64.37% | 63.50% | 35.5 KB | 0.30 µs |
+| #1 | `tier=8`, `grace_period=400`, `delta=0.01`, `tau=0.1`, `split_criterion=gini`, `leaf_prediction=mc`, `prep_scaler=None`, `obs_splitter=gaussian`, `filter_hampel=False` | 64.37% | 63.50% | 35.5 KB | 0.30 µs |
+| #2 | `tier=8`, `grace_period=200`, `delta=1e-07`, `tau=0.01`, `prep_scaler=standard`, `obs_splitter=histogram`, `filter_hampel=False`, `split_criterion=gini`, `leaf_prediction=mc` | 64.29% | 63.94% | 42.1 KB | 1.03 µs |
+| #3 | `tier=8`, `grace_period=100`, `delta=0.0001`, `tau=0.1`, `prep_scaler=None`, `obs_splitter=histogram`, `filter_hampel=False`, `split_criterion=gini`, `leaf_prediction=mc` | 64.44% | 63.75% | 35.5 KB | 0.63 µs |
 
 #### Kansho (Tier 16: 16 nós ativos, 59 utilizados, 256 nós no max)
 
@@ -187,7 +187,7 @@ Suíte automatizada de exploração de hiperparâmetros comparando **Kansho**, *
 ## Dataset: Forest Covertype (Classification)
 
 - **Descrição:** Forest Covertype (Real, 54 features, 7 classes)
-- **Total de Experimentos (Trials):** 24
+- **Total de Experimentos (Trials):** 371
 
 ### 1. Melhores Modelos por Tier (Kansho) e Competidores (Top 3)
 
@@ -195,49 +195,49 @@ Suíte automatizada de exploração de hiperparâmetros comparando **Kansho**, *
 
 | Rank | Configuração | Acurácia (%) | F1 Macro (%) | RAM (KB) | Latência (µs) |
 | :---: | :--- | :---: | :---: | :---: | :---: |
-| #1 | `tier=1`, `grace_period=400`, `delta=0.001`, `tau=0.1`, `prep_scaler=standard`, `obs_splitter=gaussian`, `filter_hampel=False`, `split_criterion=gini`, `leaf_prediction=mc` | 54.73% | 52.36% | 44.2 KB | 1.25 µs |
-| #2 | `tier=1`, `grace_period=400`, `delta=0.01`, `tau=0.1`, `split_criterion=gini`, `leaf_prediction=mc`, `prep_scaler=None`, `obs_splitter=gaussian`, `filter_hampel=False` | 54.71% | 52.02% | 18.0 KB | 0.33 µs |
-| #3 | `tier=1`, `grace_period=50`, `delta=0.001`, `tau=0.1`, `split_criterion=gini`, `leaf_prediction=nba`, `prep_scaler=None`, `obs_splitter=gaussian`, `filter_hampel=False` | 52.15% | 45.82% | 18.0 KB | 1.73 µs |
+| #1 | `tier=1`, `grace_period=50`, `delta=0.001`, `tau=0.1`, `split_criterion=gini`, `leaf_prediction=nba`, `prep_scaler=None`, `obs_splitter=gaussian`, `filter_hampel=False` | 52.15% | 45.82% | 18.0 KB | 1.73 µs |
+| #2 | `tier=1`, `grace_period=400`, `delta=0.001`, `tau=0.1`, `prep_scaler=standard`, `obs_splitter=gaussian`, `filter_hampel=False`, `split_criterion=gini`, `leaf_prediction=mc` | 54.73% | 52.36% | 44.2 KB | 1.25 µs |
+| #3 | `tier=1`, `grace_period=400`, `delta=0.01`, `tau=0.1`, `split_criterion=gini`, `leaf_prediction=mc`, `prep_scaler=None`, `obs_splitter=gaussian`, `filter_hampel=False` | 54.71% | 52.02% | 18.0 KB | 0.33 µs |
 
-#### Kansho (Tier 2: 2 nós ativos, 19 utilizados, 32 nós no max)
-
-| Rank | Configuração | Acurácia (%) | F1 Macro (%) | RAM (KB) | Latência (µs) |
-| :---: | :--- | :---: | :---: | :---: | :---: |
-| #1 | `tier=2`, `grace_period=400`, `delta=0.01`, `tau=0.1`, `split_criterion=gini`, `leaf_prediction=mc`, `prep_scaler=None`, `obs_splitter=gaussian`, `filter_hampel=False` | 57.73% | 54.25% | 34.8 KB | 0.20 µs |
-| #2 | `tier=2`, `grace_period=400`, `delta=0.001`, `tau=0.1`, `prep_scaler=standard`, `obs_splitter=gaussian`, `filter_hampel=False`, `split_criterion=gini`, `leaf_prediction=mc` | 56.64% | 53.98% | 61.0 KB | 0.80 µs |
-| #3 | `tier=2`, `grace_period=50`, `delta=0.001`, `tau=0.1`, `split_criterion=gini`, `leaf_prediction=nba`, `prep_scaler=None`, `obs_splitter=gaussian`, `filter_hampel=False` | 53.81% | 49.23% | 34.8 KB | 1.20 µs |
-
-#### Kansho (Tier 4: 4 nós ativos, 35 utilizados, 64 nós no max)
+#### Kansho (Tier 2: 2 nós ativos, 27 utilizados, 32 nós no max)
 
 | Rank | Configuração | Acurácia (%) | F1 Macro (%) | RAM (KB) | Latência (µs) |
 | :---: | :--- | :---: | :---: | :---: | :---: |
-| #1 | `tier=4`, `grace_period=400`, `delta=0.001`, `tau=0.1`, `prep_scaler=standard`, `obs_splitter=gaussian`, `filter_hampel=False`, `split_criterion=gini`, `leaf_prediction=mc` | 60.67% | 58.20% | 94.7 KB | 0.79 µs |
-| #2 | `tier=4`, `grace_period=400`, `delta=0.01`, `tau=0.1`, `split_criterion=gini`, `leaf_prediction=mc`, `prep_scaler=None`, `obs_splitter=gaussian`, `filter_hampel=False` | 62.95% | 58.09% | 68.5 KB | 0.36 µs |
-| #3 | `tier=4`, `grace_period=50`, `delta=0.001`, `tau=0.1`, `split_criterion=gini`, `leaf_prediction=nba`, `prep_scaler=None`, `obs_splitter=gaussian`, `filter_hampel=False` | 60.35% | 55.80% | 68.5 KB | 1.61 µs |
+| #1 | `tier=2`, `grace_period=50`, `delta=0.001`, `tau=0.1`, `split_criterion=gini`, `leaf_prediction=nba`, `prep_scaler=None`, `obs_splitter=gaussian`, `filter_hampel=False` | 53.81% | 49.23% | 34.8 KB | 1.20 µs |
+| #2 | `tier=2`, `grace_period=400`, `delta=0.01`, `tau=0.1`, `split_criterion=gini`, `leaf_prediction=mc`, `prep_scaler=None`, `obs_splitter=gaussian`, `filter_hampel=False` | 57.73% | 54.25% | 34.8 KB | 0.20 µs |
+| #3 | `tier=2`, `grace_period=400`, `delta=0.001`, `tau=0.1`, `prep_scaler=standard`, `obs_splitter=gaussian`, `filter_hampel=False`, `split_criterion=gini`, `leaf_prediction=mc` | 56.64% | 53.98% | 61.0 KB | 0.80 µs |
 
-#### Kansho (Tier 8: 8 nós ativos, 49 utilizados, 128 nós no max)
+#### Kansho (Tier 4: 4 nós ativos, 47 utilizados, 64 nós no max)
 
 | Rank | Configuração | Acurácia (%) | F1 Macro (%) | RAM (KB) | Latência (µs) |
 | :---: | :--- | :---: | :---: | :---: | :---: |
-| #1 | `tier=8`, `grace_period=400`, `delta=0.01`, `tau=0.1`, `split_criterion=gini`, `leaf_prediction=mc`, `prep_scaler=None`, `obs_splitter=gaussian`, `filter_hampel=False` | 64.64% | 60.41% | 135.8 KB | 0.44 µs |
-| #2 | `tier=8`, `grace_period=50`, `delta=0.001`, `tau=0.1`, `split_criterion=gini`, `leaf_prediction=nba`, `prep_scaler=None`, `obs_splitter=gaussian`, `filter_hampel=False` | 63.07% | 57.94% | 135.8 KB | 2.91 µs |
+| #1 | `tier=4`, `grace_period=50`, `delta=0.001`, `tau=0.1`, `split_criterion=gini`, `leaf_prediction=nba`, `prep_scaler=None`, `obs_splitter=gaussian`, `filter_hampel=False` | 60.35% | 55.80% | 68.5 KB | 1.61 µs |
+| #2 | `tier=4`, `grace_period=400`, `delta=0.001`, `tau=0.1`, `prep_scaler=standard`, `obs_splitter=gaussian`, `filter_hampel=False`, `split_criterion=gini`, `leaf_prediction=mc` | 60.67% | 58.20% | 94.7 KB | 0.79 µs |
+| #3 | `tier=4`, `grace_period=400`, `delta=0.01`, `tau=0.1`, `split_criterion=gini`, `leaf_prediction=mc`, `prep_scaler=None`, `obs_splitter=gaussian`, `filter_hampel=False` | 62.95% | 58.09% | 68.5 KB | 0.36 µs |
+
+#### Kansho (Tier 8: 8 nós ativos, 77 utilizados, 128 nós no max)
+
+| Rank | Configuração | Acurácia (%) | F1 Macro (%) | RAM (KB) | Latência (µs) |
+| :---: | :--- | :---: | :---: | :---: | :---: |
+| #1 | `tier=8`, `grace_period=50`, `delta=0.001`, `tau=0.1`, `split_criterion=gini`, `leaf_prediction=nba`, `prep_scaler=None`, `obs_splitter=gaussian`, `filter_hampel=False` | 63.07% | 57.94% | 135.8 KB | 2.91 µs |
+| #2 | `tier=8`, `grace_period=400`, `delta=0.01`, `tau=0.1`, `split_criterion=gini`, `leaf_prediction=mc`, `prep_scaler=None`, `obs_splitter=gaussian`, `filter_hampel=False` | 64.64% | 60.41% | 135.8 KB | 0.44 µs |
 | #3 | `tier=8`, `grace_period=50`, `delta=0.01`, `tau=0.15`, `prep_scaler=None`, `obs_splitter=gaussian`, `filter_hampel=False`, `split_criterion=gini`, `leaf_prediction=nba` | 59.83% | 56.03% | 135.8 KB | 1.49 µs |
 
-#### Kansho (Tier 16: 16 nós ativos, 95 utilizados, 256 nós no max)
+#### Kansho (Tier 16: 16 nós ativos, 99 utilizados, 256 nós no max)
 
 | Rank | Configuração | Acurácia (%) | F1 Macro (%) | RAM (KB) | Latência (µs) |
 | :---: | :--- | :---: | :---: | :---: | :---: |
-| #1 | `tier=16`, `grace_period=100`, `delta=1e-07`, `tau=0.15`, `prep_scaler=standard`, `obs_splitter=gaussian`, `filter_hampel=False`, `split_criterion=gini`, `leaf_prediction=nba` | 67.61% | 64.41% | 296.6 KB | 4.46 µs |
-| #2 | `tier=16`, `grace_period=400`, `delta=0.01`, `tau=0.1`, `split_criterion=gini`, `leaf_prediction=mc`, `prep_scaler=None`, `obs_splitter=gaussian`, `filter_hampel=False` | 65.08% | 61.60% | 270.4 KB | 0.74 µs |
-| #3 | `tier=16`, `grace_period=50`, `delta=0.001`, `tau=0.1`, `split_criterion=gini`, `leaf_prediction=nba`, `prep_scaler=None`, `obs_splitter=gaussian`, `filter_hampel=False` | 63.25% | 58.54% | 270.4 KB | 4.53 µs |
+| #1 | `tier=16`, `grace_period=50`, `delta=0.001`, `tau=0.1`, `split_criterion=gini`, `leaf_prediction=nba`, `prep_scaler=None`, `obs_splitter=gaussian`, `filter_hampel=False` | 63.25% | 58.54% | 270.4 KB | 4.53 µs |
+| #2 | `tier=16`, `grace_period=100`, `delta=1e-07`, `tau=0.15`, `prep_scaler=standard`, `obs_splitter=gaussian`, `filter_hampel=False`, `split_criterion=gini`, `leaf_prediction=nba` | 67.61% | 64.41% | 296.6 KB | 4.46 µs |
+| #3 | `tier=16`, `grace_period=400`, `delta=0.01`, `tau=0.1`, `split_criterion=gini`, `leaf_prediction=mc`, `prep_scaler=None`, `obs_splitter=gaussian`, `filter_hampel=False` | 65.08% | 61.60% | 270.4 KB | 0.74 µs |
 
-#### Kansho (Tier 40: 40 nós ativos, 207 utilizados, 1024 nós no max)
+#### Kansho (Tier 40: 40 nós ativos, 113 utilizados, 1024 nós no max)
 
 | Rank | Configuração | Acurácia (%) | F1 Macro (%) | RAM (KB) | Latência (µs) |
 | :---: | :--- | :---: | :---: | :---: | :---: |
-| #1 | `tier=40`, `grace_period=50`, `delta=0.001`, `tau=0.15`, `prep_scaler=standard`, `obs_splitter=histogram`, `filter_hampel=False`, `split_criterion=gini`, `leaf_prediction=mc` | 66.96% | 63.30% | 714.0 KB | 2.63 µs |
-| #2 | `tier=40`, `grace_period=400`, `delta=0.01`, `tau=0.1`, `split_criterion=gini`, `leaf_prediction=mc`, `prep_scaler=None`, `obs_splitter=gaussian`, `filter_hampel=False` | 65.08% | 61.60% | 687.8 KB | 0.40 µs |
-| #3 | `tier=40`, `grace_period=50`, `delta=0.001`, `tau=0.1`, `split_criterion=gini`, `leaf_prediction=nba`, `prep_scaler=None`, `obs_splitter=gaussian`, `filter_hampel=False` | 63.95% | 59.88% | 687.8 KB | 3.89 µs |
+| #1 | `tier=40`, `grace_period=50`, `delta=0.001`, `tau=0.1`, `split_criterion=gini`, `leaf_prediction=nba`, `prep_scaler=None`, `obs_splitter=gaussian`, `filter_hampel=False` | 63.95% | 59.88% | 687.8 KB | 3.89 µs |
+| #2 | `tier=40`, `grace_period=50`, `delta=0.001`, `tau=0.15`, `prep_scaler=standard`, `obs_splitter=histogram`, `filter_hampel=False`, `split_criterion=gini`, `leaf_prediction=mc` | 66.96% | 63.30% | 714.0 KB | 2.63 µs |
+| #3 | `tier=40`, `grace_period=400`, `delta=0.01`, `tau=0.1`, `split_criterion=gini`, `leaf_prediction=mc`, `prep_scaler=None`, `obs_splitter=gaussian`, `filter_hampel=False` | 65.08% | 61.60% | 687.8 KB | 0.40 µs |
 
 #### River
 
@@ -261,7 +261,7 @@ Suíte automatizada de exploração de hiperparâmetros comparando **Kansho**, *
 ## Dataset: Airlines (Classification)
 
 - **Descrição:** Airlines Delay (Real, 7 features, 2 classes)
-- **Total de Experimentos (Trials):** 30
+- **Total de Experimentos (Trials):** 528
 
 ### 1. Melhores Modelos por Tier (Kansho) e Competidores (Top 3)
 
@@ -351,7 +351,7 @@ Suíte automatizada de exploração de hiperparâmetros comparando **Kansho**, *
 ## Dataset: Friedman #1 (Regression)
 
 - **Descrição:** Friedman #1 (Synthetic, 10 continuous, nonlinear target)
-- **Total de Experimentos (Trials):** 30
+- **Total de Experimentos (Trials):** 521
 
 ### 1. Melhores Modelos por Tier (Kansho) e Competidores (Top 3)
 
@@ -441,7 +441,7 @@ Suíte automatizada de exploração de hiperparâmetros comparando **Kansho**, *
 ## Dataset: Bikes (Regression)
 
 - **Descrição:** Bikes (Real, 12 features, demand count)
-- **Total de Experimentos (Trials):** 30
+- **Total de Experimentos (Trials):** 521
 
 ### 1. Melhores Modelos por Tier (Kansho) e Competidores (Top 3)
 
@@ -531,7 +531,7 @@ Suíte automatizada de exploração de hiperparâmetros comparando **Kansho**, *
 ## Dataset: Appliances Energy (Regression)
 
 - **Descrição:** Appliances Energy (Real, 28 features, building Wh)
-- **Total de Experimentos (Trials):** 24
+- **Total de Experimentos (Trials):** 374
 
 ### 1. Melhores Modelos por Tier (Kansho) e Competidores (Top 3)
 
@@ -605,7 +605,7 @@ Suíte automatizada de exploração de hiperparâmetros comparando **Kansho**, *
 ## Dataset: NYC Taxi (Regression)
 
 - **Descrição:** NYC Taxi (Real, 7 features, trip duration seconds)
-- **Total de Experimentos (Trials):** 30
+- **Total de Experimentos (Trials):** 521
 
 ### 1. Melhores Modelos por Tier (Kansho) e Competidores (Top 3)
 

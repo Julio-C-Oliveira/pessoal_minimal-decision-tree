@@ -1019,6 +1019,116 @@ def extract_report_configs(
     return extracted
 
 
+def update_report_metrics_in_place(
+    baseline_report_path: str,
+    all_results: Dict[str, List[Dict[str, Any]]],
+    output_report_path: str,
+):
+    """
+    Updates the metrics in-place for every model row in baseline_report_path,
+    preserving the exact original row ordering and parameter strings 1:1.
+    """
+    if not os.path.exists(baseline_report_path):
+        return
+
+    def make_param_key(engine: str, params: Dict[str, Any]) -> Tuple:
+        eng = "c11" if engine in ("c11", "kansho") else engine
+        return (eng, tuple(sorted((k, str(v)) for k, v in params.items())))
+
+    indexed = {}
+    for did, trials in all_results.items():
+        for t in trials:
+            k = make_param_key(t.get("engine", ""), t.get("params", {}))
+            indexed[(did, k)] = t
+
+    dataset_map = {
+        "SEA": "sea",
+        "Electricity": "electricity",
+        "Forest Covertype": "covertype",
+        "Airlines": "airlines",
+        "Friedman #1": "friedman",
+        "Bikes": "bikes",
+        "Appliances Energy": "appliances_energy",
+        "NYC Taxi": "nyc_taxi",
+    }
+
+    current_dataset = None
+    current_engine = "kansho"
+    task = "classification"
+    out_lines = []
+
+    with open(baseline_report_path, "r", encoding="utf-8") as f:
+        lines = f.readlines()
+
+    for line in lines:
+        line_s = line.rstrip("\r\n")
+        if line_s.startswith("## Dataset:"):
+            for name, did in dataset_map.items():
+                if name in line_s:
+                    current_dataset = did
+                    break
+            task = "regression" if ("Regression" in line_s) else "classification"
+            current_engine = "kansho"
+            out_lines.append(line_s)
+        elif line_s.startswith("#### Kansho"):
+            current_engine = "kansho"
+            out_lines.append(line_s)
+        elif line_s.startswith("#### River"):
+            current_engine = "river"
+            out_lines.append(line_s)
+        elif line_s.startswith("#### Sklearn"):
+            current_engine = "sklearn"
+            out_lines.append(line_s)
+        elif line_s.startswith("| #"):
+            parts = [p.strip() for p in line_s.split("|")]
+            if len(parts) >= 7:
+                rank = parts[1]
+                cfg_str = parts[2]
+                tokens = [t.strip().strip("`") for t in cfg_str.split(",") if "=" in t]
+                d = {}
+                for tok in tokens:
+                    k, v = tok.split("=", 1)
+                    k = k.strip()
+                    v = v.strip()
+                    if v == "None":
+                        d[k] = None
+                    elif v == "True":
+                        d[k] = True
+                    elif v == "False":
+                        d[k] = False
+                    else:
+                        try:
+                            if "." in v or "e" in v.lower():
+                                d[k] = float(v)
+                            else:
+                                d[k] = int(v)
+                        except ValueError:
+                            d[k] = v
+                pk = make_param_key(current_engine, d)
+                matched = indexed.get((current_dataset, pk))
+                if matched and current_engine == "kansho":
+                    ram = matched.get("intra_train_ram_kb", 0.0)
+                    lat = matched.get("avg_us_per_sample", 0.0)
+                    if task == "classification":
+                        acc = matched.get("holdout_acc", 0.0)
+                        f1 = matched.get("f1_macro", 0.0)
+                        new_line = f"| {rank} | {cfg_str} | {acc:.2f}% | {f1:.2f}% | {ram:.1f} KB | {lat:.2f} µs |"
+                    else:
+                        mae = matched.get("holdout_mae", 0.0)
+                        r2 = matched.get("holdout_r2", 0.0)
+                        new_line = f"| {rank} | {cfg_str} | {mae:.4f} | {r2:.4f} | {ram:.1f} KB | {lat:.2f} µs |"
+                    out_lines.append(new_line)
+                else:
+                    out_lines.append(line_s)
+            else:
+                out_lines.append(line_s)
+        else:
+            out_lines.append(line_s)
+
+    with open(output_report_path, "w", encoding="utf-8") as f:
+        f.write("\n".join(out_lines) + "\n")
+
+
 def run_tuning_suite(
     data_dir: str,
     output_report: str,
@@ -1056,6 +1166,9 @@ def run_tuning_suite(
 
         backup_path = output_json.replace(".json", ".backup.json")
         shutil.copyfile(output_json, backup_path)
+        backup_report_path = output_report.replace(".md", ".backup.md")
+        if os.path.exists(output_report):
+            shutil.copyfile(output_report, backup_report_path)
         print("================================================================================")
         print(" REPLAY MODE: Re-executando configurações do relatório")
         print(f" Backup de segurança salvo em: {backup_path}")
@@ -1193,11 +1306,14 @@ def run_tuning_suite(
             with open(output_json, "w", encoding="utf-8") as f:
                 json.dump(all_results, f, indent=2)
 
-            report_view = {
-                did: [t for t in d_trials if make_param_key(t.get("engine", ""), t.get("params", {})) in valid_report_keys.get(did, set())]
-                for did, d_trials in all_results.items()
-            }
-            generate_markdown_report(report_view, output_report)
+            if os.path.exists(backup_report_path):
+                update_report_metrics_in_place(backup_report_path, all_results, output_report)
+            else:
+                report_view = {
+                    did: [t for t in d_trials if make_param_key(t.get("engine", ""), t.get("params", {})) in valid_report_keys.get(did, set())]
+                    for did, d_trials in all_results.items()
+                }
+                generate_markdown_report(report_view, output_report)
             print(f"  [✔] Checkpoint: Results and Report updated for {d_name}.")
 
         print(f"\nFinal replayed results saved to JSON: {output_json}")
