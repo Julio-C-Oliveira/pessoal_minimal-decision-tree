@@ -97,6 +97,17 @@ Para lançar uma nova versão oficial no GitHub:
 
 ## 4.1 Histórico de Releases (Changelog)
 
+### v0.3.1 (2026-11-11) — Otimização de RAM em Drift e Observadores (Entregas 7.4 e 7.5)
+- **Desacoplamento de Drift em Pool Dedicado (`ht_drift_pool_t`) (Hipótese 3 / Entrega 7.4):**
+  - Migração de `node_drift[HT_MAX_NODES]` do interior de `ht_node_t` para um pool independente e compacto de 128 instâncias `ADWIN2` (`ht_drift_pool_t drift_pool`), referenciado por índice `drift_idx` (`uint8_t`, com sentinela `0xFF`).
+  - Redução física de `sizeof(ht_tree_t)` de $524,9\text{ KB}$ para **$460,9\text{ KB}$**, economizando **$64\text{ KB}$ de SRAM estática em `float32`** e **$98\text{ KB}$ em `double64`**.
+  - Reutilização transparente do descritor de drift no split de folhas que transicionam para nós internos, preservando monitoramento de subárvores e substituição adaptativa em HAT/HAT-R.
+- **União de Cabeçalho em `ht_leaf_stats_t` e Bounding Box Única em `ht_gaussian_obs_t` (Hipóteses 4 & 5 / Entrega 7.5):**
+  - Unificação dos campos mutuamente exclusivos de classificação (NBA `mc_correct_weight`, `nb_correct_weight`) e regressão (fMSE/SGD `sample_count`, `sum_y`, `sum_sq_y`) sob uma união anônima em `ht_leaf_stats_t`.
+  - Fatoração da bounding box numérica: os limites `min_val` e `max_val` foram promovidos para o nível de atributo em `ht_gaussian_obs_t`, reduzindo a tupla por classe para apenas $12\text{ bytes}$ (`weight`, `mean`, `var_sum` em `ht_gaussian_class_stat_t`).
+  - Redução de `sizeof(ht_gaussian_obs_t)` de $80\text{ B}$ para **$56\text{ B}$** por atributo em `float32` ($160\text{ B}$ para **$112\text{ B}$** em `double64`), proporcionando uma redução adicional de **$3,84\text{ KB}$** de SRAM em `stats_pool` e desacoplando `ht_scaler_stat_t` em `ht_prep`.
+- **Suíte de Testes:** 118 testes unitários e de integração 100% aprovados (230.133 asserções) com zero warnings em `float32` e `double64`.
+
 ### v0.3.0 (2026-11-11) — Otimização Extrema de Memória SRAM (Free-lists Intrusivas e Topologia Assimétrica)
 - **Free-lists Intrusivas em `ht_memory_pool_t` (Hipótese 1 / Entrega 7.2):**
   - Eliminação completa dos vetores externos de pilha `free_nodes[HT_MAX_NODES]` e `free_stats[HT_MAX_ACTIVE_LEAVES]`, gravando os ponteiros intrusivos `next_free` diretamente dentro das estruturas inativas (`node_pool[idx].free_state.next_free` e `stats_pool[idx].next_free`).
