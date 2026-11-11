@@ -28,33 +28,14 @@ void ht_gaussian_update(ht_gaussian_obs_t *obs,
         return;
     }
 
-    /* Check if this is the first sample observed for this feature */
-    bool has_prev = false;
-    for (uint8_t c = 0; c < HT_MAX_CLASSES; ++c) {
-        if (obs->classes[c].count > (ht_float_t)0.0) {
-            has_prev = true;
-            break;
-        }
-    }
-
-    if (!has_prev) {
-        obs->min_val = val;
-        obs->max_val = val;
-    } else {
-        if (val < obs->min_val) {
-            obs->min_val = val;
-        }
-        if (val > obs->max_val) {
-            obs->max_val = val;
-        }
-    }
-
     ht_gaussian_class_stat_t *o = &obs->classes[class_idx];
 
     if (o->count <= (ht_float_t)0.0) {
         o->count = weight;
         o->mean = val;
         o->m2 = (ht_float_t)0.0;
+        o->min_val = val;
+        o->max_val = val;
     } else {
         ht_float_t old_count = o->count;
         ht_float_t new_count = old_count + weight;
@@ -64,6 +45,13 @@ void ht_gaussian_update(ht_gaussian_obs_t *obs,
         ht_float_t delta2 = val - o->mean;
         o->m2 += weight * delta * delta2;
         o->count = new_count;
+
+        if (val < o->min_val) {
+            o->min_val = val;
+        }
+        if (val > o->max_val) {
+            o->max_val = val;
+        }
     }
 }
 
@@ -152,25 +140,32 @@ uint8_t ht_gaussian_split_suggestions(const ht_gaussian_obs_t *obs,
     }
 
     uint8_t max_c = (n_classes < HT_MAX_CLASSES) ? n_classes : (uint8_t)HT_MAX_CLASSES;
+    ht_float_t min_val = HT_INFINITY;
+    ht_float_t max_val = -HT_INFINITY;
     bool found = false;
 
     for (uint8_t c = 0; c < max_c; ++c) {
         if (obs->classes[c].count > (ht_float_t)0.0) {
+            if (obs->classes[c].min_val < min_val) {
+                min_val = obs->classes[c].min_val;
+            }
+            if (obs->classes[c].max_val > max_val) {
+                max_val = obs->classes[c].max_val;
+            }
             found = true;
-            break;
         }
     }
 
-    if (!found || obs->min_val >= obs->max_val) {
+    if (!found || min_val >= max_val) {
         return 0;
     }
 
-    ht_float_t bin_size = (obs->max_val - obs->min_val) / (ht_float_t)(HT_GAUSSIAN_SPLITS + 1);
+    ht_float_t bin_size = (max_val - min_val) / (ht_float_t)(HT_GAUSSIAN_SPLITS + 1);
     uint8_t count = 0;
 
     for (uint8_t i = 0; i < HT_GAUSSIAN_SPLITS; ++i) {
-        ht_float_t split_val = obs->min_val + bin_size * (ht_float_t)(i + 1);
-        if (split_val > obs->min_val && split_val < obs->max_val) {
+        ht_float_t split_val = min_val + bin_size * (ht_float_t)(i + 1);
+        if (split_val > min_val && split_val < max_val) {
             splits_out[count++] = split_val;
         }
     }
@@ -201,33 +196,23 @@ void ht_gaussian_binary_split_dists(const ht_gaussian_obs_t *obs,
 
     uint8_t max_c = (n_classes < HT_MAX_CLASSES) ? n_classes : (uint8_t)HT_MAX_CLASSES;
 
-    /* Global bounding box check:
-     * If split_val is below feature min_val, all weight goes to right branch.
-     * If split_val is at or above feature max_val, all weight goes to left branch. */
-    if (split_val < obs->min_val) {
-        for (uint8_t c = 0; c < max_c; ++c) {
-            rhs_dist[c] = (obs->classes[c].count > (ht_float_t)0.0) ? obs->classes[c].count : (ht_float_t)0.0;
-        }
-        return;
-    }
-    if (split_val >= obs->max_val) {
-        for (uint8_t c = 0; c < max_c; ++c) {
-            lhs_dist[c] = (obs->classes[c].count > (ht_float_t)0.0) ? obs->classes[c].count : (ht_float_t)0.0;
-        }
-        return;
-    }
-
     for (uint8_t c = 0; c < max_c; ++c) {
         if (obs->classes[c].count <= (ht_float_t)0.0) {
             continue;
         }
 
-        ht_float_t stddev = ht_gaussian_stddev(&obs->classes[c]);
-        ht_float_t cdf = ht_normal_cdf(split_val, obs->classes[c].mean, stddev);
-        ht_float_t left_w = cdf * obs->classes[c].count;
-        lhs_dist[c] = left_w;
-        ht_float_t right_w = obs->classes[c].count - left_w;
-        rhs_dist[c] = (right_w > (ht_float_t)0.0) ? right_w : (ht_float_t)0.0;
+        if (split_val < obs->classes[c].min_val) {
+            rhs_dist[c] = obs->classes[c].count;
+        } else if (split_val >= obs->classes[c].max_val) {
+            lhs_dist[c] = obs->classes[c].count;
+        } else {
+            ht_float_t stddev = ht_gaussian_stddev(&obs->classes[c]);
+            ht_float_t cdf = ht_normal_cdf(split_val, obs->classes[c].mean, stddev);
+            ht_float_t left_w = cdf * obs->classes[c].count;
+            lhs_dist[c] = left_w;
+            ht_float_t right_w = obs->classes[c].count - left_w;
+            rhs_dist[c] = (right_w > (ht_float_t)0.0) ? right_w : (ht_float_t)0.0;
+        }
     }
 }
 

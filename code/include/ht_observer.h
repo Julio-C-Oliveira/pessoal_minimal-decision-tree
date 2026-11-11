@@ -73,7 +73,7 @@ void ht_gaussian_init(ht_gaussian_obs_t *obs);
  * @brief Incremental update using Welford's algorithm for 1 (feature, class) pair.
  *
  * Updates sample weight count (n_c), mean (mu_c), centered sum of squares (M2_c),
- * and observed global feature range [min_val, max_val]. Safely ignores NaN values, weights <= 0,
+ * and observed class range [min_val, max_val]. Safely ignores NaN values, weights <= 0,
  * and class indices >= HT_MAX_CLASSES.
  *
  * @param obs Pointer to Gaussian observer for the feature.

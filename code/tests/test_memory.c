@@ -73,9 +73,9 @@ static void test_stats_alloc_single_and_zeroed(void) {
             HT_ASSERT_FLOAT_EQ(stats->observers[f].num.classes[c].count, (ht_float_t)0.0);
             HT_ASSERT_FLOAT_EQ(stats->observers[f].num.classes[c].mean, (ht_float_t)0.0);
             HT_ASSERT_FLOAT_EQ(stats->observers[f].num.classes[c].m2, (ht_float_t)0.0);
+            HT_ASSERT_FLOAT_EQ(stats->observers[f].num.classes[c].min_val, (ht_float_t)0.0);
+            HT_ASSERT_FLOAT_EQ(stats->observers[f].num.classes[c].max_val, (ht_float_t)0.0);
         }
-        HT_ASSERT_FLOAT_EQ(stats->observers[f].num.min_val, (ht_float_t)0.0);
-        HT_ASSERT_FLOAT_EQ(stats->observers[f].num.max_val, (ht_float_t)0.0);
     }
 
     /* Free stats and verify recovery */
@@ -351,8 +351,8 @@ static void test_memory_stress_recycling_100k(void) {
 static void test_memory_unified_structures_and_sizes(void) {
 #ifndef HT_USE_DOUBLE
     HT_ASSERT_EQ(sizeof(ht_node_t), 20);
-    HT_ASSERT_EQ(sizeof(ht_gaussian_class_stat_t), 12);
-    HT_ASSERT_EQ(sizeof(ht_gaussian_obs_t), 56);
+    HT_ASSERT_EQ(sizeof(ht_gaussian_class_stat_t), 20);
+    HT_ASSERT_EQ(sizeof(ht_gaussian_obs_t), 80);
     HT_ASSERT_EQ(sizeof(ht_var_stat_t), 12);
     HT_ASSERT_EQ(sizeof(ht_reg_num_slot_t), 16);
     HT_ASSERT_EQ(sizeof(ht_reg_numeric_obs_t), 80);
@@ -362,8 +362,8 @@ static void test_memory_unified_structures_and_sizes(void) {
     HT_ASSERT_EQ(sizeof(ht_memory_pool_t), 430088);
 #else
     HT_ASSERT_EQ(sizeof(ht_node_t), 40);
-    HT_ASSERT_EQ(sizeof(ht_gaussian_class_stat_t), 24);
-    HT_ASSERT_EQ(sizeof(ht_gaussian_obs_t), 112);
+    HT_ASSERT_EQ(sizeof(ht_gaussian_class_stat_t), 40);
+    HT_ASSERT_EQ(sizeof(ht_gaussian_obs_t), 160);
     HT_ASSERT_EQ(sizeof(ht_var_stat_t), 24);
     HT_ASSERT_EQ(sizeof(ht_reg_num_slot_t), 32);
     HT_ASSERT_EQ(sizeof(ht_reg_numeric_obs_t), 160);

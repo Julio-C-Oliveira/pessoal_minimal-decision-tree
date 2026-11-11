@@ -17,8 +17,8 @@ static void test_gaussian_init(void) {
     obs.classes[0].count = (ht_float_t)10.0;
     obs.classes[0].mean = (ht_float_t)5.0;
     obs.classes[0].m2 = (ht_float_t)2.0;
-    obs.min_val = (ht_float_t)1.0;
-    obs.max_val = (ht_float_t)9.0;
+    obs.classes[0].min_val = (ht_float_t)1.0;
+    obs.classes[0].max_val = (ht_float_t)9.0;
 
     ht_gaussian_init(&obs);
 
@@ -26,9 +26,9 @@ static void test_gaussian_init(void) {
         HT_ASSERT_FLOAT_EQ(obs.classes[c].count, (ht_float_t)0.0);
         HT_ASSERT_FLOAT_EQ(obs.classes[c].mean, (ht_float_t)0.0);
         HT_ASSERT_FLOAT_EQ(obs.classes[c].m2, (ht_float_t)0.0);
+        HT_ASSERT_FLOAT_EQ(obs.classes[c].min_val, (ht_float_t)0.0);
+        HT_ASSERT_FLOAT_EQ(obs.classes[c].max_val, (ht_float_t)0.0);
     }
-    HT_ASSERT_FLOAT_EQ(obs.min_val, (ht_float_t)0.0);
-    HT_ASSERT_FLOAT_EQ(obs.max_val, (ht_float_t)0.0);
 }
 
 static void test_gaussian_welford_analytical(void) {
@@ -58,8 +58,8 @@ static void test_gaussian_welford_analytical(void) {
     HT_ASSERT_FLOAT_EQ(obs.classes[0].count, (ht_float_t)8.0);
     HT_ASSERT_FLOAT_NEAR(obs.classes[0].mean, (ht_float_t)5.0, 1e-5);
     HT_ASSERT_FLOAT_NEAR(obs.classes[0].m2, (ht_float_t)32.0, 1e-4);
-    HT_ASSERT_FLOAT_EQ(obs.min_val, (ht_float_t)2.0);
-    HT_ASSERT_FLOAT_EQ(obs.max_val, (ht_float_t)9.0);
+    HT_ASSERT_FLOAT_EQ(obs.classes[0].min_val, (ht_float_t)2.0);
+    HT_ASSERT_FLOAT_EQ(obs.classes[0].max_val, (ht_float_t)9.0);
 
     ht_float_t expected_var = (ht_float_t)(32.0 / 7.0);
     ht_float_t calc_var = ht_gaussian_variance(&obs.classes[0]);
@@ -269,14 +269,15 @@ static void test_gaussian_binary_split_dists(void) {
     obs.classes[0].count = (ht_float_t)100.0;
     obs.classes[0].mean = (ht_float_t)15.0;
     obs.classes[0].m2 = (ht_float_t)(99.0 * 4.0); /* variance = 4.0, std = 2.0 */
+    obs.classes[0].min_val = (ht_float_t)10.0;
+    obs.classes[0].max_val = (ht_float_t)20.0;
 
     /* Setup class 1: range [25, 35], mean = 30, count = 50 */
     obs.classes[1].count = (ht_float_t)50.0;
     obs.classes[1].mean = (ht_float_t)30.0;
     obs.classes[1].m2 = (ht_float_t)(49.0 * 1.0); /* variance = 1.0, std = 1.0 */
-
-    obs.min_val = (ht_float_t)10.0;
-    obs.max_val = (ht_float_t)35.0;
+    obs.classes[1].min_val = (ht_float_t)25.0;
+    obs.classes[1].max_val = (ht_float_t)35.0;
 
     ht_float_t lhs[HT_MAX_CLASSES];
     ht_float_t rhs[HT_MAX_CLASSES];
@@ -467,9 +468,9 @@ static void test_observers_in_leaf_stats_pool(void) {
             HT_ASSERT_FLOAT_EQ(stats->observers[f].num.classes[c].count, (ht_float_t)0.0);
             HT_ASSERT_FLOAT_EQ(stats->observers[f].num.classes[c].mean, (ht_float_t)0.0);
             HT_ASSERT_FLOAT_EQ(stats->observers[f].num.classes[c].m2, (ht_float_t)0.0);
+            HT_ASSERT_FLOAT_EQ(stats->observers[f].num.classes[c].min_val, (ht_float_t)0.0);
+            HT_ASSERT_FLOAT_EQ(stats->observers[f].num.classes[c].max_val, (ht_float_t)0.0);
         }
-        HT_ASSERT_FLOAT_EQ(stats->observers[f].num.min_val, (ht_float_t)0.0);
-        HT_ASSERT_FLOAT_EQ(stats->observers[f].num.max_val, (ht_float_t)0.0);
     }
 
     /* Feature 0 is numeric: update Gaussian observers */

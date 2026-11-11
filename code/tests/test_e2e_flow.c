@@ -314,9 +314,9 @@ static void test_e2e_stream_observer_pipeline(void) {
 
     /* 2. Verify all numeric feature observers */
     for (uint8_t f = 0; f < n_numeric; ++f) {
-        HT_ASSERT(stats->observers[f].num.min_val < stats->observers[f].num.max_val);
         for (uint8_t c = 0; c < n_classes; ++c) {
             ht_gaussian_class_stat_t *g = &stats->observers[f].num.classes[c];
+            HT_ASSERT(g->min_val < g->max_val);
             if (f == 11) {
                 /* Samples with NaN were safely skipped */
                 HT_ASSERT(g->count < (ht_float_t)200.0 && g->count >= (ht_float_t)190.0);
