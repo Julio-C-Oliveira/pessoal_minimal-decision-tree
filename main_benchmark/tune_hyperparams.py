@@ -789,7 +789,13 @@ def generate_markdown_report(
             
             # Kansho per Tier
             for tier in sorted(by_tier.keys()):
-                f.write(f"#### Kansho (Tier {tier})\n\n")
+                leaves, nodes = TIER_MAP.get(tier, (tier, tier * 16))
+                if is_high_dim and tier > 16:
+                    leaves = 40
+                    nodes = 1024
+                active_str = f"{leaves} nó ativo" if leaves == 1 else f"{leaves} nós ativos"
+                total_str = f"{nodes} nó no total" if nodes == 1 else f"{nodes} nós no total"
+                f.write(f"#### Kansho (Tier {tier}: {active_str}, {total_str})\n\n")
                 if task == "classification":
                     f.write("| Rank | Configuração | Acurácia (%) | F1 Macro (%) | RAM (KB) | Latência (µs) |\n")
                     f.write("| :---: | :--- | :---: | :---: | :---: | :---: |\n")
