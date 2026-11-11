@@ -61,19 +61,21 @@ typedef struct {
     ht_var_stat_t cat_stats[HT_MAX_CATEGORIES];
 } ht_reg_categorical_obs_t;
 
+#define HT_NODE_FLAGS_OFFSET (sizeof(ht_float_t) * (HT_MAX_CLASSES >= 4 ? HT_MAX_CLASSES : 4) + sizeof(uint16_t))
+
 /**
  * @brief Permanent structural node in the decision tree (asymmetric leaf vs branch union).
  *
  * Implements Phase 7 Hypothesis 2 (H2): Asymmetric Topology Union.
  * In a Hoeffding tree, a node is strictly an active/inactive LEAF or an internal BRANCH,
  * never both simultaneously:
- * - LEAF: class_counts[HT_MAX_CLASSES] (or reg_stats) + stats_idx (18 bytes).
+ * - LEAF: class_counts[HT_MAX_CLASSES] (or reg_stats) + stats_idx.
  * - BRANCH: split_val (threshold / cat_val) + left_child + right_child + feature_idx (9-13 bytes).
  * - INACTIVE: next_free intrusive free-list link (2 bytes).
- * - HEADER: flags and reserved placed at fixed offset 18 (float32) / 38 (float64), ensuring
- *   flags never collides with leaf or branch payload.
+ * - HEADER: flags and reserved placed at offset HT_NODE_FLAGS_OFFSET, ensuring
+ *   flags never collides with leaf or branch payload regardless of HT_MAX_CLASSES macro.
  *
- * Sized at exactly 20 bytes in float32 and 40 bytes in float64 (saving 32 KB across 4096 nodes).
+ * Sized at exactly 20 bytes in float32 and 40 bytes in float64 with default HT_MAX_CLASSES=4.
  */
 typedef struct {
     union {
@@ -99,11 +101,7 @@ typedef struct {
         uint16_t next_free;
         /* Common node header at fixed offset ensuring flags never collides with payload */
         struct {
-#ifndef HT_USE_DOUBLE
-            uint8_t _pad_flags[18];
-#else
-            uint8_t _pad_flags[38];
-#endif
+            uint8_t _pad_flags[HT_NODE_FLAGS_OFFSET];
             uint8_t flags;
             uint8_t reserved;
         };
