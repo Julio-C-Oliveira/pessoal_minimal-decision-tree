@@ -33,6 +33,7 @@ import json
 import math
 import os
 import random
+import shutil
 import subprocess
 import sys
 import threading
@@ -960,6 +961,64 @@ def run_engine_trials(
 # Suite Orchestrator
 # ==============================================================================
 
+def extract_report_configs(
+    all_results: Dict[str, List[Dict[str, Any]]],
+    selected_datasets: List[str],
+    selected_engines: List[str],
+    top_k: int = 3,
+) -> Dict[str, Dict[str, List[Dict[str, Any]]]]:
+    """
+    Extracts the Top-K configurations per tier / engine currently published in the report.
+    Returns: {d_id: {'kansho': [params, ...], 'river': [params, ...], 'sklearn': [params, ...]}}
+    """
+    extracted: Dict[str, Dict[str, List[Dict[str, Any]]]] = {}
+    kansho_enabled = ("c11" in selected_engines or "kansho" in selected_engines or "all" in selected_engines)
+    river_enabled = ("river" in selected_engines or "all" in selected_engines)
+    sklearn_enabled = ("sklearn" in selected_engines or "all" in selected_engines)
+
+    for d_id, d_name, task, desc, is_high_dim in DATASETS_CONFIG:
+        if selected_datasets and d_id not in selected_datasets and "all" not in selected_datasets:
+            continue
+        trials = all_results.get(d_id, [])
+        if not trials:
+            continue
+
+        def sort_key(x):
+            if task == "classification":
+                return (x.get("f1_macro", 0.0), x.get("holdout_acc", 0.0), -x.get("avg_us_per_sample", 0.0))
+            else:
+                return (x.get("holdout_r2", -1e9), -x.get("holdout_rmse", 1e9), -x.get("avg_us_per_sample", 0.0))
+
+        dataset_extracted: Dict[str, List[Dict[str, Any]]] = {}
+
+        if kansho_enabled:
+            by_tier: Dict[int, List[Dict[str, Any]]] = {}
+            for t in trials:
+                if t.get("engine") in ("c11", "kansho"):
+                    tier = t.get("params", {}).get("tier", 0)
+                    by_tier.setdefault(tier, []).append(t)
+            c11_configs: List[Dict[str, Any]] = []
+            for tier in sorted(by_tier.keys()):
+                by_tier[tier].sort(key=sort_key, reverse=True)
+                for t in by_tier[tier][:top_k]:
+                    c11_configs.append(t["params"])
+            dataset_extracted["kansho"] = c11_configs
+
+        if river_enabled:
+            river_trials = [t for t in trials if t.get("engine") == "river"]
+            river_trials.sort(key=sort_key, reverse=True)
+            dataset_extracted["river"] = [t["params"] for t in river_trials[:top_k]]
+
+        if sklearn_enabled:
+            sklearn_trials = [t for t in trials if t.get("engine") == "sklearn"]
+            sklearn_trials.sort(key=sort_key, reverse=True)
+            dataset_extracted["sklearn"] = [t["params"] for t in sklearn_trials[:top_k]]
+
+        extracted[d_id] = dataset_extracted
+
+    return extracted
+
+
 def run_tuning_suite(
     data_dir: str,
     output_report: str,
@@ -972,7 +1031,155 @@ def run_tuning_suite(
     jobs: int,
     trials_per_tier: int = 30,
     target_tier: Optional[int] = None,
+    replay_report: bool = False,
+    report_only: bool = False,
 ):
+    if report_only:
+        if not os.path.exists(output_json):
+            print(f"[Error: JSON file '{output_json}' not found. Cannot generate report.]")
+            sys.exit(1)
+        with open(output_json, "r", encoding="utf-8") as f:
+            all_results = json.load(f)
+        generate_markdown_report(all_results, output_report)
+        print(f"[✔] Report generated successfully from {output_json} -> {output_report}")
+        return
+
+    norm_engines = [e.strip().lower() for e in selected_engines]
+    kansho_enabled = ("c11" in norm_engines or "kansho" in norm_engines or "all" in norm_engines)
+    river_enabled = ("river" in norm_engines or "all" in norm_engines)
+    sklearn_enabled = ("sklearn" in norm_engines or "all" in norm_engines)
+
+    if replay_report:
+        if not os.path.exists(output_json):
+            print(f"[Error: JSON file '{output_json}' not found for replay mode.]")
+            sys.exit(1)
+
+        backup_path = output_json.replace(".json", ".backup.json")
+        shutil.copyfile(output_json, backup_path)
+        print("================================================================================")
+        print(" REPLAY MODE: Re-executando configurações do relatório")
+        print(f" Backup de segurança salvo em: {backup_path}")
+        print("================================================================================")
+
+        with open(output_json, "r", encoding="utf-8") as f:
+            all_results = json.load(f)
+
+        report_configs = extract_report_configs(
+            all_results,
+            selected_datasets=selected_datasets,
+            selected_engines=norm_engines,
+            top_k=3,
+        )
+
+        total_planned_trials = sum(
+            len(cfgs)
+            for d_dict in report_configs.values()
+            for cfgs in d_dict.values()
+        )
+
+        tracker = ProgressTracker(total_planned_trials)
+
+        print(f" Datasets:     {', '.join(selected_datasets)} ({len(report_configs)} com ensaios para replay)")
+        print(f" Engines:      {', '.join(selected_engines)}")
+        print(f" Parallelism:  {jobs} job(s) / núcleo(s)")
+        print(f" Total Trials: {total_planned_trials} ensaios para replay")
+        print(f" Report Dest:  {output_report}")
+        print(f" JSON Dest:    {output_json}")
+        print("================================================================================")
+
+        for d_id, d_name, task, desc, is_high_dim in DATASETS_CONFIG:
+            if d_id not in report_configs:
+                continue
+
+            d_cfgs = report_configs[d_id]
+            print(f"\n================================================================================")
+            print(f" >>> Dataset: {d_name} [{task.upper()}] - {desc}")
+            print(f"================================================================================")
+
+            train_csv = os.path.join(data_dir, f"{d_id}_train.csv")
+            test_csv = os.path.join(data_dir, f"{d_id}_test.csv")
+
+            if not os.path.exists(train_csv) or not os.path.exists(test_csv):
+                print(f"  Dataset files not found for {d_id}. Running prepare_datasets.py...")
+                prep_script = os.path.join(os.path.dirname(__file__), "prepare_datasets.py")
+                subprocess.run([PYTHON_BIN, prep_script, "--outdir", data_dir, "--dataset", d_id], check=True)
+
+            y_test, _ = load_test_ground_truth(test_csv, task)
+            replayed_trials: List[Dict[str, Any]] = []
+
+            # 1. Kansho
+            if "kansho" in d_cfgs and d_cfgs["kansho"]:
+                c11_cfgs = d_cfgs["kansho"]
+                print(f"  [1/3] Replay Kansho ({len(c11_cfgs)} ensaios, {jobs} workers)...")
+                c11_trials = run_engine_trials(
+                    "kansho",
+                    lambda cfg: run_trial_c11(train_csv, test_csv, task, cfg, y_test, is_high_dim),
+                    c11_cfgs,
+                    task,
+                    jobs,
+                    dataset_name=d_name,
+                    tracker=tracker,
+                )
+                replayed_trials.extend(c11_trials)
+
+            # 2. River
+            if "river" in d_cfgs and d_cfgs["river"]:
+                r_cfgs = d_cfgs["river"]
+                print(f"  [2/3] Replay River ({len(r_cfgs)} ensaios, {jobs} workers)...")
+                river_trials = run_engine_trials(
+                    "river",
+                    lambda cfg: run_trial_river(train_csv, test_csv, task, cfg),
+                    r_cfgs,
+                    task,
+                    jobs,
+                    dataset_name=d_name,
+                    tracker=tracker,
+                )
+                replayed_trials.extend(river_trials)
+
+            # 3. Sklearn
+            if "sklearn" in d_cfgs and d_cfgs["sklearn"]:
+                sk_cfgs = d_cfgs["sklearn"]
+                print(f"  [3/3] Replay Sklearn ({len(sk_cfgs)} ensaios, {jobs} workers)...")
+                sklearn_trials = run_engine_trials(
+                    "sklearn",
+                    lambda cfg: run_trial_sklearn(train_csv, test_csv, task, cfg),
+                    sk_cfgs,
+                    task,
+                    jobs,
+                    dataset_name=d_name,
+                    tracker=tracker,
+                )
+                replayed_trials.extend(sklearn_trials)
+
+            # In-place update in all_results[d_id]
+            def make_param_key(engine: str, params: Dict[str, Any]) -> Tuple:
+                eng = "c11" if engine in ("c11", "kansho") else engine
+                return (eng, tuple(sorted((k, str(v)) for k, v in params.items())))
+
+            existing = all_results.get(d_id, [])
+            key_to_idx = {make_param_key(t.get("engine", ""), t.get("params", {})): idx for idx, t in enumerate(existing)}
+
+            for rt in replayed_trials:
+                k = make_param_key(rt.get("engine", ""), rt.get("params", {}))
+                if k in key_to_idx:
+                    existing[key_to_idx[k]] = rt
+                else:
+                    existing.append(rt)
+
+            all_results[d_id] = existing
+
+            # Incremental save after each dataset
+            os.makedirs(os.path.dirname(output_json), exist_ok=True)
+            with open(output_json, "w", encoding="utf-8") as f:
+                json.dump(all_results, f, indent=2)
+            generate_markdown_report(all_results, output_report)
+            print(f"  [✔] Checkpoint: Results and Report updated for {d_name}.")
+
+        print(f"\nFinal replayed results saved to JSON: {output_json}")
+        print(f"Final Markdown report updated: {output_report}")
+        return
+
     # Pre-calculate total planned trials across datasets and engines
     active_datasets = [
         d for d in DATASETS_CONFIG
@@ -1135,6 +1342,8 @@ def main():
     parser.add_argument("--n-iter", type=int, default=30, help="Number of random search iterations per engine (legacy fallback).")
     parser.add_argument("--grid", action="store_true", help="Perform full exhaustive grid search.")
     parser.add_argument("--jobs", type=int, default=12, help="Number of parallel jobs.")
+    parser.add_argument("--replay-report", action="store_true", help="Re-run only the Top-3 configurations per tier/engine currently published in hyperparam_report.md.")
+    parser.add_argument("--report-only", action="store_true", help="Only re-render hyperparam_report.md from hyperparam_results.json without running trials.")
     
     args = parser.parse_args()
     
@@ -1160,6 +1369,8 @@ def main():
         args.jobs,
         args.trials_per_tier,
         target_tier,
+        args.replay_report,
+        args.report_only,
     )
 
 
