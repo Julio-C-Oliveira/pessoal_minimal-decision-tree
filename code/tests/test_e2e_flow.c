@@ -288,7 +288,7 @@ static void test_e2e_stream_observer_pipeline(void) {
             }
 
             /* Update Gaussian observer */
-            ht_gaussian_update(stats->observers[f].num, y, x[f].num, weight);
+            ht_gaussian_update(&stats->observers[f].num, y, x[f].num, weight);
         }
 
         /* Categorical features */
@@ -314,8 +314,9 @@ static void test_e2e_stream_observer_pipeline(void) {
 
     /* 2. Verify all numeric feature observers */
     for (uint8_t f = 0; f < n_numeric; ++f) {
+        HT_ASSERT(stats->observers[f].num.min_val < stats->observers[f].num.max_val);
         for (uint8_t c = 0; c < n_classes; ++c) {
-            ht_gaussian_obs_t *g = &stats->observers[f].num[c];
+            ht_gaussian_class_stat_t *g = &stats->observers[f].num.classes[c];
             if (f == 11) {
                 /* Samples with NaN were safely skipped */
                 HT_ASSERT(g->count < (ht_float_t)200.0 && g->count >= (ht_float_t)190.0);
@@ -328,7 +329,6 @@ static void test_e2e_stream_observer_pipeline(void) {
             ht_float_t var = ht_gaussian_variance(g);
             HT_ASSERT(HT_ISFINITE(var));
             HT_ASSERT(var > (ht_float_t)0.0);
-            HT_ASSERT(g->min_val < g->max_val);
 
             /* Verify conditional density and log-density */
             ht_float_t p = ht_gaussian_cond_proba(g, g->mean);
@@ -340,7 +340,7 @@ static void test_e2e_stream_observer_pipeline(void) {
 
         /* 3. Evaluate split candidates for this numeric feature */
         ht_float_t suggested_splits[HT_GAUSSIAN_SPLITS];
-        uint8_t n_splits = ht_gaussian_split_suggestions(stats->observers[f].num, n_classes, suggested_splits);
+        uint8_t n_splits = ht_gaussian_split_suggestions(&stats->observers[f].num, n_classes, suggested_splits);
         HT_ASSERT(n_splits > 0);
         HT_ASSERT(n_splits <= HT_GAUSSIAN_SPLITS);
 
@@ -350,10 +350,10 @@ static void test_e2e_stream_observer_pipeline(void) {
             ht_float_t lhs[HT_MAX_CLASSES];
             ht_float_t rhs[HT_MAX_CLASSES];
 
-            ht_gaussian_binary_split_dists(stats->observers[f].num, n_classes, split_threshold, lhs, rhs);
+            ht_gaussian_binary_split_dists(&stats->observers[f].num, n_classes, split_threshold, lhs, rhs);
 
             for (uint8_t c = 0; c < n_classes; ++c) {
-                ht_float_t expected_total = stats->observers[f].num[c].count;
+                ht_float_t expected_total = stats->observers[f].num.classes[c].count;
                 HT_ASSERT_FLOAT_NEAR(lhs[c] + rhs[c], expected_total, 1e-3);
                 HT_ASSERT(lhs[c] >= (ht_float_t)0.0);
                 HT_ASSERT(rhs[c] >= (ht_float_t)0.0);
@@ -403,7 +403,7 @@ static void test_e2e_stream_observer_pipeline(void) {
     cand.split_val.threshold = (ht_float_t)15.0;
     cand.merit = (ht_float_t)0.42;
     cand.is_categorical = 0;
-    ht_gaussian_binary_split_dists(stats->observers[0].num, n_classes, cand.split_val.threshold,
+    ht_gaussian_binary_split_dists(&stats->observers[0].num, n_classes, cand.split_val.threshold,
                                    cand.lhs_dist, cand.rhs_dist);
 
     HT_ASSERT_EQ(cand.feature_idx, 0);
@@ -459,8 +459,8 @@ static void test_e2e_split_decision_pipeline(void) {
         x0[3].cat = (int32_t)(i % 4);                    /* Category noise */
 
         root->class_counts[0] += (ht_float_t)1.0;
-        ht_gaussian_update(stats->observers[0].num, 0, x0[0].num, (ht_float_t)1.0);
-        ht_gaussian_update(stats->observers[1].num, 0, x0[1].num, (ht_float_t)1.0);
+        ht_gaussian_update(&stats->observers[0].num, 0, x0[0].num, (ht_float_t)1.0);
+        ht_gaussian_update(&stats->observers[1].num, 0, x0[1].num, (ht_float_t)1.0);
         ht_categorical_update(&stats->observers[2].cat, 0, x0[2].cat, (ht_float_t)1.0);
         ht_categorical_update(&stats->observers[3].cat, 0, x0[3].cat, (ht_float_t)1.0);
 
@@ -472,8 +472,8 @@ static void test_e2e_split_decision_pipeline(void) {
         x1[3].cat = (int32_t)(i % 4);                    /* Category noise */
 
         root->class_counts[1] += (ht_float_t)1.0;
-        ht_gaussian_update(stats->observers[0].num, 1, x1[0].num, (ht_float_t)1.0);
-        ht_gaussian_update(stats->observers[1].num, 1, x1[1].num, (ht_float_t)1.0);
+        ht_gaussian_update(&stats->observers[0].num, 1, x1[0].num, (ht_float_t)1.0);
+        ht_gaussian_update(&stats->observers[1].num, 1, x1[1].num, (ht_float_t)1.0);
         ht_categorical_update(&stats->observers[2].cat, 1, x1[2].cat, (ht_float_t)1.0);
         ht_categorical_update(&stats->observers[3].cat, 1, x1[3].cat, (ht_float_t)1.0);
     }

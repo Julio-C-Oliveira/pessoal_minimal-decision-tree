@@ -14,26 +14,26 @@
 
 static void test_gaussian_init(void) {
     ht_gaussian_obs_t obs;
-    obs.count = (ht_float_t)10.0;
-    obs.mean = (ht_float_t)5.0;
-    obs.m2 = (ht_float_t)2.0;
+    obs.classes[0].count = (ht_float_t)10.0;
+    obs.classes[0].mean = (ht_float_t)5.0;
+    obs.classes[0].m2 = (ht_float_t)2.0;
     obs.min_val = (ht_float_t)1.0;
     obs.max_val = (ht_float_t)9.0;
 
     ht_gaussian_init(&obs);
 
-    HT_ASSERT_FLOAT_EQ(obs.count, (ht_float_t)0.0);
-    HT_ASSERT_FLOAT_EQ(obs.mean, (ht_float_t)0.0);
-    HT_ASSERT_FLOAT_EQ(obs.m2, (ht_float_t)0.0);
+    for (uint8_t c = 0; c < HT_MAX_CLASSES; ++c) {
+        HT_ASSERT_FLOAT_EQ(obs.classes[c].count, (ht_float_t)0.0);
+        HT_ASSERT_FLOAT_EQ(obs.classes[c].mean, (ht_float_t)0.0);
+        HT_ASSERT_FLOAT_EQ(obs.classes[c].m2, (ht_float_t)0.0);
+    }
     HT_ASSERT_FLOAT_EQ(obs.min_val, (ht_float_t)0.0);
     HT_ASSERT_FLOAT_EQ(obs.max_val, (ht_float_t)0.0);
 }
 
 static void test_gaussian_welford_analytical(void) {
-    ht_gaussian_obs_t obs[HT_MAX_CLASSES];
-    for (uint8_t c = 0; c < HT_MAX_CLASSES; ++c) {
-        ht_gaussian_init(&obs[c]);
-    }
+    ht_gaussian_obs_t obs;
+    ht_gaussian_init(&obs);
 
     /* Known dataset: {2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0}
      * n = 8
@@ -52,29 +52,27 @@ static void test_gaussian_welford_analytical(void) {
     const uint8_t n_samples = sizeof(samples) / sizeof(samples[0]);
 
     for (uint8_t i = 0; i < n_samples; ++i) {
-        ht_gaussian_update(obs, 0, samples[i], (ht_float_t)1.0);
+        ht_gaussian_update(&obs, 0, samples[i], (ht_float_t)1.0);
     }
 
-    HT_ASSERT_FLOAT_EQ(obs[0].count, (ht_float_t)8.0);
-    HT_ASSERT_FLOAT_NEAR(obs[0].mean, (ht_float_t)5.0, 1e-5);
-    HT_ASSERT_FLOAT_NEAR(obs[0].m2, (ht_float_t)32.0, 1e-4);
-    HT_ASSERT_FLOAT_EQ(obs[0].min_val, (ht_float_t)2.0);
-    HT_ASSERT_FLOAT_EQ(obs[0].max_val, (ht_float_t)9.0);
+    HT_ASSERT_FLOAT_EQ(obs.classes[0].count, (ht_float_t)8.0);
+    HT_ASSERT_FLOAT_NEAR(obs.classes[0].mean, (ht_float_t)5.0, 1e-5);
+    HT_ASSERT_FLOAT_NEAR(obs.classes[0].m2, (ht_float_t)32.0, 1e-4);
+    HT_ASSERT_FLOAT_EQ(obs.min_val, (ht_float_t)2.0);
+    HT_ASSERT_FLOAT_EQ(obs.max_val, (ht_float_t)9.0);
 
     ht_float_t expected_var = (ht_float_t)(32.0 / 7.0);
-    ht_float_t calc_var = ht_gaussian_variance(&obs[0]);
+    ht_float_t calc_var = ht_gaussian_variance(&obs.classes[0]);
     HT_ASSERT_FLOAT_NEAR(calc_var, expected_var, 1e-4);
 
     ht_float_t expected_std = HT_SQRT(expected_var);
-    ht_float_t calc_std = ht_gaussian_stddev(&obs[0]);
+    ht_float_t calc_std = ht_gaussian_stddev(&obs.classes[0]);
     HT_ASSERT_FLOAT_NEAR(calc_std, expected_std, 1e-4);
 }
 
 static void test_gaussian_welford_weighted(void) {
-    ht_gaussian_obs_t obs[HT_MAX_CLASSES];
-    for (uint8_t c = 0; c < HT_MAX_CLASSES; ++c) {
-        ht_gaussian_init(&obs[c]);
-    }
+    ht_gaussian_obs_t obs;
+    ht_gaussian_init(&obs);
 
     /* Two weighted samples:
      * x1 = 10.0, w1 = 2.0
@@ -84,62 +82,60 @@ static void test_gaussian_welford_weighted(void) {
      * M2 = 2*(10 - 15)^2 + 2*(20 - 15)^2 = 2*25 + 2*25 = 100.0
      * Unbiased variance s^2 = 100.0 / (4.0 - 1.0) = 33.333333...
      */
-    ht_gaussian_update(obs, 1, (ht_float_t)10.0, (ht_float_t)2.0);
-    ht_gaussian_update(obs, 1, (ht_float_t)20.0, (ht_float_t)2.0);
+    ht_gaussian_update(&obs, 1, (ht_float_t)10.0, (ht_float_t)2.0);
+    ht_gaussian_update(&obs, 1, (ht_float_t)20.0, (ht_float_t)2.0);
 
-    HT_ASSERT_FLOAT_EQ(obs[1].count, (ht_float_t)4.0);
-    HT_ASSERT_FLOAT_NEAR(obs[1].mean, (ht_float_t)15.0, 1e-5);
-    HT_ASSERT_FLOAT_NEAR(obs[1].m2, (ht_float_t)100.0, 1e-4);
+    HT_ASSERT_FLOAT_EQ(obs.classes[1].count, (ht_float_t)4.0);
+    HT_ASSERT_FLOAT_NEAR(obs.classes[1].mean, (ht_float_t)15.0, 1e-5);
+    HT_ASSERT_FLOAT_NEAR(obs.classes[1].m2, (ht_float_t)100.0, 1e-4);
 
     ht_float_t expected_var = (ht_float_t)(100.0 / 3.0);
-    HT_ASSERT_FLOAT_NEAR(ht_gaussian_variance(&obs[1]), expected_var, 1e-4);
+    HT_ASSERT_FLOAT_NEAR(ht_gaussian_variance(&obs.classes[1]), expected_var, 1e-4);
 }
 
 static void test_gaussian_edge_cases(void) {
-    ht_gaussian_obs_t obs[HT_MAX_CLASSES];
-    for (uint8_t c = 0; c < HT_MAX_CLASSES; ++c) {
-        ht_gaussian_init(&obs[c]);
-    }
+    ht_gaussian_obs_t obs;
+    ht_gaussian_init(&obs);
 
     /* Edge Case 1: n = 0 */
-    HT_ASSERT_FLOAT_EQ(ht_gaussian_variance(&obs[0]), (ht_float_t)0.0);
-    HT_ASSERT_FLOAT_EQ(ht_gaussian_stddev(&obs[0]), (ht_float_t)0.0);
-    HT_ASSERT_FLOAT_EQ(ht_gaussian_cond_proba(&obs[0], (ht_float_t)5.0), (ht_float_t)0.0);
-    HT_ASSERT_EQ(ht_gaussian_cond_log_proba(&obs[0], (ht_float_t)5.0), -HT_INFINITY);
+    HT_ASSERT_FLOAT_EQ(ht_gaussian_variance(&obs.classes[0]), (ht_float_t)0.0);
+    HT_ASSERT_FLOAT_EQ(ht_gaussian_stddev(&obs.classes[0]), (ht_float_t)0.0);
+    HT_ASSERT_FLOAT_EQ(ht_gaussian_cond_proba(&obs.classes[0], (ht_float_t)5.0), (ht_float_t)0.0);
+    HT_ASSERT_EQ(ht_gaussian_cond_log_proba(&obs.classes[0], (ht_float_t)5.0), -HT_INFINITY);
 
     /* Edge Case 2: n = 1 */
-    ht_gaussian_update(obs, 0, (ht_float_t)42.0, (ht_float_t)1.0);
-    HT_ASSERT_FLOAT_EQ(obs[0].count, (ht_float_t)1.0);
-    HT_ASSERT_FLOAT_EQ(obs[0].mean, (ht_float_t)42.0);
-    HT_ASSERT_FLOAT_EQ(obs[0].m2, (ht_float_t)0.0);
-    HT_ASSERT_FLOAT_EQ(ht_gaussian_variance(&obs[0]), (ht_float_t)0.0);
-    HT_ASSERT_FLOAT_EQ(ht_gaussian_stddev(&obs[0]), (ht_float_t)0.0);
-    HT_ASSERT_FLOAT_EQ(ht_gaussian_cond_proba(&obs[0], (ht_float_t)42.0), (ht_float_t)0.0);
-    HT_ASSERT_EQ(ht_gaussian_cond_log_proba(&obs[0], (ht_float_t)42.0), -HT_INFINITY);
+    ht_gaussian_update(&obs, 0, (ht_float_t)42.0, (ht_float_t)1.0);
+    HT_ASSERT_FLOAT_EQ(obs.classes[0].count, (ht_float_t)1.0);
+    HT_ASSERT_FLOAT_EQ(obs.classes[0].mean, (ht_float_t)42.0);
+    HT_ASSERT_FLOAT_EQ(obs.classes[0].m2, (ht_float_t)0.0);
+    HT_ASSERT_FLOAT_EQ(ht_gaussian_variance(&obs.classes[0]), (ht_float_t)0.0);
+    HT_ASSERT_FLOAT_EQ(ht_gaussian_stddev(&obs.classes[0]), (ht_float_t)0.0);
+    HT_ASSERT_FLOAT_EQ(ht_gaussian_cond_proba(&obs.classes[0], (ht_float_t)42.0), (ht_float_t)0.0);
+    HT_ASSERT_EQ(ht_gaussian_cond_log_proba(&obs.classes[0], (ht_float_t)42.0), -HT_INFINITY);
 
     /* Edge Case 3: Constant feature (variance = 0, n = 3) */
-    ht_gaussian_update(obs, 0, (ht_float_t)42.0, (ht_float_t)1.0);
-    ht_gaussian_update(obs, 0, (ht_float_t)42.0, (ht_float_t)1.0);
-    HT_ASSERT_FLOAT_EQ(obs[0].count, (ht_float_t)3.0);
-    HT_ASSERT_FLOAT_EQ(obs[0].m2, (ht_float_t)0.0);
-    HT_ASSERT_FLOAT_EQ(ht_gaussian_variance(&obs[0]), (ht_float_t)0.0);
-    HT_ASSERT_FLOAT_EQ(ht_gaussian_stddev(&obs[0]), (ht_float_t)0.0);
-    HT_ASSERT_FLOAT_EQ(ht_gaussian_cond_proba(&obs[0], (ht_float_t)42.0), (ht_float_t)0.0);
-    HT_ASSERT_EQ(ht_gaussian_cond_log_proba(&obs[0], (ht_float_t)42.0), -HT_INFINITY);
+    ht_gaussian_update(&obs, 0, (ht_float_t)42.0, (ht_float_t)1.0);
+    ht_gaussian_update(&obs, 0, (ht_float_t)42.0, (ht_float_t)1.0);
+    HT_ASSERT_FLOAT_EQ(obs.classes[0].count, (ht_float_t)3.0);
+    HT_ASSERT_FLOAT_EQ(obs.classes[0].m2, (ht_float_t)0.0);
+    HT_ASSERT_FLOAT_EQ(ht_gaussian_variance(&obs.classes[0]), (ht_float_t)0.0);
+    HT_ASSERT_FLOAT_EQ(ht_gaussian_stddev(&obs.classes[0]), (ht_float_t)0.0);
+    HT_ASSERT_FLOAT_EQ(ht_gaussian_cond_proba(&obs.classes[0], (ht_float_t)42.0), (ht_float_t)0.0);
+    HT_ASSERT_EQ(ht_gaussian_cond_log_proba(&obs.classes[0], (ht_float_t)42.0), -HT_INFINITY);
 
     /* Edge Case 4: NaN input value must be ignored */
     ht_float_t nan_val = (ht_float_t)0.0 / (ht_float_t)0.0;
-    ht_gaussian_update(obs, 0, nan_val, (ht_float_t)1.0);
-    HT_ASSERT_FLOAT_EQ(obs[0].count, (ht_float_t)3.0); /* Count unchanged */
+    ht_gaussian_update(&obs, 0, nan_val, (ht_float_t)1.0);
+    HT_ASSERT_FLOAT_EQ(obs.classes[0].count, (ht_float_t)3.0); /* Count unchanged */
 
     /* Edge Case 5: Non-positive weight must be ignored */
-    ht_gaussian_update(obs, 0, (ht_float_t)100.0, (ht_float_t)0.0);
-    ht_gaussian_update(obs, 0, (ht_float_t)100.0, (ht_float_t)-2.0);
-    HT_ASSERT_FLOAT_EQ(obs[0].count, (ht_float_t)3.0);
+    ht_gaussian_update(&obs, 0, (ht_float_t)100.0, (ht_float_t)0.0);
+    ht_gaussian_update(&obs, 0, (ht_float_t)100.0, (ht_float_t)-2.0);
+    HT_ASSERT_FLOAT_EQ(obs.classes[0].count, (ht_float_t)3.0);
 
     /* Edge Case 6: Out of bounds class_idx */
-    ht_gaussian_update(obs, HT_MAX_CLASSES, (ht_float_t)100.0, (ht_float_t)1.0);
-    HT_ASSERT_FLOAT_EQ(obs[0].count, (ht_float_t)3.0);
+    ht_gaussian_update(&obs, HT_MAX_CLASSES, (ht_float_t)100.0, (ht_float_t)1.0);
+    HT_ASSERT_FLOAT_EQ(obs.classes[0].count, (ht_float_t)3.0);
 
     /* Edge Case 7: NULL observer pointer */
     ht_gaussian_update(NULL, 0, (ht_float_t)10.0, (ht_float_t)1.0);
@@ -187,26 +183,21 @@ static void test_normal_cdf(void) {
 }
 
 static void test_gaussian_pdf_and_log_pdf(void) {
-    ht_gaussian_obs_t obs;
-    ht_gaussian_init(&obs);
+    ht_gaussian_class_stat_t stat;
+    stat.count = (ht_float_t)100.0;
+    stat.mean = (ht_float_t)0.0;
+    stat.m2 = (ht_float_t)99.0; /* variance = 99 / 99 = 1.0 */
 
-    /* Setup a standard normal distribution: mu = 0, s^2 = 1 (m2 = 99, n = 100) */
-    obs.count = (ht_float_t)100.0;
-    obs.mean = (ht_float_t)0.0;
-    obs.m2 = (ht_float_t)99.0; /* variance = 99 / 99 = 1.0 */
-    obs.min_val = (ht_float_t)-3.0;
-    obs.max_val = (ht_float_t)3.0;
-
-    HT_ASSERT_FLOAT_NEAR(ht_gaussian_variance(&obs), (ht_float_t)1.0, 1e-6);
+    HT_ASSERT_FLOAT_NEAR(ht_gaussian_variance(&stat), (ht_float_t)1.0, 1e-6);
 
     /* Normal PDF at x = 0: p(0) = 1 / sqrt(2*pi) approx 0.3989422804 */
     ht_float_t expected_pdf_0 = (ht_float_t)0.3989422804;
-    ht_float_t calc_pdf_0 = ht_gaussian_cond_proba(&obs, (ht_float_t)0.0);
+    ht_float_t calc_pdf_0 = ht_gaussian_cond_proba(&stat, (ht_float_t)0.0);
     HT_ASSERT_FLOAT_NEAR(calc_pdf_0, expected_pdf_0, 1e-5);
 
     /* Log-PDF at x = 0: ln(1 / sqrt(2*pi)) = -0.5 * ln(2*pi) approx -0.918938533 */
     ht_float_t expected_log_pdf_0 = (ht_float_t)-0.918938533;
-    ht_float_t calc_log_pdf_0 = ht_gaussian_cond_log_proba(&obs, (ht_float_t)0.0);
+    ht_float_t calc_log_pdf_0 = ht_gaussian_cond_log_proba(&stat, (ht_float_t)0.0);
     HT_ASSERT_FLOAT_NEAR(calc_log_pdf_0, expected_log_pdf_0, 1e-5);
 
     /* Consistency: exp(log_pdf) == pdf */
@@ -214,36 +205,34 @@ static void test_gaussian_pdf_and_log_pdf(void) {
 
     /* Normal PDF at x = 1: p(1) = (1 / sqrt(2*pi)) * exp(-0.5) approx 0.2419707245 */
     ht_float_t expected_pdf_1 = (ht_float_t)0.2419707245;
-    ht_float_t calc_pdf_1 = ht_gaussian_cond_proba(&obs, (ht_float_t)1.0);
+    ht_float_t calc_pdf_1 = ht_gaussian_cond_proba(&stat, (ht_float_t)1.0);
     HT_ASSERT_FLOAT_NEAR(calc_pdf_1, expected_pdf_1, 1e-5);
 
     /* Log-PDF at x = 1: -0.918938533 - 0.5 = -1.418938533 */
     ht_float_t expected_log_pdf_1 = (ht_float_t)-1.418938533;
-    ht_float_t calc_log_pdf_1 = ht_gaussian_cond_log_proba(&obs, (ht_float_t)1.0);
+    ht_float_t calc_log_pdf_1 = ht_gaussian_cond_log_proba(&stat, (ht_float_t)1.0);
     HT_ASSERT_FLOAT_NEAR(calc_log_pdf_1, expected_log_pdf_1, 1e-5);
     HT_ASSERT_FLOAT_NEAR(HT_EXP(calc_log_pdf_1), calc_pdf_1, 1e-5);
 }
 
 static void test_gaussian_split_suggestions(void) {
-    ht_gaussian_obs_t obs[HT_MAX_CLASSES];
-    for (uint8_t c = 0; c < HT_MAX_CLASSES; ++c) {
-        ht_gaussian_init(&obs[c]);
-    }
+    ht_gaussian_obs_t obs;
+    ht_gaussian_init(&obs);
 
     /* Class 0 observed in range [10.0, 20.0] */
-    ht_gaussian_update(obs, 0, (ht_float_t)10.0, (ht_float_t)1.0);
-    ht_gaussian_update(obs, 0, (ht_float_t)20.0, (ht_float_t)1.0);
+    ht_gaussian_update(&obs, 0, (ht_float_t)10.0, (ht_float_t)1.0);
+    ht_gaussian_update(&obs, 0, (ht_float_t)20.0, (ht_float_t)1.0);
 
     /* Class 1 observed in range [15.0, 32.0] */
-    ht_gaussian_update(obs, 1, (ht_float_t)15.0, (ht_float_t)1.0);
-    ht_gaussian_update(obs, 1, (ht_float_t)32.0, (ht_float_t)1.0);
+    ht_gaussian_update(&obs, 1, (ht_float_t)15.0, (ht_float_t)1.0);
+    ht_gaussian_update(&obs, 1, (ht_float_t)32.0, (ht_float_t)1.0);
 
     /* Overall range: [10.0, 32.0], delta = 22.0
      * With HT_GAUSSIAN_SPLITS = 10, bin_size = 22.0 / 11.0 = 2.0
      * Suggested splits: 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0, 30.0
      */
     ht_float_t splits[HT_GAUSSIAN_SPLITS];
-    uint8_t n_splits = ht_gaussian_split_suggestions(obs, 2, splits);
+    uint8_t n_splits = ht_gaussian_split_suggestions(&obs, 2, splits);
 
     HT_ASSERT_EQ(n_splits, HT_GAUSSIAN_SPLITS);
 
@@ -258,77 +247,70 @@ static void test_gaussian_split_suggestions(void) {
     }
 
     /* Constant feature across all classes: 0 splits */
-    ht_gaussian_obs_t const_obs[HT_MAX_CLASSES];
-    for (uint8_t c = 0; c < HT_MAX_CLASSES; ++c) {
-        ht_gaussian_init(&const_obs[c]);
-    }
-    ht_gaussian_update(const_obs, 0, (ht_float_t)5.0, (ht_float_t)10.0);
-    ht_gaussian_update(const_obs, 1, (ht_float_t)5.0, (ht_float_t)10.0);
+    ht_gaussian_obs_t const_obs;
+    ht_gaussian_init(&const_obs);
+    ht_gaussian_update(&const_obs, 0, (ht_float_t)5.0, (ht_float_t)10.0);
+    ht_gaussian_update(&const_obs, 1, (ht_float_t)5.0, (ht_float_t)10.0);
 
-    uint8_t n_const_splits = ht_gaussian_split_suggestions(const_obs, 2, splits);
+    uint8_t n_const_splits = ht_gaussian_split_suggestions(&const_obs, 2, splits);
     HT_ASSERT_EQ(n_const_splits, 0);
 
     /* Empty observer: 0 splits */
-    ht_gaussian_obs_t empty_obs[HT_MAX_CLASSES];
-    for (uint8_t c = 0; c < HT_MAX_CLASSES; ++c) {
-        ht_gaussian_init(&empty_obs[c]);
-    }
-    HT_ASSERT_EQ(ht_gaussian_split_suggestions(empty_obs, 2, splits), 0);
+    ht_gaussian_obs_t empty_obs;
+    ht_gaussian_init(&empty_obs);
+    HT_ASSERT_EQ(ht_gaussian_split_suggestions(&empty_obs, 2, splits), 0);
 }
 
 static void test_gaussian_binary_split_dists(void) {
-    ht_gaussian_obs_t obs[HT_MAX_CLASSES];
-    for (uint8_t c = 0; c < HT_MAX_CLASSES; ++c) {
-        ht_gaussian_init(&obs[c]);
-    }
+    ht_gaussian_obs_t obs;
+    ht_gaussian_init(&obs);
 
     /* Setup class 0: range [10, 20], mean = 15, count = 100 */
-    obs[0].count = (ht_float_t)100.0;
-    obs[0].mean = (ht_float_t)15.0;
-    obs[0].m2 = (ht_float_t)(99.0 * 4.0); /* variance = 4.0, std = 2.0 */
-    obs[0].min_val = (ht_float_t)10.0;
-    obs[0].max_val = (ht_float_t)20.0;
+    obs.classes[0].count = (ht_float_t)100.0;
+    obs.classes[0].mean = (ht_float_t)15.0;
+    obs.classes[0].m2 = (ht_float_t)(99.0 * 4.0); /* variance = 4.0, std = 2.0 */
 
     /* Setup class 1: range [25, 35], mean = 30, count = 50 */
-    obs[1].count = (ht_float_t)50.0;
-    obs[1].mean = (ht_float_t)30.0;
-    obs[1].m2 = (ht_float_t)(49.0 * 1.0); /* variance = 1.0, std = 1.0 */
-    obs[1].min_val = (ht_float_t)25.0;
-    obs[1].max_val = (ht_float_t)35.0;
+    obs.classes[1].count = (ht_float_t)50.0;
+    obs.classes[1].mean = (ht_float_t)30.0;
+    obs.classes[1].m2 = (ht_float_t)(49.0 * 1.0); /* variance = 1.0, std = 1.0 */
+
+    obs.min_val = (ht_float_t)10.0;
+    obs.max_val = (ht_float_t)35.0;
 
     ht_float_t lhs[HT_MAX_CLASSES];
     ht_float_t rhs[HT_MAX_CLASSES];
 
-    /* Split 1: t = 5.0 (below all min_vals) */
-    ht_gaussian_binary_split_dists(obs, 2, (ht_float_t)5.0, lhs, rhs);
+    /* Split 1: t = 5.0 (below min_val) */
+    ht_gaussian_binary_split_dists(&obs, 2, (ht_float_t)5.0, lhs, rhs);
     HT_ASSERT_FLOAT_EQ(lhs[0], (ht_float_t)0.0);
     HT_ASSERT_FLOAT_EQ(rhs[0], (ht_float_t)100.0);
     HT_ASSERT_FLOAT_EQ(lhs[1], (ht_float_t)0.0);
     HT_ASSERT_FLOAT_EQ(rhs[1], (ht_float_t)50.0);
 
-    /* Split 2: t = 40.0 (above all max_vals) */
-    ht_gaussian_binary_split_dists(obs, 2, (ht_float_t)40.0, lhs, rhs);
+    /* Split 2: t = 40.0 (above max_val) */
+    ht_gaussian_binary_split_dists(&obs, 2, (ht_float_t)40.0, lhs, rhs);
     HT_ASSERT_FLOAT_EQ(lhs[0], (ht_float_t)100.0);
     HT_ASSERT_FLOAT_EQ(rhs[0], (ht_float_t)0.0);
     HT_ASSERT_FLOAT_EQ(lhs[1], (ht_float_t)50.0);
     HT_ASSERT_FLOAT_EQ(rhs[1], (ht_float_t)0.0);
 
-    /* Split 3: t = 15.0 (at mean of class 0, below min of class 1) */
-    ht_gaussian_binary_split_dists(obs, 2, (ht_float_t)15.0, lhs, rhs);
+    /* Split 3: t = 15.0 (at mean of class 0, far below class 1) */
+    ht_gaussian_binary_split_dists(&obs, 2, (ht_float_t)15.0, lhs, rhs);
     /* For class 0: Phi(15) = 0.5 -> lhs = 50, rhs = 50 */
     HT_ASSERT_FLOAT_NEAR(lhs[0], (ht_float_t)50.0, 1e-4);
     HT_ASSERT_FLOAT_NEAR(rhs[0], (ht_float_t)50.0, 1e-4);
     HT_ASSERT_FLOAT_NEAR(lhs[0] + rhs[0], (ht_float_t)100.0, 1e-4);
-    /* For class 1: 15 < min_val (25) -> lhs = 0, rhs = 50 */
-    HT_ASSERT_FLOAT_EQ(lhs[1], (ht_float_t)0.0);
-    HT_ASSERT_FLOAT_EQ(rhs[1], (ht_float_t)50.0);
+    /* For class 1: 15 is 15 std away -> lhs = 0, rhs = 50 */
+    HT_ASSERT_FLOAT_NEAR(lhs[1], (ht_float_t)0.0, 1e-4);
+    HT_ASSERT_FLOAT_NEAR(rhs[1], (ht_float_t)50.0, 1e-4);
 
-    /* Split 4: t = 22.0 (above max of class 0, below min of class 1) */
-    ht_gaussian_binary_split_dists(obs, 2, (ht_float_t)22.0, lhs, rhs);
-    HT_ASSERT_FLOAT_EQ(lhs[0], (ht_float_t)100.0);
-    HT_ASSERT_FLOAT_EQ(rhs[0], (ht_float_t)0.0);
-    HT_ASSERT_FLOAT_EQ(lhs[1], (ht_float_t)0.0);
-    HT_ASSERT_FLOAT_EQ(rhs[1], (ht_float_t)50.0);
+    /* Split 4: t = 22.0 (between class 0 and class 1) */
+    ht_gaussian_binary_split_dists(&obs, 2, (ht_float_t)22.0, lhs, rhs);
+    HT_ASSERT_FLOAT_NEAR(lhs[0], (ht_float_t)100.0, 0.1);
+    HT_ASSERT_FLOAT_NEAR(rhs[0], (ht_float_t)0.0, 0.1);
+    HT_ASSERT_FLOAT_NEAR(lhs[1], (ht_float_t)0.0, 1e-4);
+    HT_ASSERT_FLOAT_NEAR(rhs[1], (ht_float_t)50.0, 1e-4);
 }
 
 /* ========================================================================= */
@@ -482,20 +464,22 @@ static void test_observers_in_leaf_stats_pool(void) {
     /* All observers inside freshly allocated leaf_stats must be zero-initialized */
     for (uint8_t f = 0; f < HT_MAX_FEATURES; ++f) {
         for (uint8_t c = 0; c < HT_MAX_CLASSES; ++c) {
-            HT_ASSERT_FLOAT_EQ(stats->observers[f].num[c].count, (ht_float_t)0.0);
-            HT_ASSERT_FLOAT_EQ(stats->observers[f].num[c].mean, (ht_float_t)0.0);
-            HT_ASSERT_FLOAT_EQ(stats->observers[f].num[c].m2, (ht_float_t)0.0);
+            HT_ASSERT_FLOAT_EQ(stats->observers[f].num.classes[c].count, (ht_float_t)0.0);
+            HT_ASSERT_FLOAT_EQ(stats->observers[f].num.classes[c].mean, (ht_float_t)0.0);
+            HT_ASSERT_FLOAT_EQ(stats->observers[f].num.classes[c].m2, (ht_float_t)0.0);
         }
+        HT_ASSERT_FLOAT_EQ(stats->observers[f].num.min_val, (ht_float_t)0.0);
+        HT_ASSERT_FLOAT_EQ(stats->observers[f].num.max_val, (ht_float_t)0.0);
     }
 
     /* Feature 0 is numeric: update Gaussian observers */
-    ht_gaussian_update(stats->observers[0].num, 0, (ht_float_t)10.0, (ht_float_t)1.0);
-    ht_gaussian_update(stats->observers[0].num, 0, (ht_float_t)20.0, (ht_float_t)1.0);
-    ht_gaussian_update(stats->observers[0].num, 0, (ht_float_t)30.0, (ht_float_t)1.0);
+    ht_gaussian_update(&stats->observers[0].num, 0, (ht_float_t)10.0, (ht_float_t)1.0);
+    ht_gaussian_update(&stats->observers[0].num, 0, (ht_float_t)20.0, (ht_float_t)1.0);
+    ht_gaussian_update(&stats->observers[0].num, 0, (ht_float_t)30.0, (ht_float_t)1.0);
 
-    HT_ASSERT_FLOAT_EQ(stats->observers[0].num[0].count, (ht_float_t)3.0);
-    HT_ASSERT_FLOAT_NEAR(stats->observers[0].num[0].mean, (ht_float_t)20.0, 1e-5);
-    HT_ASSERT_FLOAT_NEAR(ht_gaussian_variance(&stats->observers[0].num[0]), (ht_float_t)100.0, 1e-4);
+    HT_ASSERT_FLOAT_EQ(stats->observers[0].num.classes[0].count, (ht_float_t)3.0);
+    HT_ASSERT_FLOAT_NEAR(stats->observers[0].num.classes[0].mean, (ht_float_t)20.0, 1e-5);
+    HT_ASSERT_FLOAT_NEAR(ht_gaussian_variance(&stats->observers[0].num.classes[0]), (ht_float_t)100.0, 1e-4);
 
     /* Feature 1 is categorical: update Nominal observers */
     ht_categorical_update(&stats->observers[1].cat, 0, 2, (ht_float_t)5.0);
@@ -514,7 +498,7 @@ static void test_observers_in_leaf_stats_pool(void) {
 
     ht_leaf_stats_t *recycled_stats = ht_stats_get(&s_observer_test_pool, recycled_idx);
     HT_ASSERT_NOT_NULL(recycled_stats);
-    HT_ASSERT_FLOAT_EQ(recycled_stats->observers[0].num[0].count, (ht_float_t)0.0);
+    HT_ASSERT_FLOAT_EQ(recycled_stats->observers[0].num.classes[0].count, (ht_float_t)0.0);
     HT_ASSERT_FLOAT_EQ(recycled_stats->observers[1].cat.counts[0][2], (ht_float_t)0.0);
 }
 

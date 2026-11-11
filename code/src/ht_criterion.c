@@ -214,7 +214,7 @@ ht_float_t ht_hoeffding_bound(ht_float_t range_val,
                    ((ht_float_t)2.0 * total_weight));
 }
 
-void ht_evaluate_numeric_observer(const ht_gaussian_obs_t obs[HT_MAX_CLASSES],
+void ht_evaluate_numeric_observer(const ht_gaussian_obs_t *obs,
                                   const ht_float_t pre_dist[HT_MAX_CLASSES],
                                   uint8_t n_classes,
                                   uint8_t feature_idx,
@@ -386,7 +386,7 @@ void ht_find_best_split_candidates_ext(const ht_leaf_stats_t *stats,
                                           pre_dist, n_classes, f,
                                           crit, min_branch_frac, &cand);
             } else {
-                ht_evaluate_numeric_observer(stats->observers[f].num,
+                ht_evaluate_numeric_observer(&stats->observers[f].num,
                                              pre_dist, n_classes, f,
                                              crit, min_branch_frac, &cand);
             }

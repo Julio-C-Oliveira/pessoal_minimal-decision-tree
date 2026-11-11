@@ -29,11 +29,22 @@ typedef enum {
 } ht_scaler_type_t;
 
 /**
+ * @brief Online feature scaler statistics per feature.
+ */
+typedef struct {
+    ht_float_t count;
+    ht_float_t mean;
+    ht_float_t m2;
+    ht_float_t min_val;
+    ht_float_t max_val;
+} ht_scaler_stat_t;
+
+/**
  * @brief Online feature scaler managing Welford and min-max accumulators per feature.
  */
 typedef struct {
-    ht_gaussian_obs_t stats[HT_MAX_FEATURES]; /**< Reuses count, mean, m2, min_val, max_val */
-    ht_scaler_type_t  mode[HT_MAX_FEATURES];
+    ht_scaler_stat_t stats[HT_MAX_FEATURES]; /**< Count, mean, m2, min_val, max_val per feature */
+    ht_scaler_type_t mode[HT_MAX_FEATURES];
 } ht_scaler_t;
 
 void ht_scaler_init(ht_scaler_t *scaler);

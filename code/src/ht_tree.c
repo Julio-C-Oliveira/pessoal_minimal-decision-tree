@@ -235,7 +235,7 @@ static bool ht_leaf_predict_nb_proba(const ht_tree_t *tree,
                         if (tree->params.numeric_obs_type == HT_OBS_HISTOGRAM) {
                             log_p = ht_hist_cond_log_proba(&stats->observers[f].hist, c, x[f].num);
                         } else {
-                            log_p = ht_gaussian_cond_log_proba(&stats->observers[f].num[c], x[f].num);
+                            log_p = ht_gaussian_cond_log_proba(&stats->observers[f].num.classes[c], x[f].num);
                         }
                         if (log_p > -HT_INFINITY) {
                             log_likelihood[c] += log_p;
@@ -1682,7 +1682,7 @@ static ht_status_t ht_tree_learn_one_subtree(ht_tree_t *tree,
                     if (tree->params.numeric_obs_type == HT_OBS_HISTOGRAM) {
                         ht_hist_update(&stats->observers[f].hist, y, x[f].num, weight);
                     } else {
-                        ht_gaussian_update(stats->observers[f].num, y, x[f].num, weight);
+                        ht_gaussian_update(&stats->observers[f].num, y, x[f].num, weight);
                     }
                 }
             } else {

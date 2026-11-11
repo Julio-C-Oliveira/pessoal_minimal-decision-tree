@@ -193,24 +193,22 @@ static void test_hoeffding_bound_analytical(void) {
 
 static void test_evaluate_numeric_observer(void) {
     const ht_criterion_vtable_t *crit = ht_criterion_get_vtable(HT_CRIT_GINI);
-    ht_gaussian_obs_t obs[HT_MAX_CLASSES];
-    for (uint8_t c = 0; c < HT_MAX_CLASSES; c++) {
-        ht_gaussian_init(&obs[c]);
-    }
+    ht_gaussian_obs_t obs;
+    ht_gaussian_init(&obs);
 
     /* Populate Class 0: values in [0.0, 4.0] (mean 2.0) */
     for (int i = 0; i <= 20; i++) {
-        ht_gaussian_update(obs, 0, (ht_float_t)(i * 0.2), (ht_float_t)1.0);
+        ht_gaussian_update(&obs, 0, (ht_float_t)(i * 0.2), (ht_float_t)1.0);
     }
     /* Populate Class 1: values in [6.0, 10.0] (mean 8.0) */
     for (int i = 0; i <= 20; i++) {
-        ht_gaussian_update(obs, 1, (ht_float_t)(6.0 + i * 0.2), (ht_float_t)1.0);
+        ht_gaussian_update(&obs, 1, (ht_float_t)(6.0 + i * 0.2), (ht_float_t)1.0);
     }
 
     ht_float_t pre_dist[HT_MAX_CLASSES] = { (ht_float_t)21.0, (ht_float_t)21.0, 0, 0 };
     ht_split_candidate_t cand;
 
-    ht_evaluate_numeric_observer(obs, pre_dist, 2, 0, crit, (ht_float_t)0.01, &cand);
+    ht_evaluate_numeric_observer(&obs, pre_dist, 2, 0, crit, (ht_float_t)0.01, &cand);
 
     HT_ASSERT_EQ(cand.feature_idx, 0);
     HT_ASSERT_EQ(cand.is_categorical, 0);
@@ -219,16 +217,14 @@ static void test_evaluate_numeric_observer(void) {
     HT_ASSERT(cand.split_val.threshold >= (ht_float_t)3.5 && cand.split_val.threshold <= (ht_float_t)6.5);
 
     /* Test constant feature: all samples equal to 5.0 */
-    ht_gaussian_obs_t const_obs[HT_MAX_CLASSES];
-    for (uint8_t c = 0; c < HT_MAX_CLASSES; c++) {
-        ht_gaussian_init(&const_obs[c]);
-    }
+    ht_gaussian_obs_t const_obs;
+    ht_gaussian_init(&const_obs);
     for (int i = 0; i < 20; i++) {
-        ht_gaussian_update(const_obs, 0, (ht_float_t)5.0, (ht_float_t)1.0);
-        ht_gaussian_update(const_obs, 1, (ht_float_t)5.0, (ht_float_t)1.0);
+        ht_gaussian_update(&const_obs, 0, (ht_float_t)5.0, (ht_float_t)1.0);
+        ht_gaussian_update(&const_obs, 1, (ht_float_t)5.0, (ht_float_t)1.0);
     }
     ht_split_candidate_t const_cand;
-    ht_evaluate_numeric_observer(const_obs, pre_dist, 2, 1, crit, (ht_float_t)0.01, &const_cand);
+    ht_evaluate_numeric_observer(&const_obs, pre_dist, 2, 1, crit, (ht_float_t)0.01, &const_cand);
     HT_ASSERT_EQ(const_cand.merit, -HT_INFINITY);
     HT_ASSERT_EQ(const_cand.feature_idx, HT_NO_FEATURE);
 }
@@ -287,14 +283,14 @@ static void test_find_best_split_candidates_and_tie_breaking(void) {
 
     /* Populate Feature 0: overlapping around 5.0 for both classes */
     for (int i = 0; i < 50; i++) {
-        ht_gaussian_update(stats->observers[0].num, 0, (ht_float_t)(4.0 + i * 0.04), (ht_float_t)1.0);
-        ht_gaussian_update(stats->observers[0].num, 1, (ht_float_t)(4.0 + i * 0.04), (ht_float_t)1.0);
+        ht_gaussian_update(&stats->observers[0].num, 0, (ht_float_t)(4.0 + i * 0.04), (ht_float_t)1.0);
+        ht_gaussian_update(&stats->observers[0].num, 1, (ht_float_t)(4.0 + i * 0.04), (ht_float_t)1.0);
     }
 
     /* Populate Feature 1: class 0 in [0..2], class 1 in [8..10] */
     for (int i = 0; i < 50; i++) {
-        ht_gaussian_update(stats->observers[1].num, 0, (ht_float_t)(i * 0.04), (ht_float_t)1.0);
-        ht_gaussian_update(stats->observers[1].num, 1, (ht_float_t)(8.0 + i * 0.04), (ht_float_t)1.0);
+        ht_gaussian_update(&stats->observers[1].num, 0, (ht_float_t)(i * 0.04), (ht_float_t)1.0);
+        ht_gaussian_update(&stats->observers[1].num, 1, (ht_float_t)(8.0 + i * 0.04), (ht_float_t)1.0);
     }
 
     /* Populate Feature 2: class 0 in cat 0, class 1 in cat 1 */

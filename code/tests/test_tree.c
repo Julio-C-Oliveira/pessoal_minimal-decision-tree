@@ -247,14 +247,14 @@ static void test_tree_predict_naive_bayes_lse(void) {
 
     /* Populate Class 0: clustered around (1.0, 1.0) */
     for (int i = 0; i < 50; ++i) {
-        ht_gaussian_update(stats->observers[0].num, 0, (ht_float_t)(0.8 + 0.008 * i), (ht_float_t)1.0);
-        ht_gaussian_update(stats->observers[1].num, 0, (ht_float_t)(0.9 + 0.004 * i), (ht_float_t)1.0);
+        ht_gaussian_update(&stats->observers[0].num, 0, (ht_float_t)(0.8 + 0.008 * i), (ht_float_t)1.0);
+        ht_gaussian_update(&stats->observers[1].num, 0, (ht_float_t)(0.9 + 0.004 * i), (ht_float_t)1.0);
     }
 
     /* Populate Class 1: clustered around (10.0, 10.0) */
     for (int i = 0; i < 50; ++i) {
-        ht_gaussian_update(stats->observers[0].num, 1, (ht_float_t)(9.5 + 0.02 * i), (ht_float_t)1.0);
-        ht_gaussian_update(stats->observers[1].num, 1, (ht_float_t)(10.0 + 0.01 * i), (ht_float_t)1.0);
+        ht_gaussian_update(&stats->observers[0].num, 1, (ht_float_t)(9.5 + 0.02 * i), (ht_float_t)1.0);
+        ht_gaussian_update(&stats->observers[1].num, 1, (ht_float_t)(10.0 + 0.01 * i), (ht_float_t)1.0);
     }
 
     ht_value_t x[HT_MAX_FEATURES];
@@ -294,8 +294,8 @@ static void test_tree_predict_nba_adaptive_switching(void) {
 
     /* Setup Gaussian observers such that x=10 has very high density in Class 1 */
     for (int i = 0; i < 50; ++i) {
-        ht_gaussian_update(stats->observers[0].num, 0, (ht_float_t)(0.0 + 0.01 * i), (ht_float_t)1.0);
-        ht_gaussian_update(stats->observers[0].num, 1, (ht_float_t)(10.0 + 0.01 * i), (ht_float_t)1.0);
+        ht_gaussian_update(&stats->observers[0].num, 0, (ht_float_t)(0.0 + 0.01 * i), (ht_float_t)1.0);
+        ht_gaussian_update(&stats->observers[0].num, 1, (ht_float_t)(10.0 + 0.01 * i), (ht_float_t)1.0);
     }
 
     ht_value_t x[HT_MAX_FEATURES];
