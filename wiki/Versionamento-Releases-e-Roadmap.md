@@ -97,6 +97,13 @@ Para lançar uma nova versão oficial no GitHub:
 
 ## 4.1 Histórico de Releases (Changelog)
 
+### v0.3.2 (2026-11-11) — Correção de Precisão e Paridade River em Splits Gaussianos
+- **Restauração de Bounding Box por Classe em Observador Gaussiano (`ht_gaussian_class_stat_t`):**
+  - Correção na estimativa de divisão binária numérica em `ht_gaussian_binary_split_dists`: restabelecimento de `min_val` e `max_val` em nível de classe (`ht_gaussian_class_stat_t`), em estrita conformidade com o algoritmo de referência do River (`river.tree.splitter.GaussianSplitter`).
+  - Eliminação completa de vazamento probabilístico de cauda da CDF gaussiana em atributos com distribuições concentradas (como variáveis binárias/one-hot em fluxos multi-classe), restaurando a acurácia no Forest Covertype para **58,68%** (Tier 1) e **61,43%** (Tier 2).
+  - Preservação do orçamento de 1 MB de SRAM e do dimensionamento estático de `ht_leaf_stats_t` ($1.360\text{ bytes}$ em `float32`).
+- **Suíte de Testes:** 118 testes unitários e de integração 100% aprovados (226.977 asserções) com zero warnings em `float32` e `double64`.
+
 ### v0.3.1 (2026-11-11) — Otimização de RAM em Drift e Observadores (Entregas 7.4 e 7.5)
 - **Desacoplamento de Drift em Pool Dedicado (`ht_drift_pool_t`) (Hipótese 3 / Entrega 7.4):**
   - Migração de `node_drift[HT_MAX_NODES]` do interior de `ht_node_t` para um pool independente e compacto de 128 instâncias `ADWIN2` (`ht_drift_pool_t drift_pool`), referenciado por índice `drift_idx` (`uint8_t`, com sentinela `0xFF`).
