@@ -247,14 +247,14 @@ static void test_tree_predict_naive_bayes_lse(void) {
 
     /* Populate Class 0: clustered around (1.0, 1.0) */
     for (int i = 0; i < 50; ++i) {
-        ht_gaussian_update(&stats->observers[0].num, 0, (ht_float_t)(0.8 + 0.008 * i), (ht_float_t)1.0);
-        ht_gaussian_update(&stats->observers[1].num, 0, (ht_float_t)(0.9 + 0.004 * i), (ht_float_t)1.0);
+        ht_gaussian_update(stats->observers[0].num, 0, (ht_float_t)(0.8 + 0.008 * i), (ht_float_t)1.0);
+        ht_gaussian_update(stats->observers[1].num, 0, (ht_float_t)(0.9 + 0.004 * i), (ht_float_t)1.0);
     }
 
     /* Populate Class 1: clustered around (10.0, 10.0) */
     for (int i = 0; i < 50; ++i) {
-        ht_gaussian_update(&stats->observers[0].num, 1, (ht_float_t)(9.5 + 0.02 * i), (ht_float_t)1.0);
-        ht_gaussian_update(&stats->observers[1].num, 1, (ht_float_t)(10.0 + 0.01 * i), (ht_float_t)1.0);
+        ht_gaussian_update(stats->observers[0].num, 1, (ht_float_t)(9.5 + 0.02 * i), (ht_float_t)1.0);
+        ht_gaussian_update(stats->observers[1].num, 1, (ht_float_t)(10.0 + 0.01 * i), (ht_float_t)1.0);
     }
 
     ht_value_t x[HT_MAX_FEATURES];
@@ -294,8 +294,8 @@ static void test_tree_predict_nba_adaptive_switching(void) {
 
     /* Setup Gaussian observers such that x=10 has very high density in Class 1 */
     for (int i = 0; i < 50; ++i) {
-        ht_gaussian_update(&stats->observers[0].num, 0, (ht_float_t)(0.0 + 0.01 * i), (ht_float_t)1.0);
-        ht_gaussian_update(&stats->observers[0].num, 1, (ht_float_t)(10.0 + 0.01 * i), (ht_float_t)1.0);
+        ht_gaussian_update(stats->observers[0].num, 0, (ht_float_t)(0.0 + 0.01 * i), (ht_float_t)1.0);
+        ht_gaussian_update(stats->observers[0].num, 1, (ht_float_t)(10.0 + 0.01 * i), (ht_float_t)1.0);
     }
 
     ht_value_t x[HT_MAX_FEATURES];
@@ -853,45 +853,40 @@ static void test_tree_hat_reg_alternate_tree_switch_and_prune(void) {
     uint16_t alt_stats = ht_stats_alloc(&tree.memory);
     tree.memory.node_pool[alt_root].stats_idx = alt_stats;
     ht_var_init(&tree.memory.node_pool[alt_root].reg_stats);
-    ht_node_drift_t *alt_nd = ht_tree_node_drift(&tree, alt_root);
-    HT_ASSERT_NOT_NULL(alt_nd);
-    alt_nd->adwin_idx = ht_adwin_pool_alloc(&ad_pool, NULL);
-
-    ht_node_drift_t *root_nd = ht_tree_node_drift(&tree, tree.root_idx);
-    HT_ASSERT_NOT_NULL(root_nd);
-    root_nd->alt_tree_idx = alt_root;
+    tree.node_drift[alt_root].adwin_idx = ht_adwin_pool_alloc(&ad_pool, NULL);
+    tree.node_drift[tree.root_idx].alt_tree_idx = alt_root;
     tree.n_alternate_trees++;
 
     /* 2. Configure alt tree with lower error than main tree (Switch case) */
-    root_nd->mean_error = (ht_float_t)10.0;
-    root_nd->error_m2 = (ht_float_t)5.0;
-    root_nd->error_count = 50U;
+    tree.node_drift[tree.root_idx].mean_error = (ht_float_t)10.0;
+    tree.node_drift[tree.root_idx].error_m2 = (ht_float_t)5.0;
+    tree.node_drift[tree.root_idx].error_count = 50U;
 
-    alt_nd->mean_error = (ht_float_t)1.0;
-    alt_nd->error_m2 = (ht_float_t)2.0;
-    alt_nd->error_count = 50U;
+    tree.node_drift[alt_root].mean_error = (ht_float_t)1.0;
+    tree.node_drift[alt_root].error_m2 = (ht_float_t)2.0;
+    tree.node_drift[alt_root].error_count = 50U;
 
     ht_hat_action_t act = ht_hat_evaluate_reg_alternate(
-        root_nd->mean_error,
-        root_nd->error_m2 / (ht_float_t)49.0,
-        root_nd->error_count,
-        alt_nd->mean_error,
-        alt_nd->error_m2 / (ht_float_t)49.0,
-        alt_nd->error_count,
+        tree.node_drift[tree.root_idx].mean_error,
+        tree.node_drift[tree.root_idx].error_m2 / (ht_float_t)49.0,
+        tree.node_drift[tree.root_idx].error_count,
+        tree.node_drift[alt_root].mean_error,
+        tree.node_drift[alt_root].error_m2 / (ht_float_t)49.0,
+        tree.node_drift[alt_root].error_count,
         tree.params.drift_window_threshold,
         tree.params.switch_significance
     );
     HT_ASSERT_EQ(act, HT_HAT_ACTION_SWITCH);
 
     /* 3. Configure alt tree with higher error (Prune case) */
-    alt_nd->mean_error = (ht_float_t)25.0;
+    tree.node_drift[alt_root].mean_error = (ht_float_t)25.0;
     act = ht_hat_evaluate_reg_alternate(
-        root_nd->mean_error,
-        root_nd->error_m2 / (ht_float_t)49.0,
-        root_nd->error_count,
-        alt_nd->mean_error,
-        alt_nd->error_m2 / (ht_float_t)49.0,
-        alt_nd->error_count,
+        tree.node_drift[tree.root_idx].mean_error,
+        tree.node_drift[tree.root_idx].error_m2 / (ht_float_t)49.0,
+        tree.node_drift[tree.root_idx].error_count,
+        tree.node_drift[alt_root].mean_error,
+        tree.node_drift[alt_root].error_m2 / (ht_float_t)49.0,
+        tree.node_drift[alt_root].error_count,
         tree.params.drift_window_threshold,
         tree.params.switch_significance
     );

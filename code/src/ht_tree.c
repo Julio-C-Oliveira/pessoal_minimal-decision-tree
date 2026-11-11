@@ -235,7 +235,7 @@ static bool ht_leaf_predict_nb_proba(const ht_tree_t *tree,
                         if (tree->params.numeric_obs_type == HT_OBS_HISTOGRAM) {
                             log_p = ht_hist_cond_log_proba(&stats->observers[f].hist, c, x[f].num);
                         } else {
-                            log_p = ht_gaussian_cond_log_proba(&stats->observers[f].num.classes[c], x[f].num);
+                            log_p = ht_gaussian_cond_log_proba(&stats->observers[f].num[c], x[f].num);
                         }
                         if (log_p > -HT_INFINITY) {
                             log_likelihood[c] += log_p;
@@ -388,8 +388,7 @@ static ht_status_t ht_tree_deactivate_least_promising_leaf_except(ht_tree_t *tre
                 }
             } else {
                 if (tree->params.enable_hat && tree->adwin_pool != NULL) {
-                    const ht_node_drift_t *cnd = ht_tree_node_drift_const(tree, curr);
-                    uint16_t alt = (cnd != NULL) ? cnd->alt_tree_idx : HT_INVALID_IDX;
+                    uint16_t alt = tree->node_drift[curr].alt_tree_idx;
                     if (alt != HT_INVALID_IDX && top < 62) {
                         node_stack[top] = alt;
                         depth_stack[top] = d;
@@ -507,15 +506,6 @@ static ht_status_t ht_tree_attempt_split_reg(ht_tree_t *tree, uint16_t leaf_idx,
         node->feature_idx = best.feature_idx;
         node->left_child = left_idx;
         node->right_child = right_idx;
-        node->drift_idx = HT_INVALID_IDX;
-        if (tree->drift_pool != NULL) {
-            for (uint16_t i = 0; i < HT_MAX_DRIFT_NODES; ++i) {
-                if (tree->drift_pool->pool[i].node_idx == leaf_idx) {
-                    node->drift_idx = i;
-                    break;
-                }
-            }
-        }
 
         tree->n_decision_nodes++;
         if (tree->n_active_leaves > 0) {
@@ -576,36 +566,27 @@ static ht_status_t ht_tree_attempt_split_reg(ht_tree_t *tree, uint16_t leaf_idx,
 
         /* HAT: initialize drift tracking for new branch and child nodes */
         if (tree->params.enable_hat && tree->adwin_pool != NULL) {
-            ht_node_drift_t *b_nd = ht_tree_node_drift(tree, leaf_idx);
-            if (b_nd != NULL) {
-                b_nd->alt_tree_idx = HT_INVALID_IDX;
-                b_nd->mean_error = (ht_float_t)0.0;
-                b_nd->error_m2 = (ht_float_t)0.0;
-                b_nd->error_count = 0U;
-                if (b_nd->adwin_idx != HT_INVALID_IDX) {
-                    ht_adwin_reset(ht_adwin_pool_get(tree->adwin_pool, b_nd->adwin_idx));
-                } else {
-                    b_nd->adwin_idx = ht_adwin_pool_alloc(tree->adwin_pool, NULL);
-                }
+            tree->node_drift[leaf_idx].alt_tree_idx = HT_INVALID_IDX;
+            tree->node_drift[leaf_idx].mean_error = (ht_float_t)0.0;
+            tree->node_drift[leaf_idx].error_m2 = (ht_float_t)0.0;
+            tree->node_drift[leaf_idx].error_count = 0U;
+            if (tree->node_drift[leaf_idx].adwin_idx != HT_INVALID_IDX) {
+                ht_adwin_reset(ht_adwin_pool_get(tree->adwin_pool, tree->node_drift[leaf_idx].adwin_idx));
+            } else {
+                tree->node_drift[leaf_idx].adwin_idx = ht_adwin_pool_alloc(tree->adwin_pool, NULL);
             }
 
-            ht_node_drift_t *l_nd = ht_tree_node_drift(tree, left_idx);
-            if (l_nd != NULL) {
-                l_nd->adwin_idx = ht_adwin_pool_alloc(tree->adwin_pool, NULL);
-                l_nd->alt_tree_idx = HT_INVALID_IDX;
-                l_nd->mean_error = (ht_float_t)0.0;
-                l_nd->error_m2 = (ht_float_t)0.0;
-                l_nd->error_count = 0U;
-            }
+            tree->node_drift[left_idx].adwin_idx = ht_adwin_pool_alloc(tree->adwin_pool, NULL);
+            tree->node_drift[left_idx].alt_tree_idx = HT_INVALID_IDX;
+            tree->node_drift[left_idx].mean_error = (ht_float_t)0.0;
+            tree->node_drift[left_idx].error_m2 = (ht_float_t)0.0;
+            tree->node_drift[left_idx].error_count = 0U;
 
-            ht_node_drift_t *r_nd = ht_tree_node_drift(tree, right_idx);
-            if (r_nd != NULL) {
-                r_nd->adwin_idx = ht_adwin_pool_alloc(tree->adwin_pool, NULL);
-                r_nd->alt_tree_idx = HT_INVALID_IDX;
-                r_nd->mean_error = (ht_float_t)0.0;
-                r_nd->error_m2 = (ht_float_t)0.0;
-                r_nd->error_count = 0U;
-            }
+            tree->node_drift[right_idx].adwin_idx = ht_adwin_pool_alloc(tree->adwin_pool, NULL);
+            tree->node_drift[right_idx].alt_tree_idx = HT_INVALID_IDX;
+            tree->node_drift[right_idx].mean_error = (ht_float_t)0.0;
+            tree->node_drift[right_idx].error_m2 = (ht_float_t)0.0;
+            tree->node_drift[right_idx].error_count = 0U;
         }
 
         if ((uint16_t)(depth + 1) > tree->max_depth_seen) {
@@ -709,15 +690,6 @@ static ht_status_t ht_tree_attempt_split(ht_tree_t *tree, uint16_t leaf_idx, uin
         node->feature_idx = best.feature_idx;
         node->left_child = left_idx;
         node->right_child = right_idx;
-        node->drift_idx = HT_INVALID_IDX;
-        if (tree->drift_pool != NULL) {
-            for (uint16_t i = 0; i < HT_MAX_DRIFT_NODES; ++i) {
-                if (tree->drift_pool->pool[i].node_idx == leaf_idx) {
-                    node->drift_idx = i;
-                    break;
-                }
-            }
-        }
 
         tree->n_decision_nodes++;
         if (tree->n_active_leaves > 0) {
@@ -776,33 +748,24 @@ static ht_status_t ht_tree_attempt_split(ht_tree_t *tree, uint16_t leaf_idx, uin
 
         /* HAT: initialize drift tracking for new branch and child nodes */
         if (tree->params.enable_hat && tree->adwin_pool != NULL) {
-            ht_node_drift_t *b_nd = ht_tree_node_drift(tree, leaf_idx);
-            if (b_nd != NULL) {
-                b_nd->alt_tree_idx = HT_INVALID_IDX;
-                b_nd->mean_error = (ht_float_t)0.0;
-                b_nd->error_count = 0U;
-                if (b_nd->adwin_idx != HT_INVALID_IDX) {
-                    ht_adwin_reset(ht_adwin_pool_get(tree->adwin_pool, b_nd->adwin_idx));
-                } else {
-                    b_nd->adwin_idx = ht_adwin_pool_alloc(tree->adwin_pool, NULL);
-                }
+            tree->node_drift[leaf_idx].alt_tree_idx = HT_INVALID_IDX;
+            tree->node_drift[leaf_idx].mean_error = (ht_float_t)0.0;
+            tree->node_drift[leaf_idx].error_count = 0U;
+            if (tree->node_drift[leaf_idx].adwin_idx != HT_INVALID_IDX) {
+                ht_adwin_reset(ht_adwin_pool_get(tree->adwin_pool, tree->node_drift[leaf_idx].adwin_idx));
+            } else {
+                tree->node_drift[leaf_idx].adwin_idx = ht_adwin_pool_alloc(tree->adwin_pool, NULL);
             }
 
-            ht_node_drift_t *l_nd = ht_tree_node_drift(tree, left_idx);
-            if (l_nd != NULL) {
-                l_nd->adwin_idx = ht_adwin_pool_alloc(tree->adwin_pool, NULL);
-                l_nd->alt_tree_idx = HT_INVALID_IDX;
-                l_nd->mean_error = (ht_float_t)0.0;
-                l_nd->error_count = 0U;
-            }
+            tree->node_drift[left_idx].adwin_idx = ht_adwin_pool_alloc(tree->adwin_pool, NULL);
+            tree->node_drift[left_idx].alt_tree_idx = HT_INVALID_IDX;
+            tree->node_drift[left_idx].mean_error = (ht_float_t)0.0;
+            tree->node_drift[left_idx].error_count = 0U;
 
-            ht_node_drift_t *r_nd = ht_tree_node_drift(tree, right_idx);
-            if (r_nd != NULL) {
-                r_nd->adwin_idx = ht_adwin_pool_alloc(tree->adwin_pool, NULL);
-                r_nd->alt_tree_idx = HT_INVALID_IDX;
-                r_nd->mean_error = (ht_float_t)0.0;
-                r_nd->error_count = 0U;
-            }
+            tree->node_drift[right_idx].adwin_idx = ht_adwin_pool_alloc(tree->adwin_pool, NULL);
+            tree->node_drift[right_idx].alt_tree_idx = HT_INVALID_IDX;
+            tree->node_drift[right_idx].mean_error = (ht_float_t)0.0;
+            tree->node_drift[right_idx].error_count = 0U;
         }
 
         if (depth + 1 > tree->max_depth_seen) {
@@ -932,26 +895,19 @@ ht_status_t ht_tree_init(ht_tree_t *tree, const ht_config_params_t *params) {
         return HT_ERR_INVALID_ARG;
     }
 
-    bool is_hat = params->enable_hat;
-    ht_adwin_pool_t *saved_adwin_pool = is_hat ? tree->adwin_pool : NULL;
-    ht_drift_pool_t *saved_drift_pool = is_hat ? tree->drift_pool : NULL;
+    ht_adwin_pool_t *saved_adwin_pool = tree->adwin_pool;
     memset(tree, 0, sizeof(*tree));
     tree->params = *params;
     tree->criterion_vtable = vtable;
+    tree->adwin_pool = saved_adwin_pool;
     tree->rng_state = 123456789U;
 
-    if (is_hat && saved_adwin_pool != NULL) {
-        tree->adwin_pool = saved_adwin_pool;
-        tree->drift_pool = &saved_adwin_pool->drift_pool;
-    } else if (is_hat && saved_drift_pool != NULL) {
-        tree->drift_pool = saved_drift_pool;
-    } else {
-        tree->adwin_pool = NULL;
-        tree->drift_pool = NULL;
-    }
-
-    if (tree->drift_pool != NULL) {
-        ht_drift_pool_reset(tree->drift_pool);
+    for (uint16_t i = 0; i < HT_MAX_NODES; ++i) {
+        tree->node_drift[i].adwin_idx = HT_INVALID_IDX;
+        tree->node_drift[i].alt_tree_idx = HT_INVALID_IDX;
+        tree->node_drift[i].mean_error = (ht_float_t)0.0;
+        tree->node_drift[i].error_m2 = (ht_float_t)0.0;
+        tree->node_drift[i].error_count = 0U;
     }
 
     ht_memory_init(&tree->memory);
@@ -987,13 +943,10 @@ ht_status_t ht_tree_init(ht_tree_t *tree, const ht_config_params_t *params) {
     tree->n_switch_alternate_trees = 0;
 
     if (tree->params.enable_hat && tree->adwin_pool != NULL) {
-        ht_node_drift_t *root_nd = ht_tree_node_drift(tree, root);
-        if (root_nd != NULL) {
-            ht_adwin_config_t ad_cfg;
-            ht_adwin_default_config(&ad_cfg);
-            ad_cfg.delta = tree->params.adwin_delta;
-            root_nd->adwin_idx = ht_adwin_pool_alloc(tree->adwin_pool, &ad_cfg);
-        }
+        ht_adwin_config_t ad_cfg;
+        ht_adwin_default_config(&ad_cfg);
+        ad_cfg.delta = tree->params.adwin_delta;
+        tree->node_drift[root].adwin_idx = ht_adwin_pool_alloc(tree->adwin_pool, &ad_cfg);
     }
 
     return HT_OK;
@@ -1008,7 +961,6 @@ ht_status_t ht_tree_init_hat(ht_tree_t *tree,
     ht_config_params_t hat_params = *params;
     hat_params.enable_hat = true;
     tree->adwin_pool = adwin_pool;
-    tree->drift_pool = (adwin_pool != NULL) ? &adwin_pool->drift_pool : NULL;
     return ht_tree_init(tree, &hat_params);
 }
 
@@ -1018,128 +970,16 @@ ht_status_t ht_tree_set_adwin_pool(ht_tree_t *tree, ht_adwin_pool_t *adwin_pool)
     }
     tree->adwin_pool = adwin_pool;
     if (adwin_pool != NULL) {
-        tree->drift_pool = &adwin_pool->drift_pool;
         tree->params.enable_hat = true;
-        if (tree->root_idx != HT_INVALID_IDX) {
-            ht_node_drift_t *nd = ht_tree_node_drift(tree, tree->root_idx);
-            if (nd != NULL && nd->adwin_idx == HT_INVALID_IDX) {
-                ht_adwin_config_t ad_cfg;
-                ht_adwin_default_config(&ad_cfg);
-                ad_cfg.delta = tree->params.adwin_delta;
-                nd->adwin_idx = ht_adwin_pool_alloc(adwin_pool, &ad_cfg);
-            }
+        if (tree->root_idx != HT_INVALID_IDX &&
+            tree->node_drift[tree->root_idx].adwin_idx == HT_INVALID_IDX) {
+            ht_adwin_config_t ad_cfg;
+            ht_adwin_default_config(&ad_cfg);
+            ad_cfg.delta = tree->params.adwin_delta;
+            tree->node_drift[tree->root_idx].adwin_idx = ht_adwin_pool_alloc(adwin_pool, &ad_cfg);
         }
-    } else {
-        tree->drift_pool = NULL;
     }
     return HT_OK;
-}
-
-ht_status_t ht_tree_set_drift_pool(ht_tree_t *tree, ht_drift_pool_t *drift_pool) {
-    if (tree == NULL) {
-        return HT_ERR_INVALID_ARG;
-    }
-    tree->drift_pool = drift_pool;
-    return HT_OK;
-}
-
-ht_node_drift_t *ht_tree_node_drift(ht_tree_t *tree, uint16_t node_idx) {
-    if (tree == NULL || tree->drift_pool == NULL || node_idx >= HT_MAX_NODES) {
-        return NULL;
-    }
-    ht_node_t *node = &tree->memory.node_pool[node_idx];
-    if (!(node->flags & HT_NODE_IN_USE)) {
-        return NULL;
-    }
-
-    /* Fast path for branch (decision) nodes: direct O(1) slot */
-    if (!(node->flags & HT_NODE_IS_LEAF)) {
-        if (node->drift_idx != HT_INVALID_IDX && node->drift_idx < HT_MAX_DRIFT_NODES) {
-            return &tree->drift_pool->pool[node->drift_idx];
-        }
-        uint16_t d_idx = ht_drift_pool_alloc(tree->drift_pool);
-        if (d_idx == HT_INVALID_IDX) {
-            return NULL;
-        }
-        node->drift_idx = d_idx;
-        tree->drift_pool->pool[d_idx].node_idx = node_idx;
-        return &tree->drift_pool->pool[d_idx];
-    }
-
-    /* Leaf nodes: search active drift entry assigned to this leaf */
-    for (uint16_t i = 0; i < HT_MAX_DRIFT_NODES; ++i) {
-        if (tree->drift_pool->pool[i].node_idx == node_idx) {
-            return &tree->drift_pool->pool[i];
-        }
-    }
-
-    /* Allocate drift entry for leaf */
-    uint16_t d_idx = ht_drift_pool_alloc(tree->drift_pool);
-    if (d_idx == HT_INVALID_IDX) {
-        return NULL;
-    }
-    tree->drift_pool->pool[d_idx].node_idx = node_idx;
-    return &tree->drift_pool->pool[d_idx];
-}
-
-const ht_node_drift_t *ht_tree_node_drift_const(const ht_tree_t *tree, uint16_t node_idx) {
-    if (tree == NULL || tree->drift_pool == NULL || node_idx >= HT_MAX_NODES) {
-        return NULL;
-    }
-    const ht_node_t *node = &tree->memory.node_pool[node_idx];
-    if (!(node->flags & HT_NODE_IN_USE)) {
-        return NULL;
-    }
-
-    /* Fast path for branch nodes */
-    if (!(node->flags & HT_NODE_IS_LEAF)) {
-        if (node->drift_idx != HT_INVALID_IDX && node->drift_idx < HT_MAX_DRIFT_NODES) {
-            return &tree->drift_pool->pool[node->drift_idx];
-        }
-        return NULL;
-    }
-
-    /* Leaf nodes */
-    for (uint16_t i = 0; i < HT_MAX_DRIFT_NODES; ++i) {
-        if (tree->drift_pool->pool[i].node_idx == node_idx) {
-            return &tree->drift_pool->pool[i];
-        }
-    }
-    return NULL;
-}
-
-void ht_tree_node_drift_free(ht_tree_t *tree, uint16_t node_idx) {
-    if (tree == NULL || tree->drift_pool == NULL || node_idx >= HT_MAX_NODES) {
-        return;
-    }
-    ht_node_t *node = &tree->memory.node_pool[node_idx];
-    if (!(node->flags & HT_NODE_IN_USE)) {
-        return;
-    }
-
-    if (!(node->flags & HT_NODE_IS_LEAF)) {
-        if (node->drift_idx != HT_INVALID_IDX && node->drift_idx < HT_MAX_DRIFT_NODES) {
-            ht_node_drift_t *nd = &tree->drift_pool->pool[node->drift_idx];
-            if (nd->adwin_idx != HT_INVALID_IDX && tree->adwin_pool != NULL) {
-                ht_adwin_pool_free(tree->adwin_pool, nd->adwin_idx);
-                nd->adwin_idx = HT_INVALID_IDX;
-            }
-            ht_drift_pool_free(tree->drift_pool, node->drift_idx);
-            node->drift_idx = HT_INVALID_IDX;
-        }
-    } else {
-        for (uint16_t i = 0; i < HT_MAX_DRIFT_NODES; ++i) {
-            if (tree->drift_pool->pool[i].node_idx == node_idx) {
-                ht_node_drift_t *nd = &tree->drift_pool->pool[i];
-                if (nd->adwin_idx != HT_INVALID_IDX && tree->adwin_pool != NULL) {
-                    ht_adwin_pool_free(tree->adwin_pool, nd->adwin_idx);
-                    nd->adwin_idx = HT_INVALID_IDX;
-                }
-                ht_drift_pool_free(tree->drift_pool, i);
-                break;
-            }
-        }
-    }
 }
 
 ht_status_t ht_tree_set_prep_pipeline(ht_tree_t *tree, struct ht_prep_pipeline *prep) {
@@ -1170,9 +1010,9 @@ ht_status_t ht_tree_free_subtree(ht_tree_t *tree, uint16_t subtree_root_idx) {
         }
 
         /* 1. Free alternate tree if one exists */
-        const ht_node_drift_t *nd = ht_tree_node_drift_const(tree, curr);
-        if (nd != NULL && nd->alt_tree_idx != HT_INVALID_IDX) {
-            uint16_t alt_idx = nd->alt_tree_idx;
+        if (tree->node_drift[curr].alt_tree_idx != HT_INVALID_IDX) {
+            uint16_t alt_idx = tree->node_drift[curr].alt_tree_idx;
+            tree->node_drift[curr].alt_tree_idx = HT_INVALID_IDX;
             stack[top++] = alt_idx;
         }
 
@@ -1206,8 +1046,15 @@ ht_status_t ht_tree_free_subtree(ht_tree_t *tree, uint16_t subtree_root_idx) {
             }
         }
 
-        /* 4. Free drift metadata and ADWIN detector */
-        ht_tree_node_drift_free(tree, curr);
+        /* 4. Free ADWIN detector */
+        if (tree->node_drift[curr].adwin_idx != HT_INVALID_IDX) {
+            if (tree->adwin_pool != NULL) {
+                ht_adwin_pool_free(tree->adwin_pool, tree->node_drift[curr].adwin_idx);
+            }
+            tree->node_drift[curr].adwin_idx = HT_INVALID_IDX;
+        }
+        tree->node_drift[curr].mean_error = (ht_float_t)0.0;
+        tree->node_drift[curr].error_count = 0U;
 
         /* 5. Free structural node */
         ht_node_free(&tree->memory, curr);
@@ -1393,9 +1240,8 @@ ht_status_t ht_tree_predict_proba(const ht_tree_t *tree,
                 break;
             }
 
-            const ht_node_drift_t *cnd = ht_tree_node_drift_const(tree, curr);
-            if (cnd != NULL && cnd->alt_tree_idx != HT_INVALID_IDX && q_tail < 64) {
-                root_queue[q_tail++] = cnd->alt_tree_idx;
+            if (tree->node_drift[curr].alt_tree_idx != HT_INVALID_IDX && q_tail < 64) {
+                root_queue[q_tail++] = tree->node_drift[curr].alt_tree_idx;
             }
 
             uint8_t f = node->feature_idx;
@@ -1440,8 +1286,7 @@ ht_status_t ht_tree_predict_proba(const ht_tree_t *tree,
     for (uint8_t i = 0; i < n_reached; ++i) {
         uint16_t l_idx = reached_leaves[i];
         ht_predict_proba_at_leaf(tree, l_idx, x_in, &leaf_probas[(size_t)i * HT_MAX_CLASSES]);
-        const ht_node_drift_t *lnd = ht_tree_node_drift_const(tree, l_idx);
-        leaf_errors[i] = (lnd != NULL) ? lnd->mean_error : (ht_float_t)0.0;
+        leaf_errors[i] = tree->node_drift[l_idx].mean_error;
     }
 
     ht_hat_combine_leaf_predictions(leaf_probas, leaf_errors, n_reached, tree->params.n_classes, proba_out);
@@ -1507,14 +1352,14 @@ static ht_status_t ht_tree_learn_one_subtree(ht_tree_t *tree,
         }
 
         if (tree->params.enable_hat && tree->adwin_pool != NULL) {
-            ht_node_drift_t *nd = ht_tree_node_drift(tree, curr_idx);
+            ht_node_drift_t *nd = &tree->node_drift[curr_idx];
             bool error_drift = false;
-            if (nd != NULL && nd->adwin_idx != HT_INVALID_IDX) {
+            if (nd->adwin_idx != HT_INVALID_IDX) {
                 ht_adwin_t *ad = ht_adwin_pool_get(tree->adwin_pool, nd->adwin_idx);
                 error_drift = ht_hat_check_error_drift(ad, &nd->mean_error, &nd->error_count, detec_in);
             }
 
-            if (error_drift && nd != NULL) {
+            if (error_drift) {
                 if (nd->alt_tree_idx != HT_INVALID_IDX) {
                     ht_tree_free_subtree(tree, nd->alt_tree_idx);
                     tree->n_pruned_alternate_trees++;
@@ -1538,26 +1383,23 @@ static ht_status_t ht_tree_learn_one_subtree(ht_tree_t *tree,
                         tree->n_inactive_leaves++;
                     }
 
-                    ht_node_drift_t *alt_leaf_nd = ht_tree_node_drift(tree, alt_leaf);
-                    if (alt_leaf_nd != NULL) {
-                        alt_leaf_nd->adwin_idx = ht_adwin_pool_alloc(tree->adwin_pool, NULL);
-                        alt_leaf_nd->alt_tree_idx = HT_INVALID_IDX;
-                        alt_leaf_nd->mean_error = (ht_float_t)0.0;
-                        alt_leaf_nd->error_count = 0U;
-                    }
+                    tree->node_drift[alt_leaf].adwin_idx = ht_adwin_pool_alloc(tree->adwin_pool, NULL);
+                    tree->node_drift[alt_leaf].alt_tree_idx = HT_INVALID_IDX;
+                    tree->node_drift[alt_leaf].mean_error = (ht_float_t)0.0;
+                    tree->node_drift[alt_leaf].error_count = 0U;
 
                     nd->alt_tree_idx = alt_leaf;
                     tree->n_alternate_trees++;
                 }
-            } else if (nd != NULL && nd->alt_tree_idx != HT_INVALID_IDX) {
+            } else if (nd->alt_tree_idx != HT_INVALID_IDX) {
                 uint16_t alt_idx = nd->alt_tree_idx;
-                ht_node_drift_t *alt_nd = ht_tree_node_drift(tree, alt_idx);
+                ht_node_drift_t *alt_nd = &tree->node_drift[alt_idx];
 
                 ht_hat_action_t action = ht_hat_evaluate_alternate(
                     nd->mean_error,
                     nd->error_count,
-                    (alt_nd != NULL) ? alt_nd->mean_error : (ht_float_t)0.0,
-                    (alt_nd != NULL) ? alt_nd->error_count : 0U,
+                    alt_nd->mean_error,
+                    alt_nd->error_count,
                     tree->params.drift_window_threshold,
                     tree->params.switch_significance
                 );
@@ -1590,7 +1432,7 @@ static ht_status_t ht_tree_learn_one_subtree(ht_tree_t *tree,
                 }
             }
 
-            if (nd != NULL && nd->alt_tree_idx != HT_INVALID_IDX) {
+            if (nd->alt_tree_idx != HT_INVALID_IDX) {
                 ht_tree_learn_one_subtree(tree, nd->alt_tree_idx, x, y, weight, depth);
             }
         }
@@ -1635,8 +1477,8 @@ static ht_status_t ht_tree_learn_one_subtree(ht_tree_t *tree,
     ht_node_t *leaf = &tree->memory.node_pool[leaf_idx];
 
     if (tree->params.enable_hat && tree->adwin_pool != NULL) {
-        ht_node_drift_t *leaf_nd = ht_tree_node_drift(tree, leaf_idx);
-        if (leaf_nd != NULL && leaf_nd->adwin_idx != HT_INVALID_IDX) {
+        ht_node_drift_t *leaf_nd = &tree->node_drift[leaf_idx];
+        if (leaf_nd->adwin_idx != HT_INVALID_IDX) {
             ht_adwin_t *ad = ht_adwin_pool_get(tree->adwin_pool, leaf_nd->adwin_idx);
             ht_hat_check_error_drift(ad, &leaf_nd->mean_error, &leaf_nd->error_count, detec_in);
         }
@@ -1682,7 +1524,7 @@ static ht_status_t ht_tree_learn_one_subtree(ht_tree_t *tree,
                     if (tree->params.numeric_obs_type == HT_OBS_HISTOGRAM) {
                         ht_hist_update(&stats->observers[f].hist, y, x[f].num, weight);
                     } else {
-                        ht_gaussian_update(&stats->observers[f].num, y, x[f].num, weight);
+                        ht_gaussian_update(stats->observers[f].num, y, x[f].num, weight);
                     }
                 }
             } else {
@@ -1778,8 +1620,8 @@ ht_float_t ht_tree_predict_reg(const ht_tree_t *tree, const ht_value_t x[HT_MAX_
                 break;
             }
 
-            const ht_node_drift_t *nd = ht_tree_node_drift_const(tree, curr_idx);
-            if (nd != NULL && nd->alt_tree_idx != HT_INVALID_IDX) {
+            const ht_node_drift_t *nd = &tree->node_drift[curr_idx];
+            if (nd->alt_tree_idx != HT_INVALID_IDX) {
                 uint16_t alt_leaf = ht_tree_route_from(tree, nd->alt_tree_idx, x_in);
                 if (alt_leaf != HT_INVALID_IDX) {
                     sum_pred += ht_predict_reg_at_leaf(tree, alt_leaf, x_in);
@@ -1851,14 +1693,14 @@ static ht_status_t ht_tree_learn_one_reg_subtree(ht_tree_t *tree,
         }
 
         if (tree->params.enable_hat && tree->adwin_pool != NULL) {
-            ht_node_drift_t *nd = ht_tree_node_drift(tree, curr_idx);
+            ht_node_drift_t *nd = &tree->node_drift[curr_idx];
             bool error_drift = false;
-            if (nd != NULL && nd->adwin_idx != HT_INVALID_IDX) {
+            if (nd->adwin_idx != HT_INVALID_IDX) {
                 ht_adwin_t *ad = ht_adwin_pool_get(tree->adwin_pool, nd->adwin_idx);
                 error_drift = ht_hat_check_reg_error_drift(ad, &nd->mean_error, &nd->error_m2, &nd->error_count, abs_error);
             }
 
-            if (error_drift && nd != NULL) {
+            if (error_drift) {
                 if (nd->alt_tree_idx != HT_INVALID_IDX) {
                     ht_tree_free_subtree(tree, nd->alt_tree_idx);
                     tree->n_pruned_alternate_trees++;
@@ -1887,36 +1729,29 @@ static ht_status_t ht_tree_learn_one_reg_subtree(ht_tree_t *tree,
                         tree->n_inactive_leaves++;
                     }
 
-                    ht_node_drift_t *alt_leaf_nd = ht_tree_node_drift(tree, alt_leaf);
-                    if (alt_leaf_nd != NULL) {
-                        alt_leaf_nd->adwin_idx = ht_adwin_pool_alloc(tree->adwin_pool, NULL);
-                        alt_leaf_nd->alt_tree_idx = HT_INVALID_IDX;
-                        alt_leaf_nd->mean_error = (ht_float_t)0.0;
-                        alt_leaf_nd->error_m2 = (ht_float_t)0.0;
-                        alt_leaf_nd->error_count = 0U;
-                    }
+                    tree->node_drift[alt_leaf].adwin_idx = ht_adwin_pool_alloc(tree->adwin_pool, NULL);
+                    tree->node_drift[alt_leaf].alt_tree_idx = HT_INVALID_IDX;
+                    tree->node_drift[alt_leaf].mean_error = (ht_float_t)0.0;
+                    tree->node_drift[alt_leaf].error_m2 = (ht_float_t)0.0;
+                    tree->node_drift[alt_leaf].error_count = 0U;
 
                     nd->alt_tree_idx = alt_leaf;
                     tree->n_alternate_trees++;
                 }
-            } else if (nd != NULL && nd->alt_tree_idx != HT_INVALID_IDX) {
+            } else if (nd->alt_tree_idx != HT_INVALID_IDX) {
                 uint16_t alt_idx = nd->alt_tree_idx;
-                ht_node_drift_t *alt_nd = ht_tree_node_drift(tree, alt_idx);
-
-                ht_float_t alt_mean = (alt_nd != NULL) ? alt_nd->mean_error : (ht_float_t)0.0;
-                uint32_t alt_cnt = (alt_nd != NULL) ? alt_nd->error_count : 0U;
-                ht_float_t alt_m2 = (alt_nd != NULL) ? alt_nd->error_m2 : (ht_float_t)0.0;
+                ht_node_drift_t *alt_nd = &tree->node_drift[alt_idx];
 
                 ht_float_t var_old = (nd->error_count > 1) ? (nd->error_m2 / (ht_float_t)(nd->error_count - 1)) : (ht_float_t)0.0;
-                ht_float_t var_alt = (alt_cnt > 1) ? (alt_m2 / (ht_float_t)(alt_cnt - 1)) : (ht_float_t)0.0;
+                ht_float_t var_alt = (alt_nd->error_count > 1) ? (alt_nd->error_m2 / (ht_float_t)(alt_nd->error_count - 1)) : (ht_float_t)0.0;
 
                 ht_hat_action_t action = ht_hat_evaluate_reg_alternate(
                     nd->mean_error,
                     var_old,
                     nd->error_count,
-                    alt_mean,
+                    alt_nd->mean_error,
                     var_alt,
-                    alt_cnt,
+                    alt_nd->error_count,
                     tree->params.drift_window_threshold,
                     tree->params.switch_significance
                 );
@@ -1949,7 +1784,7 @@ static ht_status_t ht_tree_learn_one_reg_subtree(ht_tree_t *tree,
                 }
             }
 
-            if (nd != NULL && nd->alt_tree_idx != HT_INVALID_IDX) {
+            if (nd->alt_tree_idx != HT_INVALID_IDX) {
                 ht_tree_learn_one_reg_subtree(tree, nd->alt_tree_idx, x, y, weight, depth);
             }
         }
@@ -1994,8 +1829,8 @@ static ht_status_t ht_tree_learn_one_reg_subtree(ht_tree_t *tree,
     ht_node_t *leaf = &tree->memory.node_pool[leaf_idx];
 
     if (tree->params.enable_hat && tree->adwin_pool != NULL) {
-        ht_node_drift_t *leaf_nd = ht_tree_node_drift(tree, leaf_idx);
-        if (leaf_nd != NULL && leaf_nd->adwin_idx != HT_INVALID_IDX) {
+        ht_node_drift_t *leaf_nd = &tree->node_drift[leaf_idx];
+        if (leaf_nd->adwin_idx != HT_INVALID_IDX) {
             ht_adwin_t *ad = ht_adwin_pool_get(tree->adwin_pool, leaf_nd->adwin_idx);
             ht_hat_check_reg_error_drift(ad, &leaf_nd->mean_error, &leaf_nd->error_m2, &leaf_nd->error_count, abs_error);
         }
@@ -2358,8 +2193,9 @@ ht_status_t ht_tree_load(ht_tree_t *tree,
     tree->train_weight_seen = header.train_weight_seen;
     tree->rng_state = 123456789U;
 
-    if (tree->drift_pool != NULL) {
-        ht_drift_pool_reset(tree->drift_pool);
+    for (uint16_t i = 0; i < HT_MAX_NODES; ++i) {
+        tree->node_drift[i].adwin_idx = HT_INVALID_IDX;
+        tree->node_drift[i].alt_tree_idx = HT_INVALID_IDX;
     }
 
     /* Read nodes */
@@ -2371,9 +2207,6 @@ ht_status_t ht_tree_load(ht_tree_t *tree,
             return HT_ERR_CORRUPT_IMAGE;
         }
         memcpy(&tree->memory.node_pool[node_idx], ptr, sizeof(ht_node_t));
-        if (!(tree->memory.node_pool[node_idx].flags & HT_NODE_IS_LEAF)) {
-            tree->memory.node_pool[node_idx].drift_idx = HT_INVALID_IDX;
-        }
         ptr += sizeof(ht_node_t);
     }
 

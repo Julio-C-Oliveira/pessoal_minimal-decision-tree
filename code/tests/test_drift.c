@@ -432,75 +432,6 @@ static void test_adwin_pool_bytes_budget(void) {
     HT_ASSERT_EQ(bytes, sizeof(ht_adwin_pool_t));
 }
 
-static void test_drift_pool_alloc_free_lifecycle(void) {
-    ht_drift_pool_t pool;
-    HT_ASSERT_EQ(ht_drift_pool_init(&pool), HT_OK);
-    HT_ASSERT_EQ(pool.free_head, 0U);
-    HT_ASSERT_EQ(pool.allocated_count, 0U);
-
-    /* Allocate all entries up to capacity */
-    uint16_t indices[HT_MAX_DRIFT_NODES];
-    for (uint16_t i = 0; i < HT_MAX_DRIFT_NODES; ++i) {
-        indices[i] = ht_drift_pool_alloc(&pool);
-        HT_ASSERT_NEQ(indices[i], HT_INVALID_IDX);
-        HT_ASSERT(indices[i] < HT_MAX_DRIFT_NODES);
-
-        ht_node_drift_t *nd = ht_drift_pool_get(&pool, indices[i]);
-        HT_ASSERT_NOT_NULL(nd);
-        HT_ASSERT_EQ(nd->adwin_idx, HT_INVALID_IDX);
-        HT_ASSERT_EQ(nd->alt_tree_idx, HT_INVALID_IDX);
-        HT_ASSERT_EQ(nd->node_idx, HT_INVALID_IDX);
-    }
-    HT_ASSERT_EQ(pool.allocated_count, HT_MAX_DRIFT_NODES);
-    HT_ASSERT_EQ(pool.free_head, HT_INVALID_IDX);
-
-    /* 129th allocation must fail */
-    HT_ASSERT_EQ(ht_drift_pool_alloc(&pool), HT_INVALID_IDX);
-
-    /* Free entry at index 5 and 10 */
-    HT_ASSERT_EQ(ht_drift_pool_free(&pool, indices[5]), HT_OK);
-    HT_ASSERT_EQ(ht_drift_pool_free(&pool, indices[10]), HT_OK);
-    HT_ASSERT_EQ(pool.allocated_count, (uint16_t)(HT_MAX_DRIFT_NODES - 2U));
-
-    /* Out of bounds free and get */
-    HT_ASSERT_EQ(ht_drift_pool_free(&pool, HT_MAX_DRIFT_NODES), HT_ERR_INVALID_ARG);
-    HT_ASSERT_NULL(ht_drift_pool_get(&pool, HT_MAX_DRIFT_NODES));
-    HT_ASSERT_NULL(ht_drift_pool_get_const(&pool, HT_MAX_DRIFT_NODES));
-
-    /* Re-allocate the 2 freed slots */
-    uint16_t realloc1 = ht_drift_pool_alloc(&pool);
-    uint16_t realloc2 = ht_drift_pool_alloc(&pool);
-    HT_ASSERT_NEQ(realloc1, HT_INVALID_IDX);
-    HT_ASSERT_NEQ(realloc2, HT_INVALID_IDX);
-    HT_ASSERT_EQ(pool.allocated_count, HT_MAX_DRIFT_NODES);
-
-    /* Reset pool */
-    ht_drift_pool_reset(&pool);
-    HT_ASSERT_EQ(pool.allocated_count, 0U);
-    HT_ASSERT_EQ(pool.free_head, 0U);
-}
-
-static void test_drift_pool_bytes_budget(void) {
-    ht_drift_pool_t pool;
-    HT_ASSERT_EQ(ht_drift_pool_init(&pool), HT_OK);
-
-    size_t bytes = ht_drift_pool_bytes_used(&pool);
-    /* Budget: <= 8 KB (128 entries * 24/32 bytes) */
-    HT_ASSERT(bytes <= (8U * 1024U));
-    HT_ASSERT_EQ(bytes, sizeof(ht_drift_pool_t));
-}
-
-static void test_tree_decoupled_drift_budget(void) {
-    /* Verify ht_tree_t RAM reduction from decoupling node_drift[4096] */
-#ifndef HT_USE_DOUBLE
-    /* In float32: was ~524.9 KB, now strictly <= 480 KB (saving ~65 KB) */
-    HT_ASSERT(sizeof(ht_tree_t) <= (480U * 1024U));
-#else
-    /* In double64: was ~1000.5 KB, now strictly <= 920 KB (saving ~98 KB) */
-    HT_ASSERT(sizeof(ht_tree_t) <= (920U * 1024U));
-#endif
-}
-
 /* --- Level 1: HAT Unit Tests (Filter, Bound, Voting) --- */
 
 static void test_hat_unilateral_error_filter(void) {
@@ -714,26 +645,16 @@ static void test_hat_subtree_replacement_and_iterative_recycling(void) {
     tree.memory.node_pool[right_idx].stats_idx = r_stats;
 
     /* Allocate ADWIN for children */
-    ht_node_drift_t *l_nd = ht_tree_node_drift(&tree, left_idx);
-    HT_ASSERT_NOT_NULL(l_nd);
-    l_nd->adwin_idx = ht_adwin_pool_alloc(&ad_pool, NULL);
-
-    ht_node_drift_t *r_nd = ht_tree_node_drift(&tree, right_idx);
-    HT_ASSERT_NOT_NULL(r_nd);
-    r_nd->adwin_idx = ht_adwin_pool_alloc(&ad_pool, NULL);
+    tree.node_drift[left_idx].adwin_idx = ht_adwin_pool_alloc(&ad_pool, NULL);
+    tree.node_drift[right_idx].adwin_idx = ht_adwin_pool_alloc(&ad_pool, NULL);
 
     /* Now create an alternate subtree at root */
     uint16_t alt_root = ht_node_alloc(&tree.memory);
     HT_ASSERT_NEQ(alt_root, HT_INVALID_IDX);
     uint16_t alt_stats = ht_stats_alloc(&tree.memory);
     tree.memory.node_pool[alt_root].stats_idx = alt_stats;
-    ht_node_drift_t *alt_nd = ht_tree_node_drift(&tree, alt_root);
-    HT_ASSERT_NOT_NULL(alt_nd);
-    alt_nd->adwin_idx = ht_adwin_pool_alloc(&ad_pool, NULL);
-
-    ht_node_drift_t *root_nd = ht_tree_node_drift(&tree, root_idx);
-    HT_ASSERT_NOT_NULL(root_nd);
-    root_nd->alt_tree_idx = alt_root;
+    tree.node_drift[alt_root].adwin_idx = ht_adwin_pool_alloc(&ad_pool, NULL);
+    tree.node_drift[root_idx].alt_tree_idx = alt_root;
 
     /* Total allocated before switch: 4 nodes, 3 stats (leaves only), 4 detectors */
     HT_ASSERT_EQ(tree.memory.nodes_allocated, 4U);
@@ -742,7 +663,7 @@ static void test_hat_subtree_replacement_and_iterative_recycling(void) {
 
     /* Perform SWITCH: alt_root becomes new root, old root subtree (root, left, right) freed */
     tree.root_idx = alt_root;
-    root_nd->alt_tree_idx = HT_INVALID_IDX;
+    tree.node_drift[root_idx].alt_tree_idx = HT_INVALID_IDX;
     HT_ASSERT_EQ(ht_tree_free_subtree(&tree, root_idx), HT_OK);
 
     /* After switch: exactly 1 node (alt_root), 1 stats, 1 detector remaining! */
@@ -772,13 +693,8 @@ static void test_hat_alternate_tree_pruning_and_recycling(void) {
     uint16_t alt_root = ht_node_alloc(&tree.memory);
     uint16_t alt_stats = ht_stats_alloc(&tree.memory);
     tree.memory.node_pool[alt_root].stats_idx = alt_stats;
-    ht_node_drift_t *alt_nd = ht_tree_node_drift(&tree, alt_root);
-    HT_ASSERT_NOT_NULL(alt_nd);
-    alt_nd->adwin_idx = ht_adwin_pool_alloc(&ad_pool, NULL);
-
-    ht_node_drift_t *root_nd = ht_tree_node_drift(&tree, tree.root_idx);
-    HT_ASSERT_NOT_NULL(root_nd);
-    root_nd->alt_tree_idx = alt_root;
+    tree.node_drift[alt_root].adwin_idx = ht_adwin_pool_alloc(&ad_pool, NULL);
+    tree.node_drift[tree.root_idx].alt_tree_idx = alt_root;
 
     HT_ASSERT_EQ(tree.memory.nodes_allocated, 2U);
     HT_ASSERT_EQ(tree.memory.stats_allocated, 2U);
@@ -786,7 +702,7 @@ static void test_hat_alternate_tree_pruning_and_recycling(void) {
 
     /* Prune alternate tree */
     HT_ASSERT_EQ(ht_tree_free_subtree(&tree, alt_root), HT_OK);
-    root_nd->alt_tree_idx = HT_INVALID_IDX;
+    tree.node_drift[tree.root_idx].alt_tree_idx = HT_INVALID_IDX;
 
     /* Memory returns strictly to baseline: 1 node, 1 stats, 1 detector */
     HT_ASSERT_EQ(tree.memory.nodes_allocated, 1U);
@@ -928,9 +844,6 @@ void test_drift_run(void) {
     HT_RUN_TEST(test_adwin_pool_concurrent_detectors);
     HT_RUN_TEST(test_adwin_pool_stress_50k_recycling);
     HT_RUN_TEST(test_adwin_pool_bytes_budget);
-    HT_RUN_TEST(test_drift_pool_alloc_free_lifecycle);
-    HT_RUN_TEST(test_drift_pool_bytes_budget);
-    HT_RUN_TEST(test_tree_decoupled_drift_budget);
 
     /* Nível 2: HAT Substituição e Poda de Subárvores */
     HT_RUN_TEST(test_hat_subtree_replacement_and_iterative_recycling);

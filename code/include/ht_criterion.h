@@ -145,7 +145,7 @@ ht_float_t ht_hoeffding_bound(ht_float_t range_val,
  * @param min_branch_frac Minimum fraction of total weight required in each child.
  * @param out_best Output candidate descriptor.
  */
-void ht_evaluate_numeric_observer(const ht_gaussian_obs_t *obs,
+void ht_evaluate_numeric_observer(const ht_gaussian_obs_t obs[HT_MAX_CLASSES],
                                   const ht_float_t pre_dist[HT_MAX_CLASSES],
                                   uint8_t n_classes,
                                   uint8_t feature_idx,

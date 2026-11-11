@@ -29,7 +29,7 @@ void ht_scaler_update_one(ht_scaler_t *scaler, uint8_t feat_idx, ht_float_t val,
     if (scaler == NULL || feat_idx >= HT_MAX_FEATURES || HT_ISNAN(val) || weight <= (ht_float_t)0.0) {
         return;
     }
-    ht_scaler_stat_t *s = &scaler->stats[feat_idx];
+    ht_gaussian_obs_t *s = &scaler->stats[feat_idx];
     if (s->count <= (ht_float_t)0.0) {
         s->count = weight;
         s->mean = val;
@@ -54,7 +54,7 @@ ht_float_t ht_scaler_transform_one(const ht_scaler_t *scaler, uint8_t feat_idx, 
     }
     ht_scaler_type_t m = scaler->mode[feat_idx];
     if (m == HT_SCALER_STANDARD) {
-        const ht_scaler_stat_t *s = &scaler->stats[feat_idx];
+        const ht_gaussian_obs_t *s = &scaler->stats[feat_idx];
         if (s->count <= (ht_float_t)1.0) {
             return (ht_float_t)0.0;
         }
@@ -62,7 +62,7 @@ ht_float_t ht_scaler_transform_one(const ht_scaler_t *scaler, uint8_t feat_idx, 
         ht_float_t stddev = HT_SQRT(var + (ht_float_t)1e-6);
         return (val - s->mean) / stddev;
     } else if (m == HT_SCALER_MINMAX) {
-        const ht_scaler_stat_t *s = &scaler->stats[feat_idx];
+        const ht_gaussian_obs_t *s = &scaler->stats[feat_idx];
         ht_float_t range = s->max_val - s->min_val;
         if (range <= (ht_float_t)1e-6) {
             return (ht_float_t)0.0;

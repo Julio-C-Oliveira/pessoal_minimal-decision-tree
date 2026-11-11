@@ -73,15 +73,15 @@ void ht_gaussian_init(ht_gaussian_obs_t *obs);
  * @brief Incremental update using Welford's algorithm for 1 (feature, class) pair.
  *
  * Updates sample weight count (n_c), mean (mu_c), centered sum of squares (M2_c),
- * and observed class range [min_val, max_val]. Safely ignores NaN values, weights <= 0,
+ * and observed range [min_val, max_val]. Safely ignores NaN values, weights <= 0,
  * and class indices >= HT_MAX_CLASSES.
  *
- * @param obs Pointer to Gaussian observer for the feature.
+ * @param obs Array of Gaussian observers for all classes of a single feature.
  * @param class_idx Target class index (0 .. HT_MAX_CLASSES - 1).
  * @param val Feature value (ignored if NaN).
  * @param weight Sample weight (ignored if <= 0).
  */
-void ht_gaussian_update(ht_gaussian_obs_t *obs,
+void ht_gaussian_update(ht_gaussian_obs_t obs[HT_MAX_CLASSES],
                         uint8_t class_idx,
                         ht_float_t val,
                         ht_float_t weight);
@@ -91,20 +91,20 @@ void ht_gaussian_update(ht_gaussian_obs_t *obs,
  *
  * Returns 0.0 if n <= 1 or M2 <= 0.
  *
- * @param obs Pointer to the Gaussian class statistics.
+ * @param obs Pointer to the Gaussian observer.
  * @return Sample variance s^2.
  */
-ht_float_t ht_gaussian_variance(const ht_gaussian_class_stat_t *obs);
+ht_float_t ht_gaussian_variance(const ht_gaussian_obs_t *obs);
 
 /**
  * @brief Computes sample standard deviation sigma = sqrt(s^2).
  *
  * Returns 0.0 if n <= 1 or s^2 <= 0.
  *
- * @param obs Pointer to the Gaussian class statistics.
+ * @param obs Pointer to the Gaussian observer.
  * @return Standard deviation sigma.
  */
-ht_float_t ht_gaussian_stddev(const ht_gaussian_class_stat_t *obs);
+ht_float_t ht_gaussian_stddev(const ht_gaussian_obs_t *obs);
 
 /**
  * @brief Evaluates the standard normal cumulative distribution function (CDF).
@@ -125,11 +125,11 @@ ht_float_t ht_normal_cdf(ht_float_t x, ht_float_t mean, ht_float_t stddev);
  * Computes p(x | c) = 1 / sqrt(2 * pi * s^2) * exp(-(x - mu)^2 / (2 * s^2)).
  * Returns 0.0 if count < 2 or variance <= 0.
  *
- * @param obs Pointer to the Gaussian class statistics.
+ * @param obs Pointer to the Gaussian observer.
  * @param val Feature value.
  * @return Density p(x | c).
  */
-ht_float_t ht_gaussian_cond_proba(const ht_gaussian_class_stat_t *obs, ht_float_t val);
+ht_float_t ht_gaussian_cond_proba(const ht_gaussian_obs_t *obs, ht_float_t val);
 
 /**
  * @brief Evaluates Gaussian log probability density function (log-PDF).
@@ -137,26 +137,26 @@ ht_float_t ht_gaussian_cond_proba(const ht_gaussian_class_stat_t *obs, ht_float_
  * Computes ln(p(x | c)) = -0.5 * (ln(2 * pi) + ln(s^2)) - (x - mu)^2 / (2 * s^2).
  * Returns -HT_INFINITY if count < 2 or variance <= 0 or val is NaN.
  *
- * @param obs Pointer to the Gaussian class statistics.
+ * @param obs Pointer to the Gaussian observer.
  * @param val Feature value.
  * @return Log density ln(p(x | c)).
  */
-ht_float_t ht_gaussian_cond_log_proba(const ht_gaussian_class_stat_t *obs, ht_float_t val);
+ht_float_t ht_gaussian_cond_log_proba(const ht_gaussian_obs_t *obs, ht_float_t val);
 
 /**
  * @brief Generates up to HT_GAUSSIAN_SPLITS evenly spaced candidate split points.
  *
  * Matches River's GaussianSplitter._split_point_suggestions:
- * Uses [min_val, max_val] across all observed classes with count > 0,
+ * Finds [min_val, max_val] across all observed classes with count > 0,
  * divides into HT_GAUSSIAN_SPLITS + 1 bins, and outputs interior candidate points.
  * Returns 0 if feature is constant (min_val >= max_val) or no samples observed.
  *
- * @param obs Pointer to Gaussian observer for the feature.
+ * @param obs Array of Gaussian observers for all classes of a feature.
  * @param n_classes Number of classes in the tree schema.
  * @param splits_out Buffer of at least HT_GAUSSIAN_SPLITS elements to receive suggested points.
  * @return Number of candidate split points written to splits_out.
  */
-uint8_t ht_gaussian_split_suggestions(const ht_gaussian_obs_t *obs,
+uint8_t ht_gaussian_split_suggestions(const ht_gaussian_obs_t obs[HT_MAX_CLASSES],
                                       uint8_t n_classes,
                                       ht_float_t splits_out[HT_GAUSSIAN_SPLITS]);
 
@@ -169,13 +169,13 @@ uint8_t ht_gaussian_split_suggestions(const ht_gaussian_obs_t *obs,
  * - If split_val >= max_val: all weight goes to left branch.
  * - Otherwise: left_weight = cdf(split_val) * count, right_weight = count - left_weight.
  *
- * @param obs Pointer to Gaussian observer for the feature.
+ * @param obs Array of Gaussian observers for all classes.
  * @param n_classes Number of active classes.
  * @param split_val Candidate threshold.
  * @param lhs_dist Output array of size HT_MAX_CLASSES for left branch (x <= split_val).
  * @param rhs_dist Output array of size HT_MAX_CLASSES for right branch (x > split_val).
  */
-void ht_gaussian_binary_split_dists(const ht_gaussian_obs_t *obs,
+void ht_gaussian_binary_split_dists(const ht_gaussian_obs_t obs[HT_MAX_CLASSES],
                                     uint8_t n_classes,
                                     ht_float_t split_val,
                                     ht_float_t lhs_dist[HT_MAX_CLASSES],
