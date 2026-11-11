@@ -14,30 +14,52 @@
 /* --- Internal Static Helpers --------------------------------------------- */
 /* ========================================================================= */
 
-static uint16_t ht_most_common_child(const ht_tree_t *tree, const ht_node_t *node) {
-    ht_float_t left_w = (ht_float_t)0.0;
-    ht_float_t right_w = (ht_float_t)0.0;
+static ht_float_t ht_node_total_weight(const ht_tree_t *tree, uint16_t node_idx) {
+    if (node_idx == HT_INVALID_IDX || node_idx >= HT_MAX_NODES) return (ht_float_t)0.0;
+    const ht_node_t *node = &tree->memory.node_pool[node_idx];
+    if (!(node->flags & HT_NODE_IN_USE)) return (ht_float_t)0.0;
 
-    if (node->left_child != HT_INVALID_IDX) {
-        const ht_node_t *left = &tree->memory.node_pool[node->left_child];
+    if (node->flags & HT_NODE_IS_LEAF) {
         if (tree->params.task_type == HT_TASK_REGRESSION) {
-            left_w = left->reg_stats.count;
+            return node->reg_stats.count;
         } else {
+            ht_float_t w = (ht_float_t)0.0;
             for (uint8_t c = 0; c < tree->params.n_classes; ++c) {
-                left_w += left->class_counts[c];
+                w += node->class_counts[c];
+            }
+            return w;
+        }
+    } else {
+        ht_float_t total = (ht_float_t)0.0;
+        uint16_t stack[64];
+        uint16_t top = 0;
+        if (node->left_child != HT_INVALID_IDX) stack[top++] = node->left_child;
+        if (node->right_child != HT_INVALID_IDX) stack[top++] = node->right_child;
+        while (top > 0) {
+            uint16_t curr = stack[--top];
+            if (curr >= HT_MAX_NODES) continue;
+            const ht_node_t *n = &tree->memory.node_pool[curr];
+            if (!(n->flags & HT_NODE_IN_USE)) continue;
+            if (n->flags & HT_NODE_IS_LEAF) {
+                if (tree->params.task_type == HT_TASK_REGRESSION) {
+                    total += n->reg_stats.count;
+                } else {
+                    for (uint8_t c = 0; c < tree->params.n_classes; ++c) {
+                        total += n->class_counts[c];
+                    }
+                }
+            } else {
+                if (n->left_child != HT_INVALID_IDX && top < 64) stack[top++] = n->left_child;
+                if (n->right_child != HT_INVALID_IDX && top < 64) stack[top++] = n->right_child;
             }
         }
+        return total;
     }
-    if (node->right_child != HT_INVALID_IDX) {
-        const ht_node_t *right = &tree->memory.node_pool[node->right_child];
-        if (tree->params.task_type == HT_TASK_REGRESSION) {
-            right_w = right->reg_stats.count;
-        } else {
-            for (uint8_t c = 0; c < tree->params.n_classes; ++c) {
-                right_w += right->class_counts[c];
-            }
-        }
-    }
+}
+
+static uint16_t ht_most_common_child(const ht_tree_t *tree, const ht_node_t *node) {
+    ht_float_t left_w = ht_node_total_weight(tree, node->left_child);
+    ht_float_t right_w = ht_node_total_weight(tree, node->right_child);
 
     return (left_w >= right_w) ? node->left_child : node->right_child;
 }
@@ -494,16 +516,12 @@ static ht_status_t ht_tree_attempt_split_reg(ht_tree_t *tree, uint16_t leaf_idx,
         ht_node_t *left = &tree->memory.node_pool[left_idx];
         left->reg_stats = best.lhs_var;
         left->flags = HT_NODE_IS_LEAF | HT_NODE_IN_USE;
-        left->left_child = HT_INVALID_IDX;
-        left->right_child = HT_INVALID_IDX;
         left->stats_idx = HT_INVALID_IDX;
 
         /* Initialize right child */
         ht_node_t *right = &tree->memory.node_pool[right_idx];
         right->reg_stats = best.rhs_var;
         right->flags = HT_NODE_IS_LEAF | HT_NODE_IN_USE;
-        right->left_child = HT_INVALID_IDX;
-        right->right_child = HT_INVALID_IDX;
         right->stats_idx = HT_INVALID_IDX;
 
         /* Allocate stats for left child */
@@ -686,8 +704,6 @@ static ht_status_t ht_tree_attempt_split(ht_tree_t *tree, uint16_t leaf_idx, uin
             left_w += best.lhs_dist[c];
         }
         left->flags = HT_NODE_IS_LEAF | HT_NODE_IN_USE;
-        left->left_child = HT_INVALID_IDX;
-        left->right_child = HT_INVALID_IDX;
         left->stats_idx = HT_INVALID_IDX;
 
         /* Initialize right child */
@@ -698,8 +714,6 @@ static ht_status_t ht_tree_attempt_split(ht_tree_t *tree, uint16_t leaf_idx, uin
             right_w += best.rhs_dist[c];
         }
         right->flags = HT_NODE_IS_LEAF | HT_NODE_IN_USE;
-        right->left_child = HT_INVALID_IDX;
-        right->right_child = HT_INVALID_IDX;
         right->stats_idx = HT_INVALID_IDX;
 
         /* Allocate stats for left child */
@@ -1017,18 +1031,18 @@ ht_status_t ht_tree_free_subtree(ht_tree_t *tree, uint16_t subtree_root_idx) {
             }
         }
 
-        /* 3. Free stats if allocated */
-        if (node->stats_idx != HT_INVALID_IDX) {
-            ht_stats_free(&tree->memory, node->stats_idx);
-            node->stats_idx = HT_INVALID_IDX;
-            if (node->flags & HT_NODE_IS_LEAF) {
+        /* 3. Free stats if allocated (leaves only) */
+        if (node->flags & HT_NODE_IS_LEAF) {
+            if (node->stats_idx != HT_INVALID_IDX) {
+                ht_stats_free(&tree->memory, node->stats_idx);
+                node->stats_idx = HT_INVALID_IDX;
                 if (tree->n_active_leaves > 0) {
                     tree->n_active_leaves--;
                 }
-            }
-        } else if (node->flags & HT_NODE_IS_LEAF) {
-            if (tree->n_inactive_leaves > 0) {
-                tree->n_inactive_leaves--;
+            } else {
+                if (tree->n_inactive_leaves > 0) {
+                    tree->n_inactive_leaves--;
+                }
             }
         }
 
@@ -1336,8 +1350,6 @@ static ht_status_t ht_tree_learn_one_subtree(ht_tree_t *tree,
         if (node->flags & HT_NODE_IS_LEAF) {
             break;
         }
-
-        node->class_counts[y] += weight;
 
         if (tree->params.enable_hat && tree->adwin_pool != NULL) {
             ht_node_drift_t *nd = &tree->node_drift[curr_idx];
@@ -1679,8 +1691,6 @@ static ht_status_t ht_tree_learn_one_reg_subtree(ht_tree_t *tree,
         if (node->flags & HT_NODE_IS_LEAF) {
             break;
         }
-
-        ht_var_update(&node->reg_stats, y, weight);
 
         if (tree->params.enable_hat && tree->adwin_pool != NULL) {
             ht_node_drift_t *nd = &tree->node_drift[curr_idx];

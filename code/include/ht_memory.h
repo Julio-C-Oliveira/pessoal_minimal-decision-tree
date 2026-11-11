@@ -62,33 +62,52 @@ typedef struct {
 } ht_reg_categorical_obs_t;
 
 /**
- * @brief Permanent structural node in the decision tree (unified classification + regression).
+ * @brief Permanent structural node in the decision tree (asymmetric leaf vs branch union).
  *
- * Designed for binary relocatability and memory efficiency:
- * - 16 or 32 bytes: anonymous union between class_counts and reg_stats
- * - 4 or 8 bytes: split_val union
- * - 2 bytes: left_child, right_child, stats_idx
- * - 1 byte: feature_idx, flags
+ * Implements Phase 7 Hypothesis 2 (H2): Asymmetric Topology Union.
+ * In a Hoeffding tree, a node is strictly an active/inactive LEAF or an internal BRANCH,
+ * never both simultaneously:
+ * - LEAF: class_counts[HT_MAX_CLASSES] (or reg_stats) + stats_idx (18 bytes).
+ * - BRANCH: split_val (threshold / cat_val) + left_child + right_child + feature_idx (9-13 bytes).
+ * - INACTIVE: next_free intrusive free-list link (2 bytes).
+ * - HEADER: flags and reserved placed at fixed offset 18 (float32) / 38 (float64), ensuring
+ *   flags never collides with leaf or branch payload.
  *
- * Sized at exactly 28 bytes in float32 and 48 bytes in float64 (zero bytes overhead).
+ * Sized at exactly 20 bytes in float32 and 40 bytes in float64 (saving 32 KB across 4096 nodes).
  */
 typedef struct {
     union {
-        ht_float_t    class_counts[HT_MAX_CLASSES];
-        ht_var_stat_t reg_stats;
+        /* Leaf node state */
+        struct {
+            union {
+                ht_float_t    class_counts[HT_MAX_CLASSES];
+                ht_var_stat_t reg_stats;
+            };
+            uint16_t stats_idx;
+        };
+        /* Branch (internal decision) node state */
+        struct {
+            union {
+                ht_float_t threshold;
+                int32_t    cat_val;
+            } split_val;
+            uint16_t left_child;
+            uint16_t right_child;
+            uint8_t  feature_idx;
+        };
+        /* Free list link when node is inactive */
+        uint16_t next_free;
+        /* Common node header at fixed offset ensuring flags never collides with payload */
+        struct {
+#ifndef HT_USE_DOUBLE
+            uint8_t _pad_flags[18];
+#else
+            uint8_t _pad_flags[38];
+#endif
+            uint8_t flags;
+            uint8_t reserved;
+        };
     };
-    union {
-        ht_float_t threshold;
-        int32_t    cat_val;
-    } split_val;
-    union {
-        uint16_t left_child; /**< Left child index if IN_USE; next free node if FREE */
-        uint16_t next_free;  /**< Intrusive free-list next index when node is free */
-    };
-    uint16_t right_child;
-    uint16_t stats_idx;
-    uint8_t  feature_idx;
-    uint8_t  flags;
 } ht_node_t;
 
 /**
@@ -188,7 +207,7 @@ typedef struct {
 /* Compile-time static assertions for exact memory layout in default configuration */
 #if HT_MAX_CLASSES == 4 && HT_MAX_FEATURES == 16 && HT_REG_NUM_SLOTS == 5
 #ifndef HT_USE_DOUBLE
-_Static_assert(sizeof(ht_node_t) == 28, "ht_node_t must be exactly 28 bytes in float32 mode");
+_Static_assert(sizeof(ht_node_t) == 20, "ht_node_t must be exactly 20 bytes in float32 mode (H2 asymmetric union)");
 _Static_assert(sizeof(ht_gaussian_obs_t) == 20, "ht_gaussian_obs_t must be 20 bytes in float32 mode");
 _Static_assert(sizeof(ht_categorical_obs_t) == 80, "ht_categorical_obs_t must be 80 bytes in float32 mode");
 _Static_assert(sizeof(ht_var_stat_t) == 12, "ht_var_stat_t must be exactly 12 bytes in float32 mode");
@@ -200,7 +219,7 @@ _Static_assert(sizeof(ht_hist_obs_t) == 80, "ht_hist_obs_t must be exactly 80 by
 _Static_assert(sizeof(ht_feature_obs_t) == 80, "ht_feature_obs_t must be 80 bytes in float32 mode");
 _Static_assert(sizeof(ht_leaf_stats_t) == 1360, "ht_leaf_stats_t must be exactly 1360 bytes in float32 mode");
 #else
-_Static_assert(sizeof(ht_node_t) == 48, "ht_node_t must be exactly 48 bytes in float64 mode");
+_Static_assert(sizeof(ht_node_t) == 40, "ht_node_t must be exactly 40 bytes in float64 mode (H2 asymmetric union)");
 _Static_assert(sizeof(ht_gaussian_obs_t) == 40, "ht_gaussian_obs_t must be 40 bytes in float64 mode");
 _Static_assert(sizeof(ht_categorical_obs_t) == 160, "ht_categorical_obs_t must be 160 bytes in float64 mode");
 _Static_assert(sizeof(ht_var_stat_t) == 24, "ht_var_stat_t must be exactly 24 bytes in float64 mode");
@@ -215,9 +234,9 @@ _Static_assert(sizeof(ht_leaf_stats_t) == 2720, "ht_leaf_stats_t must be exactly
 #endif
 #if HT_MAX_CLASSES == 4 && HT_MAX_FEATURES == 16 && HT_REG_NUM_SLOTS == 5 && HT_MAX_NODES == 4096 && HT_MAX_ACTIVE_LEAVES == 256
 #ifndef HT_USE_DOUBLE
-_Static_assert(sizeof(ht_memory_pool_t) == 462856, "ht_memory_pool_t must be exactly 462856 bytes in float32 mode (H1 intrusive free-lists)");
+_Static_assert(sizeof(ht_memory_pool_t) == 430088, "ht_memory_pool_t must be exactly 430088 bytes in float32 mode (H2 node union)");
 #else
-_Static_assert(sizeof(ht_memory_pool_t) == 892936, "ht_memory_pool_t must be exactly 892936 bytes in float64 mode (H1 intrusive free-lists)");
+_Static_assert(sizeof(ht_memory_pool_t) == 860168, "ht_memory_pool_t must be exactly 860168 bytes in float64 mode (H2 node union)");
 #endif
 #endif
 _Static_assert(sizeof(ht_memory_pool_t) <= (1024 * 1024), "ht_memory_pool_t exceeds 1 MB RAM budget!");

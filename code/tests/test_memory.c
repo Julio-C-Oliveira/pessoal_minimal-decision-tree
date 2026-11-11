@@ -39,15 +39,11 @@ static void test_node_alloc_single_and_zeroed(void) {
     /* Verify default leaf state and initialization */
     HT_ASSERT((node->flags & HT_NODE_IS_LEAF) != 0);
     HT_ASSERT((node->flags & HT_NODE_IN_USE) != 0);
-    HT_ASSERT_EQ(node->left_child, HT_INVALID_IDX);
-    HT_ASSERT_EQ(node->right_child, HT_INVALID_IDX);
     HT_ASSERT_EQ(node->stats_idx, HT_INVALID_IDX);
-    HT_ASSERT_EQ(node->feature_idx, HT_NO_FEATURE);
 
     for (uint8_t c = 0; c < HT_MAX_CLASSES; ++c) {
         HT_ASSERT_FLOAT_EQ(node->class_counts[c], (ht_float_t)0.0);
     }
-    HT_ASSERT_FLOAT_EQ(node->split_val.threshold, (ht_float_t)0.0);
 
     /* Free node and verify recovery */
     ht_node_free(&s_test_pool, n_idx);
@@ -354,26 +350,78 @@ static void test_memory_stress_recycling_100k(void) {
 
 static void test_memory_unified_structures_and_sizes(void) {
 #ifndef HT_USE_DOUBLE
-    HT_ASSERT_EQ(sizeof(ht_node_t), 28);
+    HT_ASSERT_EQ(sizeof(ht_node_t), 20);
     HT_ASSERT_EQ(sizeof(ht_var_stat_t), 12);
     HT_ASSERT_EQ(sizeof(ht_reg_num_slot_t), 16);
     HT_ASSERT_EQ(sizeof(ht_reg_numeric_obs_t), 80);
     HT_ASSERT_EQ(sizeof(ht_reg_categorical_obs_t), 60);
     HT_ASSERT_EQ(sizeof(ht_feature_obs_t), 80);
     HT_ASSERT_EQ(sizeof(ht_leaf_stats_t), 1360);
-    HT_ASSERT_EQ(sizeof(ht_memory_pool_t), 462856);
+    HT_ASSERT_EQ(sizeof(ht_memory_pool_t), 430088);
 #else
-    HT_ASSERT_EQ(sizeof(ht_node_t), 48);
+    HT_ASSERT_EQ(sizeof(ht_node_t), 40);
     HT_ASSERT_EQ(sizeof(ht_var_stat_t), 24);
     HT_ASSERT_EQ(sizeof(ht_reg_num_slot_t), 32);
     HT_ASSERT_EQ(sizeof(ht_reg_numeric_obs_t), 160);
     HT_ASSERT_EQ(sizeof(ht_reg_categorical_obs_t), 120);
     HT_ASSERT_EQ(sizeof(ht_feature_obs_t), 160);
     HT_ASSERT_EQ(sizeof(ht_leaf_stats_t), 2720);
-    HT_ASSERT_EQ(sizeof(ht_memory_pool_t), 892936);
+    HT_ASSERT_EQ(sizeof(ht_memory_pool_t), 860168);
 #endif
 
     HT_ASSERT(sizeof(ht_memory_pool_t) <= (1024 * 1024));
+}
+
+static void test_node_asymmetric_union_leaf_vs_branch(void) {
+    ht_memory_init(&s_test_pool);
+
+    uint16_t idx = ht_node_alloc(&s_test_pool);
+    HT_ASSERT_NEQ(idx, HT_INVALID_IDX);
+    ht_node_t *node = ht_node_get(&s_test_pool, idx);
+    HT_ASSERT_NOT_NULL(node);
+
+    /* 1. Leaf state validation */
+    HT_ASSERT((node->flags & HT_NODE_IS_LEAF) != 0);
+    HT_ASSERT((node->flags & HT_NODE_IN_USE) != 0);
+    node->class_counts[0] = (ht_float_t)10.0;
+    node->class_counts[1] = (ht_float_t)25.0;
+    node->class_counts[2] = (ht_float_t)5.0;
+    node->class_counts[3] = (ht_float_t)1.0;
+    node->stats_idx = 42;
+
+    /* Verify leaf fields */
+    HT_ASSERT_FLOAT_EQ(node->class_counts[0], (ht_float_t)10.0);
+    HT_ASSERT_FLOAT_EQ(node->class_counts[1], (ht_float_t)25.0);
+    HT_ASSERT_FLOAT_EQ(node->class_counts[2], (ht_float_t)5.0);
+    HT_ASSERT_FLOAT_EQ(node->class_counts[3], (ht_float_t)1.0);
+    HT_ASSERT_EQ(node->stats_idx, 42);
+    HT_ASSERT((node->flags & HT_NODE_IS_LEAF) != 0);
+    HT_ASSERT((node->flags & HT_NODE_IN_USE) != 0);
+
+    /* 2. Transition from Leaf to Decision Branch (Split event) */
+    node->flags &= ~HT_NODE_IS_LEAF;
+    node->feature_idx = 3;
+    node->split_val.threshold = (ht_float_t)12.75;
+    node->left_child = 101;
+    node->right_child = 102;
+
+    /* Verify branch fields and flags preservation */
+    HT_ASSERT(!(node->flags & HT_NODE_IS_LEAF));
+    HT_ASSERT((node->flags & HT_NODE_IN_USE) != 0);
+    HT_ASSERT_EQ(node->feature_idx, 3);
+    HT_ASSERT_FLOAT_EQ(node->split_val.threshold, (ht_float_t)12.75);
+    HT_ASSERT_EQ(node->left_child, 101);
+    HT_ASSERT_EQ(node->right_child, 102);
+
+    /* 3. Categorical branch split value */
+    node->flags |= HT_NODE_SPLIT_CAT;
+    node->split_val.cat_val = 4;
+    HT_ASSERT_EQ(node->split_val.cat_val, 4);
+    HT_ASSERT((node->flags & HT_NODE_SPLIT_CAT) != 0);
+
+    /* 4. Free and verify clean recycling */
+    ht_node_free(&s_test_pool, idx);
+    HT_ASSERT_EQ(ht_node_count(&s_test_pool), 0);
 }
 
 static void test_intrusive_free_lists_order_and_recycling(void) {
@@ -544,6 +592,7 @@ void test_memory_run(void) {
     HT_RUN_TEST(test_memory_stress_recycling_100k);
     HT_RUN_TEST(test_intrusive_free_lists_order_and_recycling);
     HT_RUN_TEST(test_memory_unified_structures_and_sizes);
+    HT_RUN_TEST(test_node_asymmetric_union_leaf_vs_branch);
     HT_RUN_TEST(test_node_unified_regression_stats);
     HT_RUN_TEST(test_leaf_stats_regression_observers_and_weights);
 }

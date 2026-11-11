@@ -42,10 +42,7 @@ uint16_t ht_node_alloc(ht_memory_pool_t *pool) {
 
     ht_node_t *node = &pool->node_pool[idx];
     memset(node, 0, sizeof(*node));
-    node->left_child = HT_INVALID_IDX;
-    node->right_child = HT_INVALID_IDX;
     node->stats_idx = HT_INVALID_IDX;
-    node->feature_idx = HT_NO_FEATURE;
     node->flags = (uint8_t)(HT_NODE_IS_LEAF | HT_NODE_IN_USE);
 
     return idx;
@@ -64,10 +61,6 @@ void ht_node_free(ht_memory_pool_t *pool, uint16_t node_idx) {
     /* Reset node state and clear active flag */
     memset(node, 0, sizeof(*node));
     node->flags = 0;
-    node->left_child = HT_INVALID_IDX;
-    node->right_child = HT_INVALID_IDX;
-    node->stats_idx = HT_INVALID_IDX;
-    node->feature_idx = HT_NO_FEATURE;
 
     /* Push onto intrusive free-list */
     node->next_free = pool->free_nodes_head;
