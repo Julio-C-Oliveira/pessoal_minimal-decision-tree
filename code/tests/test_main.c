@@ -45,12 +45,12 @@ static void test_config_constants(void) {
     /* Versioning assertions (SemVer) */
     HT_ASSERT_EQ(HT_VERSION_MAJOR, 0U);
     HT_ASSERT_EQ(HT_VERSION_MINOR, 3U);
-    HT_ASSERT_EQ(HT_VERSION_PATCH, 0U);
-    HT_ASSERT(HT_VERSION_CHECK(0, 3, 0));
-    HT_ASSERT(!HT_VERSION_CHECK(0, 3, 1));
+    HT_ASSERT_EQ(HT_VERSION_PATCH, 1U);
+    HT_ASSERT(HT_VERSION_CHECK(0, 3, 1));
+    HT_ASSERT(!HT_VERSION_CHECK(0, 3, 2));
     HT_ASSERT(!HT_VERSION_CHECK(1, 0, 0));
-    HT_ASSERT_EQ(strcmp(HT_VERSION_STRING, "0.3.0"), 0);
-    HT_ASSERT_EQ(strcmp(ht_version(), "0.3.0"), 0);
+    HT_ASSERT_EQ(strcmp(HT_VERSION_STRING, "0.3.1"), 0);
+    HT_ASSERT_EQ(strcmp(ht_version(), "0.3.1"), 0);
 }
 
 static void test_config_types_and_sizes(void) {
