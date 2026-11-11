@@ -1071,6 +1071,30 @@ def run_tuning_suite(
             top_k=3,
         )
 
+        def make_param_key(engine: str, params: Dict[str, Any]) -> Tuple:
+            eng = "c11" if engine in ("c11", "kansho") else engine
+            return (eng, tuple(sorted((k, str(v)) for k, v in params.items())))
+
+        # Build valid keys set for report view to ensure report only displays the exact evaluated models
+        valid_report_keys: Dict[str, set] = {}
+        for d_id, d_name, task, desc, is_high_dim in DATASETS_CONFIG:
+            valid_report_keys[d_id] = set()
+            if d_id in report_configs:
+                for eng, cfgs in report_configs[d_id].items():
+                    for c in cfgs:
+                        valid_report_keys[d_id].add(make_param_key(eng, c))
+            trials = all_results.get(d_id, [])
+            def sort_key_fn(x):
+                if task == "classification":
+                    return (x.get("f1_macro", 0.0), x.get("holdout_acc", 0.0), -x.get("avg_us_per_sample", 0.0))
+                else:
+                    return (x.get("holdout_r2", -1e9), -x.get("holdout_rmse", 1e9), -x.get("avg_us_per_sample", 0.0))
+            for eng in ["river", "sklearn"]:
+                eng_trials = [t for t in trials if t.get("engine") == eng]
+                eng_trials.sort(key=sort_key_fn, reverse=True)
+                for t in eng_trials[:3]:
+                    valid_report_keys[d_id].add(make_param_key(eng, t.get("params", {})))
+
         total_planned_trials = sum(
             len(cfgs)
             for d_dict in report_configs.values()
@@ -1152,11 +1176,6 @@ def run_tuning_suite(
                 )
                 replayed_trials.extend(sklearn_trials)
 
-            # In-place update in all_results[d_id]
-            def make_param_key(engine: str, params: Dict[str, Any]) -> Tuple:
-                eng = "c11" if engine in ("c11", "kansho") else engine
-                return (eng, tuple(sorted((k, str(v)) for k, v in params.items())))
-
             existing = all_results.get(d_id, [])
             key_to_idx = {make_param_key(t.get("engine", ""), t.get("params", {})): idx for idx, t in enumerate(existing)}
 
@@ -1173,7 +1192,12 @@ def run_tuning_suite(
             os.makedirs(os.path.dirname(output_json), exist_ok=True)
             with open(output_json, "w", encoding="utf-8") as f:
                 json.dump(all_results, f, indent=2)
-            generate_markdown_report(all_results, output_report)
+
+            report_view = {
+                did: [t for t in d_trials if make_param_key(t.get("engine", ""), t.get("params", {})) in valid_report_keys.get(did, set())]
+                for did, d_trials in all_results.items()
+            }
+            generate_markdown_report(report_view, output_report)
             print(f"  [✔] Checkpoint: Results and Report updated for {d_name}.")
 
         print(f"\nFinal replayed results saved to JSON: {output_json}")
