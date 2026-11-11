@@ -793,9 +793,12 @@ def generate_markdown_report(
                 if is_high_dim and tier > 16:
                     leaves = 40
                     nodes = 1024
+                top_trial = by_tier[tier][0] if by_tier[tier] else {}
+                used_nodes = top_trial.get("n_nodes", 1)
                 active_str = f"{leaves} nó ativo" if leaves == 1 else f"{leaves} nós ativos"
-                total_str = f"{nodes} nó no total" if nodes == 1 else f"{nodes} nós no total"
-                f.write(f"#### Kansho (Tier {tier}: {active_str}, {total_str})\n\n")
+                used_str = f"{used_nodes} utilizado" if used_nodes == 1 else f"{used_nodes} utilizados"
+                max_str = f"{nodes} nós no max"
+                f.write(f"#### Kansho (Tier {tier}: {active_str}, {used_str}, {max_str})\n\n")
                 if task == "classification":
                     f.write("| Rank | Configuração | Acurácia (%) | F1 Macro (%) | RAM (KB) | Latência (µs) |\n")
                     f.write("| :---: | :--- | :---: | :---: | :---: | :---: |\n")
