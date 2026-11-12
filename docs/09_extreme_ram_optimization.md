@@ -342,42 +342,130 @@ typedef struct {
 
 ### Hipótese 6: Dynamic Feature Stride Slab em `stats_pool` (Compacted Feature Layout)
 
-#### 1. Fundamentação Teórica e Diagnóstico
-A maior fonte de desperdício em datasets reais é que cada folha ativa em `stats_pool` reserva espaço estático para `HT_MAX_FEATURES = 16` atributos:
-$$16 \text{ atributos} \times 80\text{ B} = 1.280\text{ bytes por folha}$$
+#### 1. Fundamentação Teórica e Diagnóstico Exaustivo de Desperdício
+A maior fonte de desperdício de memória em todo o projeto `kansho` reside no fato de que cada folha ativa em `stats_pool` reserva espaço estático fixado para o pior caso de compilação: `HT_MAX_FEATURES` (16 ou 64 atributos) e modelos de regressão contínua com `HT_REG_NUM_SLOTS` (até 16 slots por feature).
 
-Considere os fluxos do benchmark:
-- **SEA Stream:** $3$ atributos contínuos ($13$ atributos sem uso = $1.040\text{ B}$ desperdiçados por folha!). Em $256$ folhas, são **$260\text{ KB}$ desperdiçados**!
-- **LED Stream:** $7$ atributos ($9$ sem uso = $720\text{ B}$ desperdiçados por folha = **$180\text{ KB}$ desperdiçados**).
-- **Agrawal Stream:** $9$ atributos ($7$ sem uso = $560\text{ B}$ desperdiçados por folha = **$140\text{ KB}$ desperdiçados**).
-- **Hyperplane / Friedman:** $10$ atributos ($6$ sem uso = $480\text{ B}$ desperdiçados por folha = **$120\text{ KB}$ desperdiçados**).
-
-#### 2. Mudança Proposta de Arquitetura
-Em vez de definir `stats_pool` como um array rígido `ht_leaf_stats_t stats_pool[HT_MAX_ACTIVE_LEAVES]`, definir `stats_pool` como um **buffer estático contíguo de bytes (Slab Storage)**:
-
+No modelo estático atual:
 ```c
 typedef struct {
-    uint8_t  stats_storage[HT_STATS_STORAGE_BYTES]; /* Buffer estático pré-alocado */
-    uint16_t leaf_stride;                          /* header + params->n_features * sizeof(obs) */
-    uint16_t max_leaves_capacity;                  /* HT_STATS_STORAGE_BYTES / leaf_stride */
+    ht_node_t       node_pool[HT_MAX_NODES];
+    ht_leaf_stats_t stats_pool[HT_MAX_ACTIVE_LEAVES]; /* Alocação estática homogênea */
     /* ... */
 } ht_memory_pool_t;
 ```
 
-Na inicialização da árvore (`ht_tree_init`), onde `params->n_features` é conhecido:
-$$\text{stride} = \text{sizeof(ht\_leaf\_header\_t)} + n\_features \times \text{sizeof(ht\_feature\_obs\_t)}$$
-O acesso à folha $i$ é um cálculo direto de ponteiro em $O(1)$:
-$$\text{stats\_ptr}(i) = (\text{ht\_leaf\_stats\_t} *)(\text{pool->stats\_storage} + i \times \text{pool->leaf\_stride})$$
+##### Caso Real: O Gargalo do Dataset Forest Covertype (Tier 2):
+* Em `main_benchmark/tune_hyperparams.py`, Covertype compila com `-DHT_MAX_FEATURES=64 -DHT_MAX_CLASSES=8 -DHT_MAX_ACTIVE_LEAVES=2 -DHT_MAX_NODES=32 -DHT_REG_NUM_SLOTS=16`.
+* Cada folha estática `ht_leaf_stats_t` consome **16.656 bytes (~16,3 KB)**.
+* Com apenas 2 folhas ativas (`HT_MAX_ACTIVE_LEAVES = 2`):
+  $$2 \times 16.656\text{ B} = \mathbf{33.312\text{ bytes} \ (\approx 32,5\text{ KB})}$$
+* Dos **35,3 KB** totais da árvore atual (v0.3.0), **32,5 KB (92% de toda a SRAM da árvore) estão concentrados nas 2 folhas de aprendizado**!
+* **O Desperdício Físico:** O Forest Covertype possui 54 features reais. Dez observadores inteiros ($10 \times 256\text{ B} = 2.560\text{ B}$ por folha) ficam 100% vazios. Além disso, por ser uma tarefa de classificação pura, os 76 bytes de SGD e os 96 bytes de slots extras de regressão por feature ($54 \times 96\text{ B} = 5.184\text{ B}$) são alocados sem utilidade.
 
-#### 3. Economia de Memória e Impacto
-Mantendo a mesma capacidade de $256$ folhas ativas:
-- **SEA ($3$ atributos):** O stride por folha passa a ser $16\text{ B} + 3 \times 80\text{ B} = 256\text{ B}$ (em vez de $1.360\text{ B}$).
-  $$256 \times 256\text{ B} = 65.536\text{ B } (\mathbf{64\text{ KB}} \text{ vs } 340\text{ KB})$$
-  **Economia real de $274,6\text{ KB}$ ($-80,8\%$ de redução no stats pool)!**
-- **Agrawal ($9$ atributos):** Stride de $736\text{ B}$. Total: $188,4\text{ KB}$ (economia de **$151,6\text{ KB}$**, $-44,6\%$).
-- **Hyperplane ($10$ atributos):** Stride de $816\text{ B}$. Total: $208,9\text{ KB}$ (economia de **$131,1\text{ KB}$**, $-38,6\%$).
-- **Zero Malloc:** O buffer `stats_storage` é $100\%$ estático na struct.
-- **Impacto em Acurácia:** **$0,0\%$**.
+##### Outros Streams de Benchmark:
+- **SEA Stream:** 3 atributos contínuos (13 atributos sem uso = $1.040\text{ B}$ desperdiçados por folha). Em 256 folhas: **$260\text{ KB}$ ociosos**!
+- **Electricity / Airlines:** 7 ou 8 atributos (8 a 9 atributos sem uso = mais de $160\text{ KB}$ ociosos).
+- **Friedman #1:** 10 atributos (6 atributos sem uso = mais de $120\text{ KB}$ ociosos).
+
+---
+
+#### 2. Mudança Proposta de Arquitetura: Slab Contíguo com Stride em Runtime
+
+Em vez de declarar `stats_pool` como array de structs de tamanho fixo, transformá-lo em um **buffer estático contíguo de bytes (Slab Storage)** com garantia de alinhamento:
+
+```c
+typedef struct {
+    ht_node_t node_pool[HT_MAX_NODES];
+    
+    /* Buffer estático pré-alocado contíguo (Zero Heap / Zero Malloc) */
+    _Alignas(ht_float_t) uint8_t stats_storage[HT_STATS_STORAGE_BYTES];
+    
+    uint16_t leaf_stride;          /* Tamanho exato em bytes de cada folha, alinhado à máquina */
+    uint16_t max_leaves_capacity;  /* Capacidade máxima real: HT_STATS_STORAGE_BYTES / leaf_stride */
+    uint16_t free_stats_head;      /* Cabeça da free-list intrusiva de folhas */
+    uint16_t nodes_allocated;
+    uint16_t stats_allocated;
+} ht_memory_pool_t;
+```
+
+##### Cálculo do Stride Dinâmico em `ht_tree_init`:
+Quando o modelo é inicializado, `params->n_features` e `params->task_type` são conhecidos:
+1. **Cabeçalho:** $16\text{ B}$ em Classificação (`last_split_attempt_at`, `mc_correct_weight`, `nb_correct_weight`, `next_free`).
+2. **Observadores:** $n\_features \times \text{sizeof(ht\_feature\_obs\_t)}$ (onde para 8 classes são $54 \times 160\text{ B} = 8.640\text{ B}$).
+3. **Stride Alinhado:**
+   $$\text{leaf\_stride} = (\text{raw\_bytes} + \text{HT\_ALIGN\_MASK}) \ \& \ \sim\text{HT\_ALIGN\_MASK}$$
+   onde $\text{HT\_ALIGN\_MASK} = \text{sizeof(ht\_float\_t)} - 1$ (4 bytes em float32, 8 bytes em double64).
+
+##### Acesso $O(1)$ Estritamente Determinístico:
+O acesso à folha de índice $i$ é imediato via aritmética de ponteiros:
+```c
+ht_leaf_stats_t *ht_stats_get(ht_memory_pool_t *pool, uint16_t idx) {
+    if (!pool || idx >= pool->max_leaves_capacity || idx == HT_INVALID_IDX) {
+        return NULL;
+    }
+    return (ht_leaf_stats_t *)(pool->stats_storage + ((size_t)idx * pool->leaf_stride));
+}
+```
+
+---
+
+#### 3. Análise Exaustiva de Riscos de Baixo Nível (Nível de Risco 4 / 5)
+
+A transição de arrays homogêneos tipados para um buffer bruto de bytes com *stride* variável em C11 introduz riscos críticos que devem ser dominados:
+
+##### Risco 1: *Hardware Faults* por Desalinhamento de Barramento (ARM Cortex-M / ESP32)
+* **O Mecanismo de Falha:** Microcontroladores ARM Cortex-M3/M4 (como o Stellaris LM3S6965 emulado no projeto) e ESP32 possuem instruções de carga e armazenamento de ponto flutuante e 64 bits (`VLDR.F32`, `VLDR.F64`, `LDRD`, `STRD`) que exigem **alinhamento natural rígido** (múltiplos de 4 bytes para float, múltiplos de 8 bytes para double).
+* Se o cálculo de `leaf_stride` resultar em um número não divisível por 4 (ou 8 em double), a Folha 0 estará alinhada, mas a **Folha 1 começará em um endereço desalinhado**. No primeiro acesso ao observador da Folha 1 (`obs->mean += delta`), a CPU disparará um **HardFault de Hardware imediato**, travando o dispositivo em loop infinito.
+
+##### Risco 2: Corrupção Silenciosa por Sobrescrita de Fronteira (Buffer Overrun Entre Folhas)
+* **O Mecanismo de Falha:** Como as folhas residem contíguas no mesmo buffer `stats_storage`, se qualquer função em `ht_observer.c` ou `ht_tree.c` iterar até `HT_MAX_FEATURES` (64) em vez de `params->n_features` (54), ela ultrapassará os limites da Folha 0 e sobrescreverá diretamente os primeiros bytes da Folha 1.
+* Isso destrói o cabeçalho da Folha 1 (zerando `next_free` ou corrompendo pesos Naive Bayes), corrompendo a lista encadeada livre sem acusar falha de compilação ou *Segmentation Fault* no Linux. O modelo rodará silenciosamente corrompido.
+
+##### Risco 3: Violação de Strict Aliasing no Compilador C11 (`-O2` / `-O3`)
+* **O Mecanismo de Falha:** A Seção §6.5 do padrão ISO C11 proíbe acessar a mesma região de memória através de ponteiros de tipos incompatíveis. Se o compilador otimizador não reconhecer o cast de `uint8_t*` para `ht_leaf_stats_t*` sob a regra de *Effective Type*, ele pode reordenar instruções de escrita e leitura de forma agressiva, causando leitura de valores defasados em cálculos de impureza de split.
+
+##### Risco 4: Quebra da Serialização Binária (`ht_tree_save` e `ht_tree_load`)
+* **O Mecanismo de Falha:** O código atual de serialização executa `memcpy(ptr, &tree->memory.stats_pool[idx], sizeof(ht_leaf_stats_t))`. Como a struct contém tamanho de pior caso, um `memcpy` estático leria além do final da folha compactada e, na restauração, escreveria além do bloco da folha, corrompendo o estado interno da árvore.
+
+##### Risco 5: Declaração da Struct e Flexible Array Member (FAM)
+* Em C11, a forma limpa de manter a sintaxe `stats->observers[f]` é declarar o array de observadores como um membro de array flexível (*Flexible Array Member - FAM*): `ht_feature_obs_t observers[];`.
+* Porém, `sizeof(ht_leaf_stats_t)` em structs com FAM mede **exclusivamente o cabeçalho** (16 B). É terminantemente proibido utilizar `sizeof(ht_leaf_stats_t)` para alocação ou cópia; deve-se usar sempre `pool->leaf_stride`.
+
+---
+
+#### 4. Protocolo Obrigatório de Blindagem e Salvaguardas (As 5 Regras de Ouro)
+
+Para que a implementação da Entrega 7.6 seja executada com risco zero, o desenvolvedor/agente deve obrigatoriamente cumprir as seguintes salvaguardas:
+
+1. **Alinhamento do Buffer e Máscara de Stride:**
+   * O buffer `stats_storage` deve usar `_Alignas(ht_float_t)`.
+   * Todo cálculo de `leaf_stride` deve obrigatoriamente aplicar a máscara `(stride + (sizeof(ht_float_t) - 1)) & ~(sizeof(ht_float_t) - 1)`.
+   * Incluir assert de alinhamento em runtime: `HT_ASSERT(((uintptr_t)ht_stats_get(pool, i) % sizeof(ht_float_t)) == 0)`.
+2. **Loops Restritos a `n_features` Real:**
+   * É expressamente proibido usar `HT_MAX_FEATURES` em loops que operam sobre folhas ativas. Todos os loops em `ht_observer.c` e `ht_tree.c` devem iterar estritamente até `tree->params.n_features`.
+3. **Testes de Integridade com Canários de Borda (*Canary Bytes*):**
+   * Em `code/tests/test_memory.c`, alocar duas folhas adjacentes, preencher a Folha 0 com padrões de estresse (`0xAA`) e verificar se os primeiros e últimos bytes da Folha 1 permaneceram imaculados (`0x55`).
+4. **Serialização Adaptativa:**
+   * Gravar `leaf_stride` no cabeçalho binário em `ht_tree_save` e realizar `memcpy` estritamente delimitado pelo tamanho real da folha: `memcpy(ptr, stats, pool->leaf_stride)`.
+5. **Portabilidade Bare-Metal (Gate de Emulação QEMU):**
+   * Validação obrigatória da Entrega 7.6 no emulador ARM Cortex-M3 (TI Stellaris LM3S6965 via QEMU), confirmando que nenhuma instrução `VLDR`/`LDR` gera *Hard Fault* em hardware embarcado real.
+
+---
+
+#### 5. Economia Consolidada de Memória no Forest Covertype (Tier 2)
+
+| Componente | Código Atual (v0.3.0) | Com Dynamic Stride (7.6) | Economia Líquida |
+| :--- | :---: | :---: | :---: |
+| **Cabeçalho da folha** | 84 B (com SGD ocioso) | 16 B (só classificação) | **-68 B por folha** |
+| **Observadores por folha** | $64 \times 256\text{ B} = 16.384\text{ B}$ | $54 \times 160\text{ B} = 8.640\text{ B}$ | **-7.744 B por folha** |
+| **Tamanho de 1 folha (Stride)** | **16.656 bytes** | **8.656 bytes** | **-8.000 B (-48%)** |
+| **Stats Pool (2 folhas ativas)** | **33.312 bytes** | **17.312 bytes** | **-16.000 bytes (-48%)** |
+| **Node Pool (32 nós x 36 B)** | 1.152 bytes | 1.152 bytes | 0 B (inalterado) |
+| **Topologia e Header da Árvore** | 1.680 bytes | 1.680 bytes | 0 B (inalterado) |
+| **Tamanho Total da Árvore** | **36.144 B (35,3 KB)** | **$\approx$ 20.144 B (~19,7 KB)** | **$-15,6\text{ KB}$ ($-44,2\%$)** |
+
+* **Acurácia e F1 Macro:** **100% Preservados (61,43% / 58,51%)**. A matemática de Welford, limites de corte e Naive Bayes Adaptive operam com as exatas 54 features sem alteração funcional.
+* **Latência de Inferência:** **Neutro a ligeiramente superior (~0,90 µs)**, devido à maior compactação da memória na cache L1.
 
 ---
 

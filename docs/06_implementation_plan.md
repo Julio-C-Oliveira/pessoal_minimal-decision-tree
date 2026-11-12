@@ -47,7 +47,7 @@
 | **7.3** | **Fase 7:** Hipótese 2: Union Assimétrica de Topologia em `ht_node_t` (28 B $\to$ 20 B) | `code/include/ht_memory.h`, `code/src/ht_memory.c`, `code/src/ht_tree.c`, `code/tests/test_memory.c`, `code/tests/test_tree.c`, `code/tests/test_e2e_flow.c` | **N1:** union folha (`class_counts` / `reg_stats`, `stats_idx`) vs ramo (`split_val`, `left_child`, `right_child`, `feature_idx`) com $20\text{ B}$ ($40\text{ B}$ double)<br/>**N2:** integridade de split, transição folha $\to$ ramo sem perda de filhos e roteamento robusto<br/>**N3:** prequential e holdout idênticos bit-a-bit e save/load binário | `[x]` | `049bca9` |
 | **7.4** | **Fase 7:** Hipótese 3: Desacoplamento e Pool Dedicado de Drift (`node_drift` em HAT) | `code/include/ht_tree.h`, `code/include/ht_drift.h`, `code/src/ht_tree.c`, `code/src/ht_drift.c`, `code/tests/test_drift.c`, `code/tests/test_tree.c` | **N1:** pool de drift de 128 entradas ($2\text{ KB}$ em vez de $64\text{ KB}$) e mapeamento indexado `drift_idx` ou desativação em VFDT pura (`enable_hat == false`)<br/>**N2:** detecção de drift e switch de ramos preservados<br/>**N3:** benchmark HAT em stream de drift (SEA/Agrawal) com economia $\ge 62\text{ KB}$ | `[Falha]` | `7128ca6` |
 | **7.5** | **Fase 7:** Hipótese 4 & Hipótese 5: Union de Cabeçalho em `ht_leaf_stats_t` e Bounding Box Única por Atributo | `code/include/ht_memory.h`, `code/include/ht_observer.h`, `code/src/ht_observer.c`, `code/src/ht_tree.c`, `code/tests/test_observer.c`, `code/tests/test_tree.c` | **N1:** union de SGD ($68\text{ B}$) e NBA ($8\text{ B}$) + observador gaussiano com $\min/\max$ no nível do atributo ($80\text{ B} \to 56\text{ B}$)<br/>**N2:** split suggestions e Naive Bayes com probabilidades matematicamente equivalentes<br/>**N3:** economia de $113\text{ KB}$ em classificação mantendo paridade com River | `[Falha]` | `8095979` / `ec59602` |
-| **7.6** | **Fase 7:** Hipótese 6: Dynamic Feature Stride Slab em `stats_pool` (Compacted Feature Layout) | `code/include/ht_memory.h`, `code/src/ht_memory.c`, `code/src/ht_tree.c`, `code/tests/test_memory.c`, `code/tests/test_e2e_flow.c` | **N1:** cálculo de stride contíguo em runtime baseado em `params->n_features`, indexação por offset $O(1)$<br/>**N2:** capacidade adaptativa de folhas sem alocação dinâmica<br/>**N3:** redução de $40\%$ a $81\%$ no stats pool em streams com 3 a 10 atributos | `[ ]` | — |
+| **7.6** | **Fase 7:** Hipótese 6: Dynamic Feature Stride Slab em `stats_pool` (Compacted Feature Layout) | `code/include/ht_memory.h`, `code/src/ht_memory.c`, `code/src/ht_tree.c`, `code/tests/test_memory.c`, `code/tests/test_e2e_flow.c` | **⚠️ Leitura Prévia Obrigatória:** [`docs/09_extreme_ram_optimization.md#hipotese-6-dynamic-feature-stride-slab-em-stats_pool-compacted-feature-layout`](docs/09_extreme_ram_optimization.md#hipotese-6-dynamic-feature-stride-slab-em-stats_pool-compacted-feature-layout)<br/>**N1:** buffer contíguo `_Alignas(ht_float_t)`, stride alinhado à máquina, indexação $O(1)$<br/>**N2:** testes de canário (`0xDEADBEEF`) contra overflow entre folhas e loops restritos a `n_features`<br/>**N3:** redução de $-44,2\%$ de RAM no Covertype Tier 2 ($\approx 19,7\text{ KB}$ vs $35,3\text{ KB}$) mantendo $100\%$ de paridade | `[ ]` | — |
 | **7.7** | **Fase 7:** Hipótese 7: Perfil de Compilação ADWIN Compacto e Validação Global de Benchmarks / QEMU | `code/include/ht_drift.h`, `main_benchmark/main_benchmark.py`, `emulation/esp32/run_qemu.sh`, `emulation/cortex-m3/run_qemu.sh`, `wiki/*.md` | **N1:** ADWIN de 10 níveis e 32 detectores ($\approx 17.4\text{ KB}$)<br/>**N2:** validação cruzada nos 8 datasets do `main_benchmark`<br/>**N3:** execução bare-metal no Cortex-M3 (50 KB SRAM) e ESP32 com medição de ciclos e documentação na Wiki | `[ ]` | — |
 
 ---
@@ -997,21 +997,34 @@ flowchart TD
   - **N3:** Validação prequential contra o River sem divergência de splits.
 
 #### Entrega 7.6: Hipótese 6: Dynamic Feature Stride Slab em `stats_pool` (Compacted Feature Layout)
+
+> [!IMPORTANT]
+> **LEITURA PRÉVIA OBRIGATÓRIA ANTES DE QUALQUER LINHA DE CÓDIGO:**
+> A Entrega 7.6 lida com engenharia de baixo nível em C11 (Classificada com **Risco 4 / 5**) ao transicionar de structs estáticas fixas para buffers contíguos de bytes com stride variável em tempo de execução.
+> É **terminantemente obrigatório ler e cumprir a análise de risco e o protocolo de blindagem** detalhados em [`docs/09_extreme_ram_optimization.md#hipotese-6-dynamic-feature-stride-slab-em-stats_pool-compacted-feature-layout`](docs/09_extreme_ram_optimization.md#hipotese-6-dynamic-feature-stride-slab-em-stats_pool-compacted-feature-layout) antes de iniciar qualquer implementação.
+> O desenvolvedor ou agente deve implementar obrigatoriamente as 5 salvaguardas técnicas:
+> 1. **Alinhamento Natural Obrigatório:** Buffer com `_Alignas(ht_float_t)` e `leaf_stride` arredondado via máscara `(stride + HT_ALIGN_MASK) & ~HT_ALIGN_MASK` para evitar *HardFault* em processadores ARM Cortex-M e ESP32.
+> 2. **Loops Limitados a `n_features`:** Proibido usar `HT_MAX_FEATURES` em loops de folhas ativas para evitar invasão de memória de folhas vizinhas.
+> 3. **Canários de Borda:** Teste unitário de estresse em `test_memory.c` com bytes mágicos (`0xDEADBEEF`) na fronteira entre folhas.
+> 4. **Serialização por Stride:** `ht_tree_save` e `ht_tree_load` devem salvar e restaurar estritamente `leaf_stride` bytes por folha ativa.
+> 5. **Gate Bare-Metal:** Validação obrigatória no QEMU ARM Cortex-M3 (TI Stellaris LM3S6965).
+
 - **Arquivos:** `code/include/ht_memory.h`, `code/src/ht_memory.c`, `code/src/ht_tree.c`, `code/tests/test_memory.c`, `code/tests/test_e2e_flow.c`
-- **Diagnóstico:** Datasets reais raramente utilizam 16 atributos (ex: SEA usa 3, LED usa 7, Agrawal usa 9, Hyperplane usa 10). Reservar estaticamente 16 observadores em cada folha desperdiça até $80\%$ do `stats_pool`.
+- **Diagnóstico:** Datasets reais raramente utilizam a capacidade máxima de compilação (ex: SEA usa 3 features, Covertype usa 54 das 64 reservadas). No Covertype Tier 2, as 2 folhas ativas representam **32,5 KB (92%) dos 35,3 KB da árvore**. Reservar estaticamente observadores não utilizados e slots de regressão em tarefas de classificação é o maior gargalo de SRAM de kansho.
 - **Arquitetura C11:**
-  - Transformar `stats_pool` em buffer contíguo estático pré-alocado `uint8_t stats_storage[HT_STATS_STORAGE_BYTES]`.
+  - Transformar `stats_pool` em buffer contíguo estático pré-alocado `_Alignas(ht_float_t) uint8_t stats_storage[HT_STATS_STORAGE_BYTES]`.
   - Calcular o stride da folha em runtime em `ht_tree_init`:
-    $$\text{stride} = \text{sizeof(header)} + n\_features \times \text{sizeof(ht\_feature\_obs\_t)}$$
-  - Acesso $O(1)$: `pool->stats_storage + idx * pool->leaf_stride`.
+    $$\text{stride} = (\text{header\_bytes} + n\_features \times \text{sizeof(ht\_feature\_obs\_t)} + \text{ALIGN\_MASK}) \ \& \ \sim\text{ALIGN\_MASK}$$
+  - Acesso $O(1)$: `(ht_leaf_stats_t *)(pool->stats_storage + ((size_t)idx * pool->leaf_stride))`.
 - **Economia:**
+  - **Covertype Tier 2 (54 features, classificação):** Stride cai de $16.656\text{ B} \to 8.656\text{ B}$. A árvore inteira reduz de **$35,3\text{ KB} \to \approx \mathbf{19,7\text{ KB}}$ ($-44,2\%$)**!
   - **SEA (3 features):** stride de 256 B $\to$ **economia de $274,6\text{ KB}$ ($-80,8\%$)**.
   - **Agrawal (9 features):** stride de 736 B $\to$ **economia de $151,6\text{ KB}$ ($-44,6\%$)**.
   - **Hyperplane (10 features):** stride de 816 B $\to$ **economia de $131,1\text{ KB}$ ($-38,6\%$)**.
 - **Testes (N1, N2, N3):**
-  - **N1:** Cálculo de stride e offset $O(1)$ sem overflow ou violação de alinhamento (`_Alignof`).
-  - **N2:** Capacidade adaptativa de folhas ativas sem dynamic allocation.
-  - **N3:** Execução dos benchmarks completos de classificação e regressão provando paridade numérica.
+  - **N1:** Cálculo de stride e offset $O(1)$ sem overflow; asserção estrita de alinhamento natural `(uintptr_t)ptr % sizeof(ht_float_t) == 0`.
+  - **N2:** Teste de estresse com Canários de Borda (`0xDEADBEEF`) entre folhas vizinhas garantindo zero buffer overrun; reciclagem de folhas sem corrupção de `next_free`.
+  - **N3:** Execução dos benchmarks e QEMU Cortex-M3 provando paridade numérica de 100% no River e zero hardware faults.
 
 #### Entrega 7.7: Hipótese 7: Perfil de Compilação ADWIN Compacto e Validação Global de Benchmarks / QEMU
 - **Arquivos:** `code/include/ht_drift.h`, `main_benchmark/main_benchmark.py`, `emulation/esp32/run_qemu.sh`, `emulation/cortex-m3/run_qemu.sh`, `wiki/*.md`
