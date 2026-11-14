@@ -40,14 +40,14 @@
 
 | Dataset | Tarefa | Latência Média | Latência p95 | Latência p99 | Throughput (Vazão) | Model Footprint | Consumo RAM (SRAM / Heap) | FLOPs / Amostra |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **SEA** | Classificação | **6.88 µs** | 20.88 µs | 27.34 µs | **145,349 amostras/s** | 564 B (19 nós) | 49.7 KB (.bss) / **0 B Heap** | **69 FLOPs** |
-| **Electricity** | Classificação | **23.91 µs** | 44.24 µs | 86.12 µs | **41,824 amostras/s** | 564 B (19 nós) | 49.7 KB (.bss) / **0 B Heap** | **149 FLOPs** |
-| **Forest Covertype** | Classificação | **99.34 µs** | 396.48 µs | 709.32 µs | **10,066 amostras/s** | 1,348 B (47 nós) | 49.7 KB (.bss) / **0 B Heap** | **2250 FLOPs** |
-| **Airlines** | Classificação | **8.20 µs** | 31.64 µs | 45.68 µs | **121,951 amostras/s** | 956 B (33 nós) | 49.7 KB (.bss) / **0 B Heap** | **133 FLOPs** |
-| **Friedman #1** | Regressão | **9.31 µs** | 19.64 µs | 33.48 µs | **107,411 amostras/s** | 956 B (33 nós) | 49.7 KB (.bss) / **0 B Heap** | **138 FLOPs** |
-| **Bikes** | Regressão | **8.05 µs** | 17.12 µs | 30.28 µs | **124,224 amostras/s** | 620 B (21 nós) | 49.7 KB (.bss) / **0 B Heap** | **160 FLOPs** |
-| **Appliances Energy** | Regressão | **41.57 µs** | 153.82 µs | 255.16 µs | **24,056 amostras/s** | 900 B (31 nós) | 49.7 KB (.bss) / **0 B Heap** | **336 FLOPs** |
-| **NYC Taxi** | Regressão | **9.20 µs** | 42.10 µs | 50.86 µs | **108,696 amostras/s** | 1,012 B (35 nós) | 49.7 KB (.bss) / **0 B Heap** | **105 FLOPs** |
+| **SEA** | Classificação | **20.08 µs** | 61.96 µs | 85.62 µs | **49,801 amostras/s** | 450 B (19 nós) | 48.5 KB (.bss) / **0 B Heap** | **69 FLOPs** |
+| **Electricity** | Classificação | **65.57 µs** | 108.84 µs | 374.12 µs | **15,251 amostras/s** | 450 B (19 nós) | 48.5 KB (.bss) / **0 B Heap** | **149 FLOPs** |
+| **Forest Covertype** | Classificação | **285.41 µs** | 1156.58 µs | 1901.28 µs | **3,504 amostras/s** | 1,066 B (47 nós) | 48.5 KB (.bss) / **0 B Heap** | **2250 FLOPs** |
+| **Airlines** | Classificação | **21.46 µs** | 87.46 µs | 114.76 µs | **46,598 amostras/s** | 758 B (33 nós) | 48.5 KB (.bss) / **0 B Heap** | **133 FLOPs** |
+| **Friedman #1** | Regressão | **22.68 µs** | 45.90 µs | 73.42 µs | **44,092 amostras/s** | 758 B (33 nós) | 48.5 KB (.bss) / **0 B Heap** | **138 FLOPs** |
+| **Bikes** | Regressão | **21.15 µs** | 44.80 µs | 65.62 µs | **47,281 amostras/s** | 494 B (21 nós) | 48.5 KB (.bss) / **0 B Heap** | **160 FLOPs** |
+| **Appliances Energy** | Regressão | **111.22 µs** | 411.08 µs | 632.64 µs | **8,991 amostras/s** | 714 B (31 nós) | 48.5 KB (.bss) / **0 B Heap** | **336 FLOPs** |
+| **NYC Taxi** | Regressão | **27.83 µs** | 120.42 µs | 202.48 µs | **35,932 amostras/s** | 802 B (35 nós) | 48.5 KB (.bss) / **0 B Heap** | **105 FLOPs** |
 
 ---
 

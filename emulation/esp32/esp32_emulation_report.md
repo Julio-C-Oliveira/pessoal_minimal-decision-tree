@@ -12,9 +12,9 @@
 | Dataset | Hiperparâmetros (Tier 8) | Treino | Teste | Acurácia Holdout | Precisão Macro | Recall Macro | F1-Score Macro | Acurácia Preq. | Topologia (Nós) |
 | :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
 | **SEA** | `grace=100`, `delta=0.01`, `tau=0.1`, `crit=info_gain`, `leaf=nba` | 14,000 | 6,000 | **99.02%** | 98.76% | 98.99% | **98.87%** | 97.29% | 43 nós (8 folhas) |
-| **Electricity** | `grace=400`, `delta=0.01`, `tau=0.1`, `crit=gini`, `leaf=mc` | 31,718 | 13,594 | **64.37%** | 64.00% | 63.93% | **63.96%** | 64.58% | 77 nós (8 folhas) |
-| **Forest Covertype** | `grace=50`, `delta=0.001`, `tau=0.1`, `crit=gini`, `leaf=nba` | 17,500 | 7,500 | **66.00%** | 63.27% | 62.92% | **62.73%** | 60.74% | 79 nós (8 folhas) |
-| **Airlines** | `grace=200`, `delta=1e-07`, `tau=0.1`, `crit=info_gain`, `leaf=nb` | 17,500 | 7,500 | **72.57%** | 57.86% | 55.46% | **55.72%** | 74.62% | 39 nós (8 folhas) |
+| **Electricity** | `grace=400`, `delta=0.01`, `tau=0.1`, `crit=gini`, `leaf=mc` | 31,718 | 13,594 | **64.26%** | 63.88% | 63.32% | **63.34%** | 64.55% | 77 nós (8 folhas) |
+| **Forest Covertype** | `grace=50`, `delta=0.001`, `tau=0.1`, `crit=gini`, `leaf=nba` | 17,500 | 7,500 | **50.63%** | 46.35% | 44.80% | **45.12%** | 42.56% | 17 nós (8 folhas) |
+| **Airlines** | `grace=200`, `delta=1e-07`, `tau=0.1`, `crit=info_gain`, `leaf=nb` | 17,500 | 7,500 | **76.51%** | 64.64% | 55.27% | **54.66%** | 75.16% | 39 nós (8 folhas) |
 
 ---
 
@@ -22,10 +22,10 @@
 
 | Dataset | Hiperparâmetros (Tier 8) | Treino | Teste | Holdout MAE | Holdout RMSE | Holdout $R^2$ | Preq. MAE | Preq. RMSE | Preq. $R^2$ | Topologia (Nós) |
 | :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **Friedman #1** | `grace=200`, `delta=1e-07`, `tau=0.01`, `leaf=model` | 14,000 | 6,000 | **2.2397** | 2.8391 | **0.6756** | 2.2026 | 2.8780 | 0.6631 | 43 nós (8 folhas) |
-| **Bikes** | `grace=50`, `delta=0.01`, `tau=0.05`, `leaf=mean` | 12,165 | 5,214 | **45.8832** | 72.9454 | **0.0563** | 49.4816 | 76.8065 | 0.5982 | 49 nós (8 folhas) |
-| **Appliances Energy** | `grace=200`, `delta=0.0001`, `tau=0.15`, `leaf=model` | 13,814 | 5,921 | **29.7707** | 37.6680 | **0.7461** | 37.2707 | 461.9753 | -36.6846 | 47 nós (8 folhas) |
-| **NYC Taxi** | `grace=100`, `delta=0.0001`, `tau=0.05`, `leaf=adaptive` | 10,500 | 4,500 | **341.7619** | 447.4803 | **0.1816** | 349.9388 | 460.5901 | 0.1541 | 55 nós (8 folhas) |
+| **Friedman #1** | `grace=200`, `delta=1e-07`, `tau=0.01`, `leaf=model` | 14,000 | 6,000 | **2.2983** | 2.8873 | **0.6645** | 2.2714 | 2.8942 | 0.6593 | 41 nós (8 folhas) |
+| **Bikes** | `grace=50`, `delta=0.01`, `tau=0.05`, `leaf=mean` | 12,165 | 5,214 | **50.8890** | 77.6307 | **-0.0688** | 57.4764 | 88.2797 | 0.4693 | 57 nós (8 folhas) |
+| **Appliances Energy** | `grace=200`, `delta=0.0001`, `tau=0.15`, `leaf=model` | 13,814 | 5,921 | **177860798554002.6250** | 521297245863909.0625 | **-48618857909607110524534784.0000** | 647824185999011.1250 | 989617425214023.6250 | -172926110052698160489299968.0000 | 47 nós (8 folhas) |
+| **NYC Taxi** | `grace=100`, `delta=0.0001`, `tau=0.05`, `leaf=adaptive` | 10,500 | 4,500 | **339.0038** | 445.7490 | **0.1879** | 379.1255 | 2306.5156 | -20.2121 | 49 nós (8 folhas) |
 
 ---
 
@@ -39,14 +39,14 @@
 
 | Dataset | Tarefa | Latência Média | Latência p95 | Latência p99 | Throughput (Vazão) | Model Footprint | Consumo RAM (SRAM / Heap) | FLOPs / Amostra |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **SEA** | Classificação | **16.00 µs** | 54.34 µs | 74.55 µs | **62,500 amostras/s** | 1,236 B (43 nós) | 112.0 KB (.bss) / **0 B Heap** | **69 FLOPs** |
-| **Electricity** | Classificação | **18.12 µs** | 35.06 µs | 55.90 µs | **55,188 amostras/s** | 2,188 B (77 nós) | 112.0 KB (.bss) / **0 B Heap** | **149 FLOPs** |
-| **Forest Covertype** | Classificação | **467.02 µs** | 1408.83 µs | 3299.17 µs | **2,141 amostras/s** | 2,244 B (79 nós) | 112.0 KB (.bss) / **0 B Heap** | **2,250 FLOPs** |
-| **Airlines** | Classificação | **82.52 µs** | 153.69 µs | 216.12 µs | **12,118 amostras/s** | 1,124 B (39 nós) | 112.0 KB (.bss) / **0 B Heap** | **133 FLOPs** |
-| **Friedman #1** | Regressão | **63.63 µs** | 117.15 µs | 156.51 µs | **15,716 amostras/s** | 1,236 B (43 nós) | 112.0 KB (.bss) / **0 B Heap** | **138 FLOPs** |
-| **Bikes** | Regressão | **50.87 µs** | 114.89 µs | 158.14 µs | **19,658 amostras/s** | 1,404 B (49 nós) | 112.0 KB (.bss) / **64 B Heap** | **160 FLOPs** |
-| **Appliances Energy** | Regressão | **238.81 µs** | 627.71 µs | 742.54 µs | **4,187 amostras/s** | 1,348 B (47 nós) | 112.0 KB (.bss) / **0 B Heap** | **336 FLOPs** |
-| **NYC Taxi** | Regressão | **42.87 µs** | 95.96 µs | 126.60 µs | **23,326 amostras/s** | 1,572 B (55 nós) | 112.0 KB (.bss) / **0 B Heap** | **105 FLOPs** |
+| **SEA** | Classificação | **41.51 µs** | 119.67 µs | 251.25 µs | **24,091 amostras/s** | 978 B (43 nós) | 111.3 KB (.bss) / **0 B Heap** | **69 FLOPs** |
+| **Electricity** | Classificação | **35.53 µs** | 69.72 µs | 114.19 µs | **28,145 amostras/s** | 1,726 B (77 nós) | 111.3 KB (.bss) / **0 B Heap** | **149 FLOPs** |
+| **Forest Covertype** | Classificação | **1804.24 µs** | 2918.68 µs | 25161.96 µs | **554 amostras/s** | 406 B (17 nós) | 111.3 KB (.bss) / **0 B Heap** | **2,250 FLOPs** |
+| **Airlines** | Classificação | **88.99 µs** | 181.68 µs | 470.20 µs | **11,237 amostras/s** | 890 B (39 nós) | 111.3 KB (.bss) / **0 B Heap** | **133 FLOPs** |
+| **Friedman #1** | Regressão | **65.13 µs** | 131.34 µs | 254.98 µs | **15,354 amostras/s** | 934 B (41 nós) | 111.3 KB (.bss) / **0 B Heap** | **138 FLOPs** |
+| **Bikes** | Regressão | **49.30 µs** | 105.39 µs | 217.15 µs | **20,284 amostras/s** | 1,286 B (57 nós) | 111.3 KB (.bss) / **64 B Heap** | **160 FLOPs** |
+| **Appliances Energy** | Regressão | **80.12 µs** | 160.42 µs | 224.65 µs | **12,481 amostras/s** | 1,066 B (47 nós) | 111.3 KB (.bss) / **184 B Heap** | **336 FLOPs** |
+| **NYC Taxi** | Regressão | **47.35 µs** | 95.70 µs | 227.25 µs | **21,119 amostras/s** | 1,110 B (49 nós) | 111.3 KB (.bss) / **32 B Heap** | **105 FLOPs** |
 
 ---
 

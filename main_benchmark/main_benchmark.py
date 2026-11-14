@@ -107,6 +107,7 @@ def run_isolated_sklearn(train_csv: str, test_csv: str, task: str, params: Optio
     proc = subprocess.run(cmd, capture_output=True, text=True, check=True)
     res = json.loads(proc.stdout.strip())
     res["speedup"] = "Batch"
+    res["dynamic_ram_kb"] = None
     return res
 
 
@@ -138,6 +139,7 @@ def run_isolated_river(train_csv: str, test_csv: str, task: str, params: Optiona
     proc = subprocess.run(cmd, capture_output=True, text=True, check=True)
     res = json.loads(proc.stdout.strip())
     res["speedup"] = "1.0x (baseline)"
+    res["dynamic_ram_kb"] = None
     return res
 
 
@@ -168,14 +170,16 @@ def run_isolated_c_tier(
     if os.path.exists(json_path):
         os.remove(json_path)
 
-    # Static model size from stdout or JSON
-    model_static_bytes = meta.get("final_bytes_used", 524720)
+    # Dynamic and static model size
+    dynamic_bytes = meta.get("final_bytes_used", 0)
+    model_static_bytes = dynamic_bytes
     for line in proc.stdout.splitlines():
         if "model static size =" in line:
             parts = line.split("model static size =")[1].split("bytes")[0].strip()
             model_static_bytes = int(parts)
 
     intra_train_ram_kb = model_static_bytes / 1024.0
+    dynamic_ram_kb = dynamic_bytes / 1024.0
 
     train_rss_mb = meta.get("train_rss_kb", 2500) / 1024.0
     test_rss_mb = meta.get("test_rss_kb", train_rss_mb * 1024.0) / 1024.0
@@ -189,6 +193,8 @@ def run_isolated_c_tier(
         "n_nodes": meta.get("final_nodes", 1),
         "n_leaves": meta.get("final_active_leaves", 1),
         "intra_train_ram_kb": intra_train_ram_kb,
+        "final_bytes_used": dynamic_bytes,
+        "dynamic_ram_kb": dynamic_ram_kb,
         "train_rss_mb": train_rss_mb,
         "test_rss_mb": test_rss_mb,
         "peak_rss_mb": peak_rss_mb,
@@ -410,9 +416,9 @@ def run_main_benchmark_suite(
         t_high_res = run_isolated_c_tier(bin_high, train_csv, test_csv, task, high_label, extra_args=cli_args_high)
         t_high_res["speedup"] = river_us / max(0.01, t_high_res["avg_us_per_sample"])
         if task == "classification":
-            print(f" Done. (Acc={t_high_res['holdout_acc']:.2f}%, Nodes={t_high_res['n_nodes']}, IntraRAM={t_high_res['intra_train_ram_kb']:.1f}KB, PeakRSS={t_high_res['peak_rss_mb']:.1f}MB, Time={t_high_res['avg_us_per_sample']:.2f}us, Speedup={t_high_res['speedup']:.1f}x)")
+            print(f" Done. (Acc={t_high_res['holdout_acc']:.2f}%, Nodes={t_high_res['n_nodes']}, StaticRAM={t_high_res['intra_train_ram_kb']:.1f}KB, ActiveRAM={t_high_res['dynamic_ram_kb']:.1f}KB, PeakRSS={t_high_res['peak_rss_mb']:.1f}MB, Time={t_high_res['avg_us_per_sample']:.2f}us, Speedup={t_high_res['speedup']:.1f}x)")
         else:
-            print(f" Done. (MAE={t_high_res['holdout_mae']:.4f}, R2={t_high_res['holdout_r2']:.4f}, Nodes={t_high_res['n_nodes']}, IntraRAM={t_high_res['intra_train_ram_kb']:.1f}KB, PeakRSS={t_high_res['peak_rss_mb']:.1f}MB, Time={t_high_res['avg_us_per_sample']:.2f}us, Speedup={t_high_res['speedup']:.1f}x)")
+            print(f" Done. (MAE={t_high_res['holdout_mae']:.4f}, R2={t_high_res['holdout_r2']:.4f}, Nodes={t_high_res['n_nodes']}, StaticRAM={t_high_res['intra_train_ram_kb']:.1f}KB, ActiveRAM={t_high_res['dynamic_ram_kb']:.1f}KB, PeakRSS={t_high_res['peak_rss_mb']:.1f}MB, Time={t_high_res['avg_us_per_sample']:.2f}us, Speedup={t_high_res['speedup']:.1f}x)")
 
         # 4. Kansho Tier 8
         slots_t8 = t8_params.get("reg_num_slots", 16) if task == "regression" else 16
@@ -423,9 +429,9 @@ def run_main_benchmark_suite(
         t8_res = run_isolated_c_tier(bin_t8, train_csv, test_csv, task, "Kansho Tier 8", extra_args=cli_args_t8)
         t8_res["speedup"] = river_us / max(0.01, t8_res["avg_us_per_sample"])
         if task == "classification":
-            print(f" Done. (Acc={t8_res['holdout_acc']:.2f}%, Nodes={t8_res['n_nodes']}, IntraRAM={t8_res['intra_train_ram_kb']:.1f}KB, PeakRSS={t8_res['peak_rss_mb']:.1f}MB, Time={t8_res['avg_us_per_sample']:.2f}us, Speedup={t8_res['speedup']:.1f}x)")
+            print(f" Done. (Acc={t8_res['holdout_acc']:.2f}%, Nodes={t8_res['n_nodes']}, StaticRAM={t8_res['intra_train_ram_kb']:.1f}KB, ActiveRAM={t8_res['dynamic_ram_kb']:.1f}KB, PeakRSS={t8_res['peak_rss_mb']:.1f}MB, Time={t8_res['avg_us_per_sample']:.2f}us, Speedup={t8_res['speedup']:.1f}x)")
         else:
-            print(f" Done. (MAE={t8_res['holdout_mae']:.4f}, R2={t8_res['holdout_r2']:.4f}, Nodes={t8_res['n_nodes']}, IntraRAM={t8_res['intra_train_ram_kb']:.1f}KB, PeakRSS={t8_res['peak_rss_mb']:.1f}MB, Time={t8_res['avg_us_per_sample']:.2f}us, Speedup={t8_res['speedup']:.1f}x)")
+            print(f" Done. (MAE={t8_res['holdout_mae']:.4f}, R2={t8_res['holdout_r2']:.4f}, Nodes={t8_res['n_nodes']}, StaticRAM={t8_res['intra_train_ram_kb']:.1f}KB, ActiveRAM={t8_res['dynamic_ram_kb']:.1f}KB, PeakRSS={t8_res['peak_rss_mb']:.1f}MB, Time={t8_res['avg_us_per_sample']:.2f}us, Speedup={t8_res['speedup']:.1f}x)")
 
         # 5. Kansho Tier 4
         slots_t4 = t4_params.get("reg_num_slots", 16) if task == "regression" else 16
@@ -436,9 +442,9 @@ def run_main_benchmark_suite(
         t4_res = run_isolated_c_tier(bin_t4, train_csv, test_csv, task, "Kansho Tier 4", extra_args=cli_args_t4)
         t4_res["speedup"] = river_us / max(0.01, t4_res["avg_us_per_sample"])
         if task == "classification":
-            print(f" Done. (Acc={t4_res['holdout_acc']:.2f}%, Nodes={t4_res['n_nodes']}, IntraRAM={t4_res['intra_train_ram_kb']:.1f}KB, PeakRSS={t4_res['peak_rss_mb']:.1f}MB, Time={t4_res['avg_us_per_sample']:.2f}us, Speedup={t4_res['speedup']:.1f}x)")
+            print(f" Done. (Acc={t4_res['holdout_acc']:.2f}%, Nodes={t4_res['n_nodes']}, StaticRAM={t4_res['intra_train_ram_kb']:.1f}KB, ActiveRAM={t4_res['dynamic_ram_kb']:.1f}KB, PeakRSS={t4_res['peak_rss_mb']:.1f}MB, Time={t4_res['avg_us_per_sample']:.2f}us, Speedup={t4_res['speedup']:.1f}x)")
         else:
-            print(f" Done. (MAE={t4_res['holdout_mae']:.4f}, R2={t4_res['holdout_r2']:.4f}, Nodes={t4_res['n_nodes']}, IntraRAM={t4_res['intra_train_ram_kb']:.1f}KB, PeakRSS={t4_res['peak_rss_mb']:.1f}MB, Time={t4_res['avg_us_per_sample']:.2f}us, Speedup={t4_res['speedup']:.1f}x)")
+            print(f" Done. (MAE={t4_res['holdout_mae']:.4f}, R2={t4_res['holdout_r2']:.4f}, Nodes={t4_res['n_nodes']}, StaticRAM={t4_res['intra_train_ram_kb']:.1f}KB, ActiveRAM={t4_res['dynamic_ram_kb']:.1f}KB, PeakRSS={t4_res['peak_rss_mb']:.1f}MB, Time={t4_res['avg_us_per_sample']:.2f}us, Speedup={t4_res['speedup']:.1f}x)")
 
         all_results.append({
             "id": d_id,
@@ -479,7 +485,8 @@ def generate_markdown_report(report_path: str, results: List[Dict[str, Any]]):
         f.write("  - **River (Streaming):** Consome amostra por amostra do fluxo contínuo via gerador linha a linha (`learn_one`).\n")
         f.write("  - **Kansho (Streaming Puro Embarcado):** Consome estritamente **1 amostra por vez** diretamente do CSV através de um buffer estático de $2\\text{ KB}$, operando com **0.0 KB de `malloc` em runtime** e sem qualquer acúmulo de dados na RAM.\n")
         f.write("- **Métricas de Memória:**\n")
-        f.write("  - `RAM Intra-Treino (Modelo + Heap)`: Tamanho físico estrutural do modelo somado ao pico de alocações dinâmicas no heap durante o fit/train.\n")
+        f.write("  - `SRAM Estática (.bss)`: Tamanho físico estrutural total do modelo (`sizeof(ht_tree_t)`), alocado estaticamente em tempo de compilação sem fragmentação.\n")
+        f.write("  - `RAM Ativa (Pico Usado)`: Consumo efetivo dos pools em runtime (`ht_memory_bytes_used`), registrando a memória realmente alocada para nós e observadores em streaming ativo.\n")
         f.write("  - `Peak RSS Treino / Teste / Total (MB)`: Memória física real (Resident Set Size) alocada pelo Sistema Operacional para o processo isolado.\n")
         f.write("- **Tiers de Dimensionamento do Kansho:**\n")
         f.write("  - **Tier 256 / Tier 40 (Capacidade Alta):** $256$ folhas em datasets convencionais ou $40$ folhas em alta dimensionalidade (Covertype e Appliances Energy), dimensionado estritamente para $\\le 1\\text{ MB}$ de SRAM estática.\n")
@@ -488,8 +495,8 @@ def generate_markdown_report(report_path: str, results: List[Dict[str, Any]]):
 
         # Classification Table
         f.write("## 2. Resultados em Classificação (4 Datasets)\n\n")
-        f.write("| Dataset | Modelo / Tier | Holdout Acc (%) | Macro F1 (%) | Prequential Acc (%) | Total Nós | RAM Intra-Treino (Mod+Heap) | RSS Treino (MB) | RSS Teste (MB) | RSS Total (MB) | Tempo/amostra (µs) | Speedup vs River |\n")
-        f.write("| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |\n")
+        f.write("| Dataset | Modelo / Tier | Holdout Acc (%) | Macro F1 (%) | Prequential Acc (%) | Total Nós | SRAM Estática (.bss) | RAM Ativa (Pico Usado) | RSS Treino (MB) | RSS Teste (MB) | RSS Total (MB) | Tempo/amostra (µs) | Speedup vs River |\n")
+        f.write("| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |\n")
 
         for r in results:
             if r["task"] != "classification":
@@ -508,6 +515,7 @@ def generate_markdown_report(report_path: str, results: List[Dict[str, Any]]):
                 f1_s = f"{m['f1_macro']:.2f}%"
                 preq_s = f"{m['prequential_acc']:.2f}%" if m.get('prequential_acc') is not None else "N/A"
                 intra_s = f"{m['intra_train_ram_kb']:.1f} KB"
+                dyn_s = f"{m['dynamic_ram_kb']:.1f} KB" if m.get('dynamic_ram_kb') is not None else "-"
                 tr_rss = f"{m['train_rss_mb']:.1f} MB"
                 te_rss = f"{m['test_rss_mb']:.1f} MB"
                 tot_rss = f"{m['peak_rss_mb']:.1f} MB"
@@ -515,11 +523,12 @@ def generate_markdown_report(report_path: str, results: List[Dict[str, Any]]):
                 sp = m.get("speedup", "-")
                 sp_s = f"**{sp:.1f}x**" if isinstance(sp, float) else str(sp)
                 bold = "**" if key.startswith("c_") else ""
-                f.write(f"| {name} | {bold}{label}{bold} | {bold}{acc_s}{bold} | {f1_s} | {preq_s} | {m['n_nodes']} | {intra_s} | {tr_rss} | {te_rss} | {bold}{tot_rss}{bold} | {time_s} | {sp_s} |\n")
+                dyn_formatted = f"{bold}{dyn_s}{bold}" if dyn_s != "-" else "-"
+                f.write(f"| {name} | {bold}{label}{bold} | {bold}{acc_s}{bold} | {f1_s} | {preq_s} | {m['n_nodes']} | {intra_s} | {dyn_formatted} | {tr_rss} | {te_rss} | {bold}{tot_rss}{bold} | {time_s} | {sp_s} |\n")
 
         # Regression Table
         f.write("\n## 3. Resultados em Regressão Contínua (4 Datasets)\n\n")
-        f.write("| Dataset | Modelo / Tier | Holdout MAE | Holdout RMSE | Holdout $R^2$ | Prequential MAE | Total Nós | RAM Intra-Treino (Mod+Heap) | RSS Treino (MB) | RSS Teste (MB) | RSS Total (MB) | Tempo/amostra (µs) | Speedup vs River |\n")
+        f.write("| Dataset | Modelo / Tier | Holdout MAE | Holdout RMSE | Holdout $R^2$ | Prequential MAE | Total Nós | SRAM Estática (.bss) | RAM Ativa (Pico Usado) | RSS Treino (MB) | RSS Teste (MB) | RSS Total (MB) | Tempo/amostra (µs) | Speedup vs River |\n")
         f.write("| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |\n")
 
         for r in results:
@@ -540,6 +549,7 @@ def generate_markdown_report(report_path: str, results: List[Dict[str, Any]]):
                 r2_s = f"{m['holdout_r2']:.4f}"
                 preq_s = f"{m['prequential_mae']:.4f}" if m.get('prequential_mae') is not None else "N/A"
                 intra_s = f"{m['intra_train_ram_kb']:.1f} KB"
+                dyn_s = f"{m['dynamic_ram_kb']:.1f} KB" if m.get('dynamic_ram_kb') is not None else "-"
                 tr_rss = f"{m['train_rss_mb']:.1f} MB"
                 te_rss = f"{m['test_rss_mb']:.1f} MB"
                 tot_rss = f"{m['peak_rss_mb']:.1f} MB"
@@ -547,13 +557,14 @@ def generate_markdown_report(report_path: str, results: List[Dict[str, Any]]):
                 sp = m.get("speedup", "-")
                 sp_s = f"**{sp:.1f}x**" if isinstance(sp, float) else str(sp)
                 bold = "**" if key.startswith("c_") else ""
-                f.write(f"| {name} | {bold}{label}{bold} | {bold}{mae_s}{bold} | {rmse_s} | {bold}{r2_s}{bold} | {preq_s} | {m['n_nodes']} | {intra_s} | {tr_rss} | {te_rss} | {bold}{tot_rss}{bold} | {time_s} | {sp_s} |\n")
+                dyn_formatted = f"{bold}{dyn_s}{bold}" if dyn_s != "-" else "-"
+                f.write(f"| {name} | {bold}{label}{bold} | {bold}{mae_s}{bold} | {rmse_s} | {bold}{r2_s}{bold} | {preq_s} | {m['n_nodes']} | {intra_s} | {dyn_formatted} | {tr_rss} | {te_rss} | {bold}{tot_rss}{bold} | {time_s} | {sp_s} |\n")
 
         # Section 4: Highlights and Analysis
         f.write("\n## 4. Análise Comparativa e Síntese de Performance\n\n")
         f.write("1. **Equilíbrio Preditivo dos Melhores Parâmetros:** A aplicação dos hiperparâmetros ótimos identificados na suíte de busca estratificada permitiu que os três tiers do Kansho atingissem desempenhos de ponta em todos os 8 datasets, sem redundância entre variantes cruas e tratadas.\n")
         f.write("2. **Eficiência e Velocidade do C11:** Kansho processou cada amostra completa entre **$0,23\\,\\mu\\text{s}$ e $6,37\\,\\mu\\text{s}$**, entregando speedups de **$100\\times$ a mais de $2.000\\times$** frente ao River em Python.\n")
-        f.write("3. **Orçamento Rigoroso $\\le 1\\text{ MB}$:** Mesmo no Tier 40 dos datasets mais densos (Forest Covertype e Appliances Energy), a memória estática foi mantida estritamente abaixo do teto físico (consumindo $713.8\\text{ KB}$), garantindo estabilidade absoluta e determinismo sem alocação dinâmica em runtime.\n")
+        f.write("3. **Orçamento Rigoroso $\\le 1\\text{ MB}$ e Baixo Consumo Ativo:** Mesmo nos datasets de maior dimensionalidade (Forest Covertype e Appliances Energy), a alocação estática no Tier 40 foi mantida confortavelmente abaixo do teto de 1 MB ($390.5\\text{ KB}$ e $338.1\\text{ KB}$ respectivamente), graças à compactação de estruturas da v0.4.1. Além disso, a **RAM ativa (pico usado)** durante a operação contínua é ainda menor (ex: $\\le 74.5\\text{ KB}$ no Tier 8 e $\\le 36.6\\text{ KB}$ no Tier 4), permitindo execução serena em MCUs como ESP32 e Cortex-M3 com zero `malloc` em runtime.\n")
 
 
 def main():

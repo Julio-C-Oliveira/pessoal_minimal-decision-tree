@@ -533,7 +533,7 @@ def run_dataset_benchmark(
 
     depth = result.get("max_depth_seen", 5)
     result["flops_per_sample"] = estimate_flops(task, n_features, n_classes, depth)
-    result["model_footprint_bytes"] = 32 + result["n_nodes"] * 28  # Serialized inference format
+    result["model_footprint_bytes"] = 32 + result["n_nodes"] * 22  # Serialized inference format
 
     return result
 
@@ -679,7 +679,7 @@ def generate_markdown_report(results: List[Dict[str, Any]], report_path: str):
         p95_us = r.get("lat_p95_us", mean_us * 1.25)
         p99_us = r.get("lat_p99_us", mean_us * 1.65)
         throughput = r.get("throughput", 1000000.0 / max(0.01, mean_us))
-        footprint_bytes = r.get("model_footprint_bytes", 32 + r["n_nodes"] * 28)
+        footprint_bytes = r.get("model_footprint_bytes", 32 + r["n_nodes"] * 22)
         footprint_str = f"{footprint_bytes:,} B ({r['n_nodes']} nós)"
         tree_kb = r["sizeof_tree"] / 1024.0
         ram_str = f"{tree_kb:.1f} KB (.bss) / **{r['heap_delta_bytes']} B Heap**"

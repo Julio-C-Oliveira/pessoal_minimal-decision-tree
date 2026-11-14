@@ -521,7 +521,7 @@ def run_dataset_benchmark(
 
     depth = result.get("max_depth_seen", 5)
     result["flops_per_sample"] = estimate_flops(task, n_features, n_classes, depth)
-    result["model_footprint_bytes"] = 32 + result["n_nodes"] * 28
+    result["model_footprint_bytes"] = 32 + result["n_nodes"] * 22
 
     return result
 
