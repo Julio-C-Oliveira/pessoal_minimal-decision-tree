@@ -97,6 +97,19 @@ Para lançar uma nova versão oficial no GitHub:
 
 ## 4.1 Histórico de Releases (Changelog)
 
+### v0.4.1 (2026-11-14) — Otimização de Footprint com Perfil ADWIN Compacto e Omissão de Feat Stats (Entrega 7.7)
+- **Perfil de Compilação ADWIN Compacto (`ht_drift`):**
+  - Parametrização dos níveis de histograma exponencial do ADWIN via macro `HT_ADWIN_LEVELS` (padrão 32, configurável até 10 para microcontroladores como Cortex-M3 / ESP32).
+  - Asserção algébrica estática em tempo de compilação garantindo dimensionamento exato da struct `ht_adwin_t`.
+  - Redução física de `sizeof(ht_adwin_t)` de $2.096\text{ B}$ para **$688\text{ B}$** (economia de $-67,2\%$ por detector), poupando **$180,2\text{ KB}$** de SRAM no pool de 128 instâncias (`drift_pool`).
+  - Adição de teste unitário de saturação de nível superior (`test_adwin_highest_level_saturation_and_drop`), validando a reciclagem elegante de baldes no horizonte temporal máximo.
+- **Omissão Condicional de `feat_stats` em Classificação (`ht_tree`):**
+  - Proteção de `feat_stats[HT_MAX_FEATURES]` de regressão sob `#ifndef HT_CLASSIF_ONLY`, eliminando a redundância desse vetor nos caminhos puros de classificação em `ht_tree.c` e `ht_tree.h`.
+- **Validação Experimental no Replay Benchmark (8 Datasets):**
+  - Forest Covertype (Tier 2, 54 features, 7 classes): redução de RAM de **$22,8\text{ KB}$ para $18,9\text{ KB}$ ($-17,1\%$)**, com acurácia ($61,43\%$) e F1 Macro ($58,51\%$) bit-a-bit idênticos.
+  - Reduções drásticas em todos os 8 datasets nos benchmarks de streaming e prequential (economias entre $-17\%$ e $-82\%$ em RAM intra-treino).
+- **Suíte de Testes:** 119 testes unitários e de integração 100% aprovados (227.173 asserções) com zero warnings em `float32` e `double64`.
+
 ### v0.4.0 (2026-11-14) — Otimização Extrema de Memória SRAM com Dynamic Feature Stride Slab (Entrega 7.6)
 - **Dynamic Feature Stride Slab Allocator (`ht_memory`) (Entrega 7.6):**
   - Implementação de particionamento dinâmico de *stride* no pool de estatísticas (`stats_pool`) em `ht_memory.c`, calculando o passo físico em bytes por folha (`leaf_stride`) em tempo de compilação e inicialização com base em `HT_MAX_FEATURES`, alinhado a boundaries de 4 bytes (`uint32_t`).
