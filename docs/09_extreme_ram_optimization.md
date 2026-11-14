@@ -523,22 +523,75 @@ Comparação considerando o perfil compacto de classificação para Forest Cover
 
 ---
 
-### Hipótese 7: ADWIN Exponencial Compacto para Microcontroladores
+### Hipótese 7: Perfil de Compilação ADWIN Compacto, Dimensionamento `.bss` por Dataset e Validação Global
 
-#### 1. Fundamentação Teórica e Diagnóstico
-Em [`code/include/ht_drift.h`](../code/include/ht_drift.h), cada detector ADWIN possui $14$ níveis de buckets (`HT_ADWIN_LEVELS = 14`), pesando $764\text{ bytes}$ em `float32` e $1.504\text{ bytes}$ em `double64`.
-Com $128$ detectores no pool, `ht_adwin_pool_t` consome **$98\text{ KB}$** em `float32` e **$192,8\text{ KB}$** em `double64`.
+#### 1. Fundamentação Teórica e Diagnóstico Completo (Pool ADWIN + `.bss` por Dataset + `feat_stats`)
 
-No entanto, em microcontroladores de 32 a 256 KB de SRAM:
-- O nível 13 do ADWIN armazena buckets de tamanho $2^{13} = 8.192$ amostras. A janela total pode ultrapassar $80.000$ amostras, o que é excessivo para sensores que operam em ciclos curtos e precisam reagir a drifts recentes.
-- Reduzindo `HT_ADWIN_LEVELS` de 14 para 10 níveis, a janela máxima suportada ainda é de até $5.115$ amostras (mais que suficiente para detecção precisa com $\delta = 0,002$).
-- Cada detector passa a ter $10 \times 52 + 36 = 556\text{ bytes}$ (em vez de $764\text{ B}$).
-- Reduzindo o número de detectores simultâneos de 128 para 32 (uma árvore embarcada com profundidade 8 dificilmente possui mais de 10 a 20 ramos ativos simultâneos):
-  $$32 \times 556\text{ bytes} \approx 17.792\text{ bytes } (\mathbf{17,4\text{ KB}} \text{ vs } 98\text{ KB})$$
+Uma auditoria cruzada entre [`code/include/ht_drift.h`](../code/include/ht_drift.h), [`code/include/ht_tree.h`](../code/include/ht_tree.h), [`main_benchmark/tune_hyperparams.py`](../main_benchmark/tune_hyperparams.py) e os firmwares QEMU identificou três fontes remanescentes de desperdício estático e uma trava de compilação:
 
-#### 2. Economia de Memória e Impacto
-- **Economia no Pool ADWIN:** De $98,1\text{ KB}$ para $17,4\text{ KB}$ (**economia de $80,7\text{ KB}$**, $-82,3\%$).
-- **Impacto em Acurácia:** Praticamente nulo para drifts abruptos e drifts graduais com janela $\le 5.000$ amostras.
+1. **Pool ADWIN Superdimensionado e `_Static_assert` Fixo em [`code/include/ht_drift.h`](../code/include/ht_drift.h):**
+   - Cada detector ADWIN possui $14$ níveis de buckets (`HT_ADWIN_LEVELS = 14`), pesando **$764\text{ bytes}$** em `float32` e **$1.504\text{ bytes}$** em `double64`. Com $128$ detectores no pool (`HT_MAX_ADWIN_DETECTORS = 128`), `ht_adwin_pool_t` consome exatamente **$98.068\text{ bytes}$ ($95,77\text{ KB}$)** em `float32` e **$192.792\text{ bytes}$ ($188,27\text{ KB}$)** em `double64`.
+   - O nível 13 armazena buckets de $2^{13} = 8.192$ amostras, permitindo janelas de até $81.915$ amostras — desproporcional para microcontroladores de 32–256 KB SRAM operando em ciclos curtos. Reduzindo `HT_ADWIN_LEVELS` de `14` para `10` (janela máxima de $5 \times (2^{10} - 1) = 5.115$ amostras, suficiente para $\delta = 0,002$) e `HT_MAX_ADWIN_DETECTORS` de `128` para `32`:
+     - Cada detector cai para $10 \times 52 + 36 = \mathbf{556\text{ B}}$ (`float32`) e $10 \times 104 + 48 = \mathbf{1.088\text{ B}}$ (`double64`).
+     - `ht_adwin_pool_t` com 32 detectores passa a ocupar $32 \times 556 + 64 + 8 = \mathbf{17.864\text{ bytes}}$ (**$17,45\text{ KB}$** vs $95,77\text{ KB}$).
+   - **Bloqueio de Compilação Atual:** As linhas 77–81 de `code/include/ht_drift.h` impõem `_Static_assert(sizeof(ht_adwin_t) == 764)` (e `1504`) **sem guarda de `HT_ADWIN_LEVELS`**, quebrando imediatamente qualquer compilação com `-DHT_ADWIN_LEVELS=10`.
+2. **Reserva Ociosa em `.bss` no Compilador On-Demand (`main_benchmark/tune_hyperparams.py` e `main_benchmark.py`):**
+   - Na Entrega 7.6, `ht_memory.h` introduziu `HT_STATS_STORAGE_BYTES` para ajustar o slab em `.bss`, mas `ensure_c11_binary()` em `main_benchmark/tune_hyperparams.py` ainda compila o Forest Covertype (`n_features = 54`) com `-DHT_MAX_FEATURES=64 -DHT_CLASSIF_ONLY` sem parametrizar `HT_STATS_STORAGE_BYTES` para as 54 features reais.
+   - Com isso, o perfil Forest Covertype Tier 2 (`2` folhas ativas, `32` nós max) ainda reserva $20.512\text{ B}$ no slab (para 64 features) em vez de $17.312\text{ B}$ (54 features), acumulando **$3.200\text{ B}$ ($3,13\text{ KB}$)** mortos em `.bss` e mantendo `sizeof(ht_tree_t)` em **$23.352\text{ B}$ ($22,80\text{ KB}$)**.
+3. **Estatísticas de Regressão SGD Ociosas na Classificação (`feat_stats` em `ht_tree.h`):**
+   - O campo `ht_var_stat_t feat_stats[HT_MAX_FEATURES]` dentro de `ht_tree_t` ($64 \times 12\text{ B} = \mathbf{768\text{ B}}$ no Covertype) existe exclusivamente para a normalização Z-Score híbrida das folhas SGD de regressão (`leaf_sgd_normalize`), permanecendo $100\%$ ocioso em compilações `-DHT_CLASSIF_ONLY`.
+
+#### 2. Arquitetura C11 e Salvaguardas Obrigatórias
+
+1. **Parametrização do `_Static_assert` em `code/include/ht_drift.h`:**
+   - Substituir o assert literal incondicional por asserção algébrica compatível com qualquer `HT_ADWIN_LEVELS`:
+     ```c
+     #ifndef HT_USE_DOUBLE
+     _Static_assert(sizeof(ht_adwin_t) == (HT_ADWIN_LEVELS * sizeof(ht_adwin_row_t) + 36U),
+                    "ht_adwin_t size mismatch in float32 mode");
+     #if HT_ADWIN_LEVELS == 14
+     _Static_assert(sizeof(ht_adwin_t) == 764, "ht_adwin_t must be 764 bytes at 14 levels (float32)");
+     #elif HT_ADWIN_LEVELS == 10
+     _Static_assert(sizeof(ht_adwin_t) == 556, "ht_adwin_t must be 556 bytes at 10 levels (float32)");
+     #endif
+     #else
+     _Static_assert(sizeof(ht_adwin_t) == (HT_ADWIN_LEVELS * sizeof(ht_adwin_row_t) + 48U),
+                    "ht_adwin_t size mismatch in float64 mode");
+     #if HT_ADWIN_LEVELS == 14
+     _Static_assert(sizeof(ht_adwin_t) == 1504, "ht_adwin_t must be 1504 bytes at 14 levels (float64)");
+     #elif HT_ADWIN_LEVELS == 10
+     _Static_assert(sizeof(ht_adwin_t) == 1088, "ht_adwin_t must be 1088 bytes at 10 levels (float64)");
+     #endif
+     #endif
+     ```
+2. **Teste de Saturação do Último Nível Exponencial (`last_bucket_row == HT_ADWIN_LEVELS - 1`) em `code/tests/test_drift.c`:**
+   - Como a janela máxima com `10` níveis é de $\approx 5.115$ amostras, fluxos estacionários contínuos atingem o ramo `else` de descarte do bucket mais antigo em `ht_adwin_compress_buckets()`.
+   - Incluir teste N1/N2 dedicado inserindo $> 6.000$ amostras (e/ou saturando todos os `HT_ADWIN_LEVELS`) validando que `width`, `total_sum` e `total_variance` permanecem consistentes, sem *underflow* negativo nem acesso fora dos limites de `rows[]`.
+3. **Guarda `#ifndef HT_CLASSIF_ONLY` para `feat_stats` em `code/include/ht_tree.h` e `code/src/ht_tree.c`:**
+   - Condicionar `ht_var_stat_t feat_stats[HT_MAX_FEATURES]` e o bloco correspondente em `ht_tree.c` a `#ifndef HT_CLASSIF_ONLY`, removendo **$768\text{ B}$** ($64 \times 12\text{ B}$) em builds de classificação pura (ou $192\text{ B}$ com `F=16`).
+4. **Dimensionamento `.bss` por Dataset em `main_benchmark/tune_hyperparams.py` e `main_benchmark/main_benchmark.py`:**
+   - Atualizar `ensure_c11_binary()` para receber/resolver o `n_features` real do dataset (ou calcular e passar `-DHT_STATS_STORAGE_BYTES=<bytes>` exato para `leaves * leaf_stride(n_features, task)`), materializando na seção `.bss` a economia da Entrega 7.6.
+5. **Perfis MCU nos Firmwares QEMU (`emulation/esp32/CMakeLists.txt` e `emulation/cortex-m3/Makefile`):**
+   - Atualizar diretamente os arquivos de build dos firmwares (não os scripts `run_qemu.sh` de orquestração):
+     - [`emulation/esp32/CMakeLists.txt`](../emulation/esp32/CMakeLists.txt): adicionar `HT_ADWIN_LEVELS=10` (junto a `HT_MAX_ADWIN_DETECTORS=32`).
+     - [`emulation/cortex-m3/Makefile`](../emulation/cortex-m3/Makefile): adicionar `-DHT_ADWIN_LEVELS=10` em `CONFIG_DEFS` (mantendo `-DHT_MAX_ADWIN_DETECTORS=2`).
+
+#### 3. Economia de Memória e Impacto Consolidado
+
+- **Economia no Pool ADWIN (`ht_adwin_pool_t`, perfil MCU `10L / 32D` vs padrão `14L / 128D`):**
+  - `float32`: de **$98.068\text{ B}$ ($95,77\text{ KB}$)** para **$17.864\text{ B}$ ($17,45\text{ KB}$)** — **$-80.204\text{ B}$ ($-78,32\text{ KB}$ / $-81,8\%$)**.
+  - *(Nota: como `ht_adwin_pool_t` reside fora de `ht_tree_t` e não é instanciado no modo VFDT puro sem `--hat`, a H7 isolada reduz $0\text{ B}$ no Forest Covertype VFDT, atuando diretamente em firmwares e benchmarks HAT).*
+- **Economia no Forest Covertype Tier 2 (`HT_MAX_ACTIVE_LEAVES=2`, `HT_MAX_NODES=32`, `HT_CLASSIF_ONLY`, `F=64` vs `n_features=54`):**
+
+| Componente em `ht_tree_t` | Estado Atual Pós-7.6 (`F=64`, `CLASSIF_ONLY`) | Com `-DHT_STATS_STORAGE_BYTES=17312` | Com `HT_STATS_STORAGE_BYTES=17312` + Guarda `feat_stats` |
+| :--- | :---: | :---: | :---: |
+| `memory.stats_storage` (2 folhas) | $20.512\text{ B}$ ($20,03\text{ KB}$) | **$17.312\text{ B}$** ($16,91\text{ KB}$) | **$17.312\text{ B}$** ($16,91\text{ KB}$) |
+| `memory.node_pool[32]` ($32 \times 36\text{ B}$) | $1.152\text{ B}$ | $1.152\text{ B}$ | $1.152\text{ B}$ |
+| `feat_stats[64]` ($64 \times 12\text{ B}$) | $768\text{ B}$ | $768\text{ B}$ | **$0\text{ B}$** (omitido em `HT_CLASSIF_ONLY`) |
+| `node_drift[32]` + `params` + metadados | $920\text{ B}$ | $920\text{ B}$ | $920\text{ B}$ |
+| **Total `sizeof(ht_tree_t)`** | **$23.352\text{ B}$ ($22,80\text{ KB}$)** | **$20.152\text{ B}$ ($19,68\text{ KB}$, $-13,7\%$)** | **$19.384\text{ B}$ ($18,93\text{ KB}$, $-17,0\%$)** |
+
+- **Impacto em Acurácia:** **$0,0\%$** no Covertype (100% preservada: $61,43\%$ acurácia / $58,51\%$ F1 Macro) e impacto praticamente nulo no ADWIN para drifts abruptos e graduais com janela $\le 5.000$ amostras.
 
 ---
 
