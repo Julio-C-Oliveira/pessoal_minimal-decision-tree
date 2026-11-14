@@ -169,7 +169,20 @@ Para lançar uma nova versão oficial no GitHub:
 
 ## 5. Possíveis Trabalhos Futuros e Extensões (Roadmap)
 
-Embora todas as fases planejadas (Fases 0 a 4, incluindo Classificação, Adaptação a *Concept Drift* com `ADWIN2`/`HAT` e Regressão Contínua `FIMT-DD`/`HAT-R`) estejam 100% concluídas com zero heap dinâmico em runtime e conformidade estrita com o teto de 1 MB de RAM, as análises teóricas e as constatações experimentais do **Main Benchmark com 8 Datasets** apontam direções promissoras de evolução estruturadas em 6 eixos temáticos:
+Embora todas as fases entregues até a `v0.4.1` (**Fases 0 a 7**, incluindo Classificação, Adaptação a *Concept Drift* com `ADWIN2`/`HAT`, Regressão Contínua `FIMT-DD`/`HAT-R`, `libht_prep` e otimização extrema de SRAM com *slab* por feature) estejam 100% concluídas com zero heap dinâmico em runtime e perfis enxutos (`4,7 KB` a `18,9 KB`), as análises teóricas e os resultados experimentais do **Main Benchmark com 8 Datasets** apontam duas prioridades estratégicas imediatas — além dos 6 eixos detalhados a seguir — para fechar as lacunas restantes do nicho embarcado:
+
+### 5.0 Prioridades Estratégicas: Consolidando a Liderança no Nicho Embarcado
+
+> [!TIP]
+> **Foco de Evolução (`v0.5.0+`):** Cobrir 100% do espectro de microcontroladores (incluindo *ultra-low-power* sem FPU) e competir mais próximo aos modelos *batch* em fluxos tabulares complexos preservando o teto estrito de SRAM.
+
+1. **Aritmética de Ponto Fixo (`Q16.16` / `int16`, `-DHT_USE_FIXED_POINT`) para MCUs sem FPU:**
+   - Hoje, o uso padrão de `float32` impõe penalidade severa de latência e energia em microcontroladores de baixíssimo custo sem unidade de ponto flutuante em hardware (como **ARM Cortex-M0 / M0+** e núcleos **RISC-V sem extensão `F`**), onde operações `float` são emuladas em software (`soft-fp`).
+   - A flag de compilação **`-DHT_USE_FIXED_POINT`** abrirá o mercado de sensores alimentados por bateria com autonomia de anos (detalhes técnicos no [Item #2](#51-plataformas-embarcadas-hardware-real-e-concorrência-multi-core)).
+2. **Micro-Ensembles com Observadores Compartilhados e Subespaços (`< 100 KB` de SRAM):**
+   - Em vez de uma *Adaptive Random Forest* tradicional (que multiplicaria por $M$ o custo dos observadores de Welford/Histograma), implementar um **comitê de 3 a 5 árvores rasas (Tier 2 ou Tier 4)** que **compartilham estatísticas na raiz** ou particionam **subespaços aleatórios de features** sobre o `leaf_stride` dinâmico (`v0.4.0`), elevando drasticamente o Macro F1 no *Forest Covertype* e o $R^2$ nas regressões abaixo de **`100 KB`** (detalhes no [Item #18](#56-estabilidade-numérica-ecossistema-e-ensembles)).
+
+---
 
 ### 5.1 Plataformas Embarcadas, Hardware Real e Concorrência Multi-Core
 
@@ -177,9 +190,9 @@ Embora todas as fases planejadas (Fases 0 a 4, incluindo Classificação, Adapta
    - Criação de scripts e targets no Makefile para compilação cruzada com toolchains reais (`arm-none-eabi-gcc` para ARM Cortex-M4F / Cortex-M7, `riscv64-unknown-elf-gcc` para RISC-V e ESP-IDF para ESP32).
    - Validação direta em bancada com microcontroladores operando sob FreeRTOS ou Zephyr OS, medindo ciclos exatos de clock (`DWT->CYCCNT`) e consumo de corrente/energia por amostra.
 
-2. **Quantização e Aritmética de Ponto Fixo (Fixed-Point / INT8 / Q16.16):**
-   - Suporte a microcontroladores de baixíssimo custo desprovidos de FPU de ponto flutuante em hardware (ex: ARM Cortex-M0/M0+ ou microcontroladores de 8/16 bits).
-   - Substituição de `ht_float_t` por inteiros escalados em ponto fixo Q16.16 (16 bits de parte inteira e 16 bits de fração) com tabelas de consulta (*LUT*) ou algoritmo CORDIC para aproximações de $\ln(x)$, $\exp(x)$ e $\sqrt{x}$.
+2. **Quantização e Aritmética de Ponto Fixo (`-DHT_USE_FIXED_POINT` — `Q16.16` / `int16`):**
+   - Suporte nativo via flag de compilação `-DHT_USE_FIXED_POINT` para microcontroladores de baixíssimo custo e ultrabaixo consumo desprovidos de FPU em hardware (**ARM Cortex-M0 / M0+**, **RISC-V `RV32I` / `RV32IMC` sem extensão `F`** e MCUs de 8/16 bits), eliminando a sobrecarga de emulação `soft-fp` de `float32`.
+   - Substituição de `ht_float_t` por aritmética inteira escalada em ponto fixo (`Q16.16`, ou perfil compacto `int16` para observadores quantizados) com tabelas de consulta (*LUT*) ou algoritmo CORDIC para aproximações determinísticas de $\ln(x)$, $\exp(x)$ e $\sqrt{x}$, viabilizando inferência e aprendizado em sensores de bateria com vida útil de anos.
 
 3. **Validação Prática em ESP32 com Máquina de Estados Completa:**
    - Teste da biblioteca embarcada em uma placa **ESP32** com máquina de estados operacional completa para aplicações de borda:
@@ -265,8 +278,9 @@ Embora todas as fases planejadas (Fases 0 a 4, incluindo Classificação, Adapta
 17. **Bindings em Python (CFFI / ctypes / Cython):**
     - Disponibilização de um wrapper Python de alto desempenho expondo a API clássica do Scikit-Learn e River (`fit_one`, `predict_one`, `predict_proba_one`), permitindo que cientistas de dados usem o núcleo ultrarrápido em C11 diretamente em pipelines de experimentação ($200\times$ a $1.000\times$ mais rápido que implementações em Python puro).
 
-18. **Ensembles Online Embarcados (Streaming Random Forests / Online Bagging):**
-    - Implementação de algoritmos de ensemble em streaming (*Online Bagging* de Oza & Russell com distribuição de Poisson, ou *Leveraging Bagging*), dividindo o pool estático de nós e detectores entre $M$ árvores leves (ex: 5 a 10 árvores de 32 nós cada) operando colaborativamente dentro do orçamento máximo de $1\text{ MB}$ de RAM.
+18. **Micro-Ensembles com Observadores Compartilhados e Ensembles Online Embarcados (`< 100 KB` SRAM):**
+    - Em vez de uma *Adaptive Random Forest* tradicional (que multiplicaria o consumo de RAM dos observadores de Welford/Histograma pelo número $M$ de árvores), implementar um **comitê de 3 a 5 árvores rasas (Tier 2 ou Tier 4)** que **compartilham a mesma estrutura de estatísticas na raiz** ou operam sobre **subespaços aleatórios de features** dimensionados via *slab* (`leaf_stride` da `v0.4.0`), elevando drasticamente o Macro F1 no *Forest Covertype* e o $R^2$ nas regressões mantendo o conjunto estritamente abaixo de **`100 KB` de SRAM**.
+    - Como extensão para perfis de maior capacidade (até $1\text{ MB}$), suporte complementar a *Online Bagging* de Oza & Russell (Poisson) ou *Leveraging Bagging* distribuindo o pool estático de nós e detectores entre $M$ árvores leves.
 
 19. **Micro-Pipelines Embarcados de Pré-Processamento Zero-Malloc (`libht_prep`) — Concluído (v0.2.0):**
     - Criação de uma biblioteca companheira modular em C11 estático (`code/include/ht_prep.h` e `code/src/ht_prep.c`) com **zero alocação dinâmica (`malloc`/`free`)** em runtime:
