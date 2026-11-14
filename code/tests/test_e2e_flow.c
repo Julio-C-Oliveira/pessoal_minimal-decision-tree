@@ -433,7 +433,7 @@ static void test_e2e_split_decision_pipeline(void) {
     uint16_t stats_idx = ht_stats_alloc(&pool);
     HT_ASSERT_NEQ(stats_idx, HT_INVALID_IDX);
     root->stats_idx = stats_idx;
-    ht_leaf_stats_t *stats = &pool.stats_pool[stats_idx];
+    ht_leaf_stats_t *stats = ht_stats_get(&pool, stats_idx);
 
     /* 3. Configure mixed schema: 4 features
      * Feature 0: Numeric, discriminatory (class 0 in [1..4], class 1 in [6..9])

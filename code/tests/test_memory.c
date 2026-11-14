@@ -350,6 +350,7 @@ static void test_memory_stress_recycling_100k(void) {
 
 static void test_memory_unified_structures_and_sizes(void) {
 #ifndef HT_USE_DOUBLE
+    HT_ASSERT_EQ(offsetof(ht_leaf_stats_t, observers), 16);
     HT_ASSERT_EQ(sizeof(ht_node_t), 20);
     HT_ASSERT_EQ(sizeof(ht_var_stat_t), 12);
     HT_ASSERT_EQ(sizeof(ht_reg_num_slot_t), 16);
@@ -357,8 +358,9 @@ static void test_memory_unified_structures_and_sizes(void) {
     HT_ASSERT_EQ(sizeof(ht_reg_categorical_obs_t), 60);
     HT_ASSERT_EQ(sizeof(ht_feature_obs_t), 80);
     HT_ASSERT_EQ(sizeof(ht_leaf_stats_t), 1360);
-    HT_ASSERT_EQ(sizeof(ht_memory_pool_t), 430088);
+    HT_ASSERT_EQ(sizeof(ht_memory_pool_t), 430092);
 #else
+    HT_ASSERT_EQ(offsetof(ht_leaf_stats_t, observers), 32);
     HT_ASSERT_EQ(sizeof(ht_node_t), 40);
     HT_ASSERT_EQ(sizeof(ht_var_stat_t), 24);
     HT_ASSERT_EQ(sizeof(ht_reg_num_slot_t), 32);
@@ -366,7 +368,7 @@ static void test_memory_unified_structures_and_sizes(void) {
     HT_ASSERT_EQ(sizeof(ht_reg_categorical_obs_t), 120);
     HT_ASSERT_EQ(sizeof(ht_feature_obs_t), 160);
     HT_ASSERT_EQ(sizeof(ht_leaf_stats_t), 2720);
-    HT_ASSERT_EQ(sizeof(ht_memory_pool_t), 860168);
+    HT_ASSERT_EQ(sizeof(ht_memory_pool_t), 860176);
 #endif
 
     HT_ASSERT(sizeof(ht_memory_pool_t) <= (1024 * 1024));
@@ -476,7 +478,7 @@ static void test_intrusive_free_lists_order_and_recycling(void) {
 
     ht_stats_free(&s_test_pool, s0);
     HT_ASSERT_EQ(s_test_pool.free_stats_head, 0);
-    HT_ASSERT_EQ(s_test_pool.stats_pool[0].next_free, 2);
+    HT_ASSERT_EQ(ht_stats_get(&s_test_pool, 0)->next_free, 2);
 
     uint16_t s_realloc = ht_stats_alloc(&s_test_pool);
     HT_ASSERT_EQ(s_realloc, 0);
@@ -541,8 +543,9 @@ static void test_leaf_stats_regression_observers_and_weights(void) {
     HT_ASSERT_FLOAT_EQ(stats->fmse_mean, (ht_float_t)0.0);
     HT_ASSERT_FLOAT_EQ(stats->fmse_model, (ht_float_t)0.0);
     HT_ASSERT_FLOAT_EQ(stats->reg_intercept, (ht_float_t)0.0);
+    ht_float_t *reg_w = ht_leaf_reg_weights(stats, HT_MAX_FEATURES);
     for (uint8_t f = 0; f < HT_MAX_FEATURES; ++f) {
-        HT_ASSERT_FLOAT_EQ(stats->reg_weights[f], (ht_float_t)0.0);
+        HT_ASSERT_FLOAT_EQ(reg_w[f], (ht_float_t)0.0);
         for (uint8_t k = 0; k < HT_REG_NUM_SLOTS; ++k) {
             HT_ASSERT_FLOAT_EQ(stats->observers[f].reg_num.slots[k].x_mean, (ht_float_t)0.0);
             HT_ASSERT_FLOAT_EQ(stats->observers[f].reg_num.slots[k].y_stats.count, (ht_float_t)0.0);
@@ -554,7 +557,7 @@ static void test_leaf_stats_regression_observers_and_weights(void) {
     stats->fmse_model = (ht_float_t)0.567;
     stats->reg_intercept = (ht_float_t)3.14;
     for (uint8_t f = 0; f < HT_MAX_FEATURES; ++f) {
-        stats->reg_weights[f] = (ht_float_t)(f * 0.5);
+        reg_w[f] = (ht_float_t)(f * 0.5);
     }
 
     HT_ASSERT_FLOAT_NEAR(stats->fmse_mean, (ht_float_t)1.234, 1e-4);
@@ -572,11 +575,124 @@ static void test_leaf_stats_regression_observers_and_weights(void) {
     HT_ASSERT_FLOAT_EQ(re_stats->fmse_mean, (ht_float_t)0.0);
     HT_ASSERT_FLOAT_EQ(re_stats->fmse_model, (ht_float_t)0.0);
     HT_ASSERT_FLOAT_EQ(re_stats->reg_intercept, (ht_float_t)0.0);
+    const ht_float_t *re_reg_w = ht_leaf_reg_weights_const(re_stats, HT_MAX_FEATURES);
     for (uint8_t f = 0; f < HT_MAX_FEATURES; ++f) {
-        HT_ASSERT_FLOAT_EQ(re_stats->reg_weights[f], (ht_float_t)0.0);
+        HT_ASSERT_FLOAT_EQ(re_reg_w[f], (ht_float_t)0.0);
     }
 
     ht_stats_free(&s_test_pool, realloc_idx);
+}
+
+static void test_dynamic_stride_slab_initialization_and_alignment(void) {
+    /* Test dynamic stride calculation for 3 features in classification */
+    bool ok = ht_memory_init_stride(&s_test_pool, 3, HT_TASK_CLASSIFICATION);
+    HT_ASSERT(ok);
+
+#ifndef HT_USE_DOUBLE
+    /* Stride: 16 B header + 3 * 80 B = 256 B */
+    HT_ASSERT_EQ(s_test_pool.leaf_stride, 256);
+#else
+    /* Stride: 32 B header + 3 * 160 B = 512 B */
+    HT_ASSERT_EQ(s_test_pool.leaf_stride, 512);
+#endif
+
+    /* Capacity must be clamped to HT_MAX_ACTIVE_LEAVES */
+    HT_ASSERT_EQ(s_test_pool.max_leaves_capacity, HT_MAX_ACTIVE_LEAVES);
+    HT_ASSERT_EQ(ht_stats_available(&s_test_pool), HT_MAX_ACTIVE_LEAVES);
+
+    /* Allocate all leaves and verify strict natural machine alignment */
+    for (uint32_t i = 0; i < HT_MAX_ACTIVE_LEAVES; ++i) {
+        uint16_t idx = ht_stats_alloc(&s_test_pool);
+        HT_ASSERT_EQ(idx, (uint16_t)i);
+        ht_leaf_stats_t *leaf = ht_stats_get(&s_test_pool, idx);
+        HT_ASSERT_NOT_NULL(leaf);
+        HT_ASSERT(((uintptr_t)leaf % sizeof(ht_float_t)) == 0);
+    }
+    HT_ASSERT_EQ(ht_stats_available(&s_test_pool), 0);
+
+    /* Verify ht_memory_bytes_used computes exact dynamic stride */
+    size_t expected_bytes = (size_t)HT_MAX_ACTIVE_LEAVES * (size_t)s_test_pool.leaf_stride;
+    HT_ASSERT_EQ(ht_memory_bytes_used(&s_test_pool), expected_bytes);
+
+    /* Free all leaves */
+    for (uint32_t i = 0; i < HT_MAX_ACTIVE_LEAVES; ++i) {
+        ht_stats_free(&s_test_pool, (uint16_t)i);
+    }
+    HT_ASSERT_EQ(ht_stats_available(&s_test_pool), HT_MAX_ACTIVE_LEAVES);
+    HT_ASSERT_EQ(ht_memory_bytes_used(&s_test_pool), 0);
+}
+
+static void test_dynamic_stride_canary_boundary_protection(void) {
+    /* Initialize with 4 features in classification */
+    bool ok = ht_memory_init_stride(&s_test_pool, 4, HT_TASK_CLASSIFICATION);
+    HT_ASSERT(ok);
+
+    uint16_t s0 = ht_stats_alloc(&s_test_pool);
+    uint16_t s1 = ht_stats_alloc(&s_test_pool);
+    HT_ASSERT_EQ(s0, 0);
+    HT_ASSERT_EQ(s1, 1);
+
+    ht_leaf_stats_t *leaf0 = ht_stats_get(&s_test_pool, s0);
+    ht_leaf_stats_t *leaf1 = ht_stats_get(&s_test_pool, s1);
+    HT_ASSERT_NOT_NULL(leaf0);
+    HT_ASSERT_NOT_NULL(leaf1);
+
+    /* Fill leaf 1 with sentinel canary bytes (0x55) */
+    uint8_t *ptr1 = (uint8_t *)leaf1;
+    memset(ptr1, 0x55, s_test_pool.leaf_stride);
+
+    /* Stress fill leaf 0 up to its exact boundary with 0xAA */
+    uint8_t *ptr0 = (uint8_t *)leaf0;
+    memset(ptr0, 0xAA, s_test_pool.leaf_stride);
+
+    /* Verify that leaf 1 remained completely untouched */
+    for (size_t i = 0; i < s_test_pool.leaf_stride; ++i) {
+        HT_ASSERT_EQ(ptr1[i], 0x55);
+    }
+
+    /* Reset last_split_attempt_at so ht_stats_free knows the blocks are active */
+    leaf0->last_split_attempt_at = (ht_float_t)0.0;
+    leaf1->last_split_attempt_at = (ht_float_t)0.0;
+
+    /* Free leaf 0 and leaf 1, verifying free-list pointer recovery */
+    ht_stats_free(&s_test_pool, s0);
+    ht_stats_free(&s_test_pool, s1);
+
+    HT_ASSERT_EQ(ht_stats_count(&s_test_pool), 0);
+    HT_ASSERT_EQ(ht_stats_available(&s_test_pool), HT_MAX_ACTIVE_LEAVES);
+}
+
+static void test_dynamic_stride_classif_only_and_edge_cases(void) {
+    /* NULL pointer and out-of-range features */
+    HT_ASSERT(!ht_memory_init_stride(NULL, 4, HT_TASK_CLASSIFICATION));
+    HT_ASSERT(!ht_memory_init_stride(&s_test_pool, 0, HT_TASK_CLASSIFICATION));
+    HT_ASSERT(!ht_memory_init_stride(&s_test_pool, HT_MAX_FEATURES + 1, HT_TASK_CLASSIFICATION));
+
+    /* Test regression vs classification stride difference */
+    bool ok_class = ht_memory_init_stride(&s_test_pool, 4, HT_TASK_CLASSIFICATION);
+    HT_ASSERT(ok_class);
+    uint16_t stride_class = s_test_pool.leaf_stride;
+
+#ifndef HT_CLASSIF_ONLY
+    bool ok_reg = ht_memory_init_stride(&s_test_pool, 4, HT_TASK_REGRESSION);
+    HT_ASSERT(ok_reg);
+    uint16_t stride_reg = s_test_pool.leaf_stride;
+
+    /* Regression stride has 4 additional weights */
+    size_t expected_diff = 4 * sizeof(ht_float_t);
+    HT_ASSERT_EQ(stride_reg - stride_class, expected_diff);
+
+    /* Helper accessor test */
+    uint16_t s_idx = ht_stats_alloc(&s_test_pool);
+    ht_leaf_stats_t *st = ht_stats_get(&s_test_pool, s_idx);
+    HT_ASSERT_NOT_NULL(st);
+    ht_float_t *w = ht_leaf_reg_weights(st, 4);
+    HT_ASSERT_EQ((uintptr_t)w, (uintptr_t)&st->observers[4]);
+    ht_stats_free(&s_test_pool, s_idx);
+#else
+    /* Rejection of regression under HT_CLASSIF_ONLY */
+    HT_ASSERT(!ht_memory_init_stride(&s_test_pool, 4, HT_TASK_REGRESSION));
+#endif
 }
 
 void test_memory_run(void) {
@@ -595,4 +711,7 @@ void test_memory_run(void) {
     HT_RUN_TEST(test_node_asymmetric_union_leaf_vs_branch);
     HT_RUN_TEST(test_node_unified_regression_stats);
     HT_RUN_TEST(test_leaf_stats_regression_observers_and_weights);
+    HT_RUN_TEST(test_dynamic_stride_slab_initialization_and_alignment);
+    HT_RUN_TEST(test_dynamic_stride_canary_boundary_protection);
+    HT_RUN_TEST(test_dynamic_stride_classif_only_and_edge_cases);
 }

@@ -122,6 +122,7 @@ static ht_float_t ht_leaf_predict_linear_model(const ht_tree_t *tree,
                                                const ht_leaf_stats_t *stats,
                                                const ht_value_t x[HT_MAX_FEATURES]) {
     ht_float_t pred = stats->reg_intercept;
+    const ht_float_t *weights = ht_leaf_reg_weights_const(stats, tree->params.n_features);
     for (uint8_t f = 0; f < tree->params.n_features; ++f) {
         if (tree->params.feature_types[f] == HT_FEAT_NUMERIC) {
             if (!HT_ISNAN(x[f].num)) {
@@ -129,7 +130,7 @@ static ht_float_t ht_leaf_predict_linear_model(const ht_tree_t *tree,
                 if (tree->params.leaf_sgd_normalize) {
                     val = ht_tree_normalize_feature_for_sgd(tree, stats, f, val);
                 }
-                pred += stats->reg_weights[f] * val;
+                pred += weights[f] * val;
             }
         }
     }
@@ -149,7 +150,7 @@ static ht_float_t ht_predict_reg_at_leaf(const ht_tree_t *tree,
         return node->reg_stats.mean;
     }
 
-    const ht_leaf_stats_t *stats = &tree->memory.stats_pool[node->stats_idx];
+    const ht_leaf_stats_t *stats = ht_stats_get_const(&tree->memory, node->stats_idx);
 
     if (tree->params.leaf_prediction == HT_LEAF_MEAN) {
         return node->reg_stats.mean;
@@ -325,7 +326,7 @@ static void ht_predict_proba_at_leaf(const ht_tree_t *tree,
     bool is_active = (node->stats_idx != HT_INVALID_IDX);
 
     if (is_active) {
-        const ht_leaf_stats_t *stats = &tree->memory.stats_pool[node->stats_idx];
+        const ht_leaf_stats_t *stats = ht_stats_get_const(&tree->memory, node->stats_idx);
 
         if (tree->params.leaf_prediction == HT_LEAF_NB) {
             ht_float_t total = (ht_float_t)0.0;
@@ -443,7 +444,7 @@ static ht_status_t ht_tree_attempt_split_reg(ht_tree_t *tree, uint16_t leaf_idx,
         return HT_OK;
     }
 
-    const ht_leaf_stats_t *stats = &tree->memory.stats_pool[node->stats_idx];
+    const ht_leaf_stats_t *stats = ht_stats_get_const(&tree->memory, node->stats_idx);
     ht_split_candidate_t best, second_best;
 
     ht_find_best_reg_split_candidates(
@@ -474,7 +475,9 @@ static ht_status_t ht_tree_attempt_split_reg(ht_tree_t *tree, uint16_t leaf_idx,
 
         /* Save mother leaf's linear model weights and fmse before recycling */
         ht_float_t parent_weights[HT_MAX_FEATURES];
-        memcpy(parent_weights, stats->reg_weights, sizeof(parent_weights));
+        memset(parent_weights, 0, sizeof(parent_weights));
+        const ht_float_t *src_weights = ht_leaf_reg_weights_const(stats, tree->params.n_features);
+        memcpy(parent_weights, src_weights, (size_t)tree->params.n_features * sizeof(ht_float_t));
         ht_float_t parent_intercept = stats->reg_intercept;
         ht_float_t parent_fmse_mean = stats->fmse_mean;
         ht_float_t parent_fmse_model = stats->fmse_model;
@@ -533,12 +536,13 @@ static ht_status_t ht_tree_attempt_split_reg(ht_tree_t *tree, uint16_t leaf_idx,
         }
         if (l_stats != HT_INVALID_IDX) {
             left->stats_idx = l_stats;
-            ht_leaf_stats_t *ls = &tree->memory.stats_pool[l_stats];
+            ht_leaf_stats_t *ls = ht_stats_get(&tree->memory, l_stats);
             ls->last_split_attempt_at = left->reg_stats.count;
             ls->fmse_mean = parent_fmse_mean;
             ls->fmse_model = parent_fmse_model;
             ls->reg_intercept = parent_intercept;
-            memcpy(ls->reg_weights, parent_weights, sizeof(parent_weights));
+            ht_float_t *dst_l_weights = ht_leaf_reg_weights(ls, tree->params.n_features);
+            memcpy(dst_l_weights, parent_weights, (size_t)tree->params.n_features * sizeof(ht_float_t));
             tree->n_active_leaves++;
         } else {
             tree->n_inactive_leaves++;
@@ -553,12 +557,13 @@ static ht_status_t ht_tree_attempt_split_reg(ht_tree_t *tree, uint16_t leaf_idx,
         }
         if (r_stats != HT_INVALID_IDX) {
             right->stats_idx = r_stats;
-            ht_leaf_stats_t *rs = &tree->memory.stats_pool[r_stats];
+            ht_leaf_stats_t *rs = ht_stats_get(&tree->memory, r_stats);
             rs->last_split_attempt_at = right->reg_stats.count;
             rs->fmse_mean = parent_fmse_mean;
             rs->fmse_model = parent_fmse_model;
             rs->reg_intercept = parent_intercept;
-            memcpy(rs->reg_weights, parent_weights, sizeof(parent_weights));
+            ht_float_t *dst_r_weights = ht_leaf_reg_weights(rs, tree->params.n_features);
+            memcpy(dst_r_weights, parent_weights, (size_t)tree->params.n_features * sizeof(ht_float_t));
             tree->n_active_leaves++;
         } else {
             tree->n_inactive_leaves++;
@@ -601,7 +606,7 @@ static ht_status_t ht_tree_attempt_split(ht_tree_t *tree, uint16_t leaf_idx, uin
     if (node->stats_idx == HT_INVALID_IDX) {
         return HT_OK;
     }
-    ht_leaf_stats_t *stats = &tree->memory.stats_pool[node->stats_idx];
+    ht_leaf_stats_t *stats = ht_stats_get(&tree->memory, node->stats_idx);
 
     /* 1. Check if class distribution is pure */
     uint8_t active_classes = 0;
@@ -725,7 +730,10 @@ static ht_status_t ht_tree_attempt_split(ht_tree_t *tree, uint16_t leaf_idx, uin
         }
         if (l_stats != HT_INVALID_IDX) {
             left->stats_idx = l_stats;
-            tree->memory.stats_pool[l_stats].last_split_attempt_at = left_w;
+            ht_leaf_stats_t *ls = ht_stats_get(&tree->memory, l_stats);
+            if (ls) {
+                ls->last_split_attempt_at = left_w;
+            }
             tree->n_active_leaves++;
         } else {
             tree->n_inactive_leaves++;
@@ -740,7 +748,10 @@ static ht_status_t ht_tree_attempt_split(ht_tree_t *tree, uint16_t leaf_idx, uin
         }
         if (r_stats != HT_INVALID_IDX) {
             right->stats_idx = r_stats;
-            tree->memory.stats_pool[r_stats].last_split_attempt_at = right_w;
+            ht_leaf_stats_t *rs = ht_stats_get(&tree->memory, r_stats);
+            if (rs) {
+                rs->last_split_attempt_at = right_w;
+            }
             tree->n_active_leaves++;
         } else {
             tree->n_inactive_leaves++;
@@ -910,7 +921,15 @@ ht_status_t ht_tree_init(ht_tree_t *tree, const ht_config_params_t *params) {
         tree->node_drift[i].error_count = 0U;
     }
 
-    ht_memory_init(&tree->memory);
+#ifdef HT_CLASSIF_ONLY
+    if (params->task_type == HT_TASK_REGRESSION) {
+        return HT_ERR_INVALID_ARG;
+    }
+#endif
+
+    if (!ht_memory_init_stride(&tree->memory, params->n_features, params->task_type)) {
+        return HT_ERR_INVALID_ARG;
+    }
 
     /* Allocate root node */
     uint16_t root = ht_node_alloc(&tree->memory);
@@ -1377,7 +1396,10 @@ static ht_status_t ht_tree_learn_one_subtree(ht_tree_t *tree,
                     if (alt_stats != HT_INVALID_IDX) {
                         ht_node_t *al = &tree->memory.node_pool[alt_leaf];
                         al->stats_idx = alt_stats;
-                        tree->memory.stats_pool[alt_stats].last_split_attempt_at = (ht_float_t)0.0;
+                        ht_leaf_stats_t *alt_st = ht_stats_get(&tree->memory, alt_stats);
+                        if (alt_st) {
+                            alt_st->last_split_attempt_at = (ht_float_t)0.0;
+                        }
                         tree->n_active_leaves++;
                     } else {
                         tree->n_inactive_leaves++;
@@ -1486,7 +1508,7 @@ static ht_status_t ht_tree_learn_one_subtree(ht_tree_t *tree,
 
     /* Active leaf learning */
     if (leaf->stats_idx != HT_INVALID_IDX) {
-        ht_leaf_stats_t *stats = &tree->memory.stats_pool[leaf->stats_idx];
+        ht_leaf_stats_t *stats = ht_stats_get(&tree->memory, leaf->stats_idx);
 
         /* Prequential performance tracking for NBA before stats update */
         if (tree->params.leaf_prediction == HT_LEAF_NBA) {
@@ -1718,12 +1740,13 @@ static ht_status_t ht_tree_learn_one_reg_subtree(ht_tree_t *tree,
                     if (alt_stats != HT_INVALID_IDX) {
                         ht_node_t *al = &tree->memory.node_pool[alt_leaf];
                         al->stats_idx = alt_stats;
-                        ht_leaf_stats_t *als = &tree->memory.stats_pool[alt_stats];
+                        ht_leaf_stats_t *als = ht_stats_get(&tree->memory, alt_stats);
                         als->last_split_attempt_at = (ht_float_t)0.0;
                         als->fmse_mean = (ht_float_t)0.0;
                         als->fmse_model = (ht_float_t)0.0;
                         als->reg_intercept = (ht_float_t)0.0;
-                        memset(als->reg_weights, 0, sizeof(als->reg_weights));
+                        ht_float_t *als_weights = ht_leaf_reg_weights(als, tree->params.n_features);
+                        memset(als_weights, 0, (size_t)tree->params.n_features * sizeof(ht_float_t));
                         tree->n_active_leaves++;
                     } else {
                         tree->n_inactive_leaves++;
@@ -1837,7 +1860,7 @@ static ht_status_t ht_tree_learn_one_reg_subtree(ht_tree_t *tree,
     }
 
     if (leaf->stats_idx != HT_INVALID_IDX) {
-        ht_leaf_stats_t *stats = &tree->memory.stats_pool[leaf->stats_idx];
+        ht_leaf_stats_t *stats = ht_stats_get(&tree->memory, leaf->stats_idx);
 
         /* 1. Update fMSE if adaptive */
         if (tree->params.leaf_prediction == HT_LEAF_ADAPTIVE) {
@@ -1862,6 +1885,7 @@ static ht_status_t ht_tree_learn_one_reg_subtree(ht_tree_t *tree,
 
             ht_float_t l2_decay = (ht_float_t)1.0 - eta * tree->params.l2_regularization;
             if (l2_decay < (ht_float_t)0.0) l2_decay = (ht_float_t)0.0;
+            ht_float_t *weights = ht_leaf_reg_weights(stats, tree->params.n_features);
             for (uint8_t f = 0; f < tree->params.n_features; ++f) {
                 if (tree->params.feature_types[f] == HT_FEAT_NUMERIC) {
                     if (!HT_ISNAN(x[f].num)) {
@@ -1869,9 +1893,9 @@ static ht_status_t ht_tree_learn_one_reg_subtree(ht_tree_t *tree,
                         if (tree->params.leaf_sgd_normalize) {
                             val = ht_tree_normalize_feature_for_sgd(tree, stats, f, val);
                         }
-                        stats->reg_weights[f] = stats->reg_weights[f] * l2_decay + eta * weight * err * val;
-                        if (stats->reg_weights[f] > (ht_float_t)1e12) stats->reg_weights[f] = (ht_float_t)1e12;
-                        else if (stats->reg_weights[f] < (ht_float_t)-1e12) stats->reg_weights[f] = (ht_float_t)-1e12;
+                        weights[f] = weights[f] * l2_decay + eta * weight * err * val;
+                        if (weights[f] > (ht_float_t)1e12) weights[f] = (ht_float_t)1e12;
+                        else if (weights[f] < (ht_float_t)-1e12) weights[f] = (ht_float_t)-1e12;
                     }
                 }
             }
@@ -2024,7 +2048,10 @@ ht_status_t ht_tree_reactivate_leaf(ht_tree_t *tree, uint16_t leaf_idx) {
     for (uint8_t c = 0; c < tree->params.n_classes; ++c) {
         total += node->class_counts[c];
     }
-    tree->memory.stats_pool[s_idx].last_split_attempt_at = total;
+    ht_leaf_stats_t *st = ht_stats_get(&tree->memory, s_idx);
+    if (st) {
+        st->last_split_attempt_at = total;
+    }
 
     tree->n_active_leaves++;
     if (tree->n_inactive_leaves > 0) {
@@ -2069,7 +2096,7 @@ ht_status_t ht_tree_save(const ht_tree_t *tree,
     size_t total_size = sizeof(ht_serial_header_t) +
         (size_t)num_nodes_in_use * (sizeof(uint16_t) + sizeof(ht_node_t));
     if (include_training_stats) {
-        total_size += (size_t)num_stats_in_use * (sizeof(uint16_t) + sizeof(ht_leaf_stats_t));
+        total_size += (size_t)num_stats_in_use * (sizeof(uint16_t) + (size_t)tree->memory.leaf_stride);
     }
 
     if (out_bytes_written != NULL) {
@@ -2133,8 +2160,9 @@ ht_status_t ht_tree_save(const ht_tree_t *tree,
                 uint16_t s_idx = node->stats_idx;
                 memcpy(ptr, &s_idx, sizeof(uint16_t));
                 ptr += sizeof(uint16_t);
-                memcpy(ptr, &tree->memory.stats_pool[s_idx], sizeof(ht_leaf_stats_t));
-                ptr += sizeof(ht_leaf_stats_t);
+                const ht_leaf_stats_t *stats = ht_stats_get_const(&tree->memory, s_idx);
+                memcpy(ptr, stats, tree->memory.leaf_stride);
+                ptr += tree->memory.leaf_stride;
             }
         }
     }
@@ -2167,22 +2195,32 @@ ht_status_t ht_tree_load(ht_tree_t *tree,
         return HT_ERR_CORRUPT_IMAGE;
     }
 
-    size_t expected_size = sizeof(ht_serial_header_t) +
-        (size_t)header.num_nodes_in_use * (sizeof(uint16_t) + sizeof(ht_node_t));
-    if (header.flags & HT_SERIAL_FLAG_STATS) {
-        expected_size += (size_t)header.num_stats_in_use * (sizeof(uint16_t) + sizeof(ht_leaf_stats_t));
-    }
-
-    if (buffer_len < expected_size) {
-        return HT_ERR_CORRUPT_IMAGE;
-    }
-
     const ht_criterion_vtable_t *vtable = ht_criterion_get_vtable(header.params.criterion);
     if (vtable == NULL) {
         return HT_ERR_CORRUPT_IMAGE;
     }
 
+#ifdef HT_CLASSIF_ONLY
+    if (header.params.task_type == HT_TASK_REGRESSION) {
+        return HT_ERR_CORRUPT_IMAGE;
+    }
+#endif
+
     memset(tree, 0, sizeof(*tree));
+
+    if (!ht_memory_init_stride(&tree->memory, header.params.n_features, header.params.task_type)) {
+        return HT_ERR_CORRUPT_IMAGE;
+    }
+
+    size_t expected_size = sizeof(ht_serial_header_t) +
+        (size_t)header.num_nodes_in_use * (sizeof(uint16_t) + sizeof(ht_node_t));
+    if (header.flags & HT_SERIAL_FLAG_STATS) {
+        expected_size += (size_t)header.num_stats_in_use * (sizeof(uint16_t) + (size_t)tree->memory.leaf_stride);
+    }
+
+    if (buffer_len < expected_size) {
+        return HT_ERR_CORRUPT_IMAGE;
+    }
     tree->params = header.params;
     tree->criterion_vtable = vtable;
     tree->root_idx = header.root_idx;
@@ -2216,11 +2254,15 @@ ht_status_t ht_tree_load(ht_tree_t *tree,
             uint16_t stats_idx;
             memcpy(&stats_idx, ptr, sizeof(uint16_t));
             ptr += sizeof(uint16_t);
-            if (stats_idx >= HT_MAX_ACTIVE_LEAVES) {
+            if (stats_idx >= tree->memory.max_leaves_capacity) {
                 return HT_ERR_CORRUPT_IMAGE;
             }
-            memcpy(&tree->memory.stats_pool[stats_idx], ptr, sizeof(ht_leaf_stats_t));
-            ptr += sizeof(ht_leaf_stats_t);
+            ht_leaf_stats_t *stats = ht_stats_get(&tree->memory, stats_idx);
+            if (!stats) {
+                return HT_ERR_CORRUPT_IMAGE;
+            }
+            memcpy(stats, ptr, tree->memory.leaf_stride);
+            ptr += tree->memory.leaf_stride;
         }
     } else {
         /* When loading inference-only image, ensure all leaves are marked inactive */
@@ -2253,7 +2295,7 @@ ht_status_t ht_tree_load(ht_tree_t *tree,
             const ht_node_t *node = &tree->memory.node_pool[i];
             if ((node->flags & HT_NODE_IN_USE) &&
                 (node->flags & HT_NODE_IS_LEAF) &&
-                (node->stats_idx < HT_MAX_ACTIVE_LEAVES)) {
+                (node->stats_idx < tree->memory.max_leaves_capacity)) {
                 stats_in_use[node->stats_idx] = true;
             }
         }
@@ -2261,10 +2303,11 @@ ht_status_t ht_tree_load(ht_tree_t *tree,
 
     tree->memory.free_stats_head = HT_INVALID_IDX;
     tree->memory.stats_allocated = 0;
-    for (int32_t i = (int32_t)HT_MAX_ACTIVE_LEAVES - 1; i >= 0; --i) {
+    for (int32_t i = (int32_t)tree->memory.max_leaves_capacity - 1; i >= 0; --i) {
+        ht_leaf_stats_t *st = ht_stats_get(&tree->memory, (uint16_t)i);
         if (!stats_in_use[i]) {
-            tree->memory.stats_pool[i].last_split_attempt_at = (ht_float_t)-1.0;
-            tree->memory.stats_pool[i].next_free = tree->memory.free_stats_head;
+            st->last_split_attempt_at = (ht_float_t)-1.0;
+            st->next_free = tree->memory.free_stats_head;
             tree->memory.free_stats_head = (uint16_t)i;
         } else {
             tree->memory.stats_allocated++;

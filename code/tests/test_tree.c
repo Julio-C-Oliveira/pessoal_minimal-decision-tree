@@ -243,7 +243,7 @@ static void test_tree_predict_naive_bayes_lse(void) {
     root->class_counts[0] = (ht_float_t)50.0;
     root->class_counts[1] = (ht_float_t)50.0;
 
-    ht_leaf_stats_t *stats = &tree.memory.stats_pool[root->stats_idx];
+    ht_leaf_stats_t *stats = ht_stats_get(&tree.memory, root->stats_idx);
 
     /* Populate Class 0: clustered around (1.0, 1.0) */
     for (int i = 0; i < 50; ++i) {
@@ -290,7 +290,7 @@ static void test_tree_predict_nba_adaptive_switching(void) {
     root->class_counts[0] = (ht_float_t)90.0;
     root->class_counts[1] = (ht_float_t)10.0;
 
-    ht_leaf_stats_t *stats = &tree.memory.stats_pool[root->stats_idx];
+    ht_leaf_stats_t *stats = ht_stats_get(&tree.memory, root->stats_idx);
 
     /* Setup Gaussian observers such that x=10 has very high density in Class 1 */
     for (int i = 0; i < 50; ++i) {
@@ -667,10 +667,13 @@ static void test_tree_reg_predict_leaf_model_sgd_and_clipping(void) {
     x[0].num = (ht_float_t)1e8;
     HT_ASSERT_EQ(ht_tree_learn_one_reg(&tree, x, (ht_float_t)1e14, (ht_float_t)1.0), HT_OK);
     uint16_t s_idx = tree.memory.node_pool[tree.root_idx].stats_idx;
-    HT_ASSERT(tree.memory.stats_pool[s_idx].reg_weights[0] <= (ht_float_t)1e12);
-    HT_ASSERT(tree.memory.stats_pool[s_idx].reg_weights[0] >= (ht_float_t)-1e12);
-    HT_ASSERT(tree.memory.stats_pool[s_idx].reg_intercept <= (ht_float_t)1e12);
-    HT_ASSERT(tree.memory.stats_pool[s_idx].reg_intercept >= (ht_float_t)-1e12);
+    ht_leaf_stats_t *s_leaf = ht_stats_get(&tree.memory, s_idx);
+    HT_ASSERT_NOT_NULL(s_leaf);
+    const ht_float_t *s_w = ht_leaf_reg_weights_const(s_leaf, tree.params.n_features);
+    HT_ASSERT(s_w[0] <= (ht_float_t)1e12);
+    HT_ASSERT(s_w[0] >= (ht_float_t)-1e12);
+    HT_ASSERT(s_leaf->reg_intercept <= (ht_float_t)1e12);
+    HT_ASSERT(s_leaf->reg_intercept >= (ht_float_t)-1e12);
 }
 
 static void test_tree_reg_predict_leaf_adaptive_fmse(void) {
@@ -695,7 +698,8 @@ static void test_tree_reg_predict_leaf_adaptive_fmse(void) {
     }
 
     uint16_t s_idx = tree.memory.node_pool[tree.root_idx].stats_idx;
-    ht_leaf_stats_t *st = &tree.memory.stats_pool[s_idx];
+    ht_leaf_stats_t *st = ht_stats_get(&tree.memory, s_idx);
+    HT_ASSERT_NOT_NULL(st);
 
     /* For linear stream, model error is smaller than mean error */
     HT_ASSERT(st->fmse_model < st->fmse_mean);
@@ -935,10 +939,13 @@ static void test_tree_leaf_sgd_hybrid_normalization(void) {
 
     /* Verify weights are stable and bounded */
     uint16_t s_idx = tree.memory.node_pool[tree.root_idx].stats_idx;
-    HT_ASSERT(tree.memory.stats_pool[s_idx].reg_weights[0] < (ht_float_t)100.0);
-    HT_ASSERT(tree.memory.stats_pool[s_idx].reg_weights[0] > (ht_float_t)-100.0);
-    HT_ASSERT(tree.memory.stats_pool[s_idx].reg_weights[1] < (ht_float_t)100.0);
-    HT_ASSERT(tree.memory.stats_pool[s_idx].reg_weights[1] > (ht_float_t)-100.0);
+    ht_leaf_stats_t *s_leaf = ht_stats_get(&tree.memory, s_idx);
+    HT_ASSERT_NOT_NULL(s_leaf);
+    const ht_float_t *s_w = ht_leaf_reg_weights_const(s_leaf, tree.params.n_features);
+    HT_ASSERT(s_w[0] < (ht_float_t)100.0);
+    HT_ASSERT(s_w[0] > (ht_float_t)-100.0);
+    HT_ASSERT(s_w[1] < (ht_float_t)100.0);
+    HT_ASSERT(s_w[1] > (ht_float_t)-100.0);
 }
 
 static void test_tree_attached_prep_pipeline(void) {

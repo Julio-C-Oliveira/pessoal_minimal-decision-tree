@@ -98,6 +98,11 @@ typedef float ht_float_t;
 #define HT_REG_NUM_SLOTS     5U
 #endif
 
+/* Dynamic Feature Stride Slab in stats_pool (Phase 7 - Hypothesis 6)
+ * - Define HT_CLASSIF_ONLY to omit regression weights storage in stats_storage.
+ * - Define HT_STATS_STORAGE_BYTES to explicitly override static slab storage size in bytes.
+ */
+
 #ifndef HT_ADWIN_MAX_BUCKETS
 #define HT_ADWIN_MAX_BUCKETS 5U
 #endif
