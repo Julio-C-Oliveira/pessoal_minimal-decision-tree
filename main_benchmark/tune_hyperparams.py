@@ -192,7 +192,7 @@ def ensure_c11_binary(tier: int, slots: int, is_high_dim: bool, task: str = "cla
                     obs_size = max_classes * 20
                     reg_size = 0
                 else:
-                    obs_size = max(slots * 16, 80)
+                    obs_size = max(slots * 16, max_classes * 20, 80)
                     reg_size = 4
                 raw_bytes = 16 + (n_features * obs_size) + (n_features * reg_size)
                 leaf_stride = (raw_bytes + 3) & ~3
