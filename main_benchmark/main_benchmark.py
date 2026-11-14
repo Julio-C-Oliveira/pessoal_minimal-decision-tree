@@ -394,7 +394,7 @@ def run_main_benchmark_suite(
 
         # 3. Kansho High Tier (Tier 256 or Tier 40)
         slots_high = t_high_params.get("reg_num_slots", 16) if task == "regression" else 16
-        bin_high = ensure_c11_binary(high_tier, slots_high, is_high_dim)
+        bin_high = ensure_c11_binary(high_tier, slots_high, is_high_dim, task)
         cli_args_high = build_c11_cli_args(t_high_params, task)
         high_label = f"Kansho Tier {high_tier}"
 
@@ -408,7 +408,7 @@ def run_main_benchmark_suite(
 
         # 4. Kansho Tier 8
         slots_t8 = t8_params.get("reg_num_slots", 16) if task == "regression" else 16
-        bin_t8 = ensure_c11_binary(8, slots_t8, is_high_dim)
+        bin_t8 = ensure_c11_binary(8, slots_t8, is_high_dim, task)
         cli_args_t8 = build_c11_cli_args(t8_params, task)
 
         print(f"  [4/5] Running Kansho Tier 8 ({os.path.basename(bin_t8)})...", end="", flush=True)
@@ -421,7 +421,7 @@ def run_main_benchmark_suite(
 
         # 5. Kansho Tier 4
         slots_t4 = t4_params.get("reg_num_slots", 16) if task == "regression" else 16
-        bin_t4 = ensure_c11_binary(4, slots_t4, is_high_dim)
+        bin_t4 = ensure_c11_binary(4, slots_t4, is_high_dim, task)
         cli_args_t4 = build_c11_cli_args(t4_params, task)
 
         print(f"  [5/5] Running Kansho Tier 4 ({os.path.basename(bin_t4)})...", end="", flush=True)

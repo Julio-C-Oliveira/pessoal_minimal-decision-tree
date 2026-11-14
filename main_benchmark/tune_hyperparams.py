@@ -94,7 +94,7 @@ def resolve_executable(bin_name: str) -> str:
 # C11 On-Demand Binary Compilation & Cache
 # ==============================================================================
 
-def calculate_safe_capacity(tier: int, slots: int, is_high_dim: bool) -> Tuple[int, int]:
+def calculate_safe_capacity(tier: int, slots: int, is_high_dim: bool, task: str = "classification") -> Tuple[int, int]:
     """
     Computes exact safe leaf and node capacities, strictly enforcing the <= 1 MB SRAM
     budget under any feature, class, or regression slot configuration before compilation.
@@ -106,9 +106,12 @@ def calculate_safe_capacity(tier: int, slots: int, is_high_dim: bool) -> Tuple[i
     node_size = (max_classes * 4) + 16
 
     # Leaf stats size estimate:
-    # Observers: max_features * max(max_classes * 20, slots * 16, 80)
-    obs_size = max(max_classes * 20, slots * 16, 80)
-    leaf_size = 16 + (max_features * 4) + (max_features * obs_size)
+    if task == "classification":
+        obs_size = max_classes * 20
+        leaf_size = 16 + (max_features * obs_size)
+    else:
+        obs_size = max(slots * 16, 80)
+        leaf_size = 16 + (max_features * 4) + (max_features * obs_size)
 
     leaves, nodes = TIER_MAP.get(tier, (tier, tier * 16))
     if is_high_dim and tier > 16:
@@ -127,15 +130,16 @@ def calculate_safe_capacity(tier: int, slots: int, is_high_dim: bool) -> Tuple[i
     return leaves, nodes
 
 
-def ensure_c11_binary(tier: int, slots: int, is_high_dim: bool) -> str:
+def ensure_c11_binary(tier: int, slots: int, is_high_dim: bool, task: str = "classification") -> str:
     """
     Compiles or retrieves a cached C11 benchmark runner binary with the required
     tier (active leaves) and regression slot macros. Thread-safe with lock.
     """
     with _compile_lock:
         os.makedirs(BUILD_DIR, exist_ok=True)
-        suffix = "_main" if is_high_dim else ""
-        bin_name = f"bench_c_runner_t{tier}_s{slots}{suffix}"
+        task_suffix = "_classif" if task == "classification" else f"_s{slots}"
+        high_dim_suffix = "_main" if is_high_dim else ""
+        bin_name = f"bench_c_runner_t{tier}{task_suffix}{high_dim_suffix}"
         bin_path = os.path.join(BUILD_DIR, bin_name)
 
         # Check if binary already exists and is newer than source files
@@ -163,13 +167,17 @@ def ensure_c11_binary(tier: int, slots: int, is_high_dim: bool) -> str:
         if needs_compile:
             print(f"    [Compiling C11 binary: {bin_name}]...", end="", flush=True)
             
-            leaves, nodes = calculate_safe_capacity(tier, slots, is_high_dim)
+            leaves, nodes = calculate_safe_capacity(tier, slots, is_high_dim, task)
 
             macros = [
                 f"-DHT_MAX_ACTIVE_LEAVES={leaves}",
                 f"-DHT_MAX_NODES={nodes}",
-                f"-DHT_REG_NUM_SLOTS={slots}",
             ]
+            if task == "classification":
+                macros.append("-DHT_CLASSIF_ONLY")
+            else:
+                macros.append(f"-DHT_REG_NUM_SLOTS={slots}")
+
             if is_high_dim:
                 macros.extend(["-DHT_MAX_FEATURES=64", "-DHT_MAX_CLASSES=8"])
 
@@ -306,7 +314,7 @@ def run_trial_c11(
 ) -> Dict[str, Any]:
     tier = params.get("tier", 256)
     slots = params.get("reg_num_slots", 16)
-    bin_path = ensure_c11_binary(tier, slots, is_high_dim)
+    bin_path = ensure_c11_binary(tier, slots, is_high_dim, task)
 
     json_path = f"/tmp/tune_c11_{os.path.basename(bin_path)}_{time.time_ns()}_{random.randint(0, 10000000)}.json"
     cmd = [
@@ -346,8 +354,9 @@ def run_trial_c11(
     if os.path.exists(json_path):
         os.remove(json_path)
 
-    # Static model size
-    model_static_bytes = meta.get("final_bytes_used", 524720)
+    # Dynamic and static model size
+    dynamic_bytes = meta.get("final_bytes_used", 0)
+    model_static_bytes = dynamic_bytes
     for line in proc.stdout.splitlines():
         if "model static size =" in line:
             parts = line.split("model static size =")[1].split("bytes")[0].strip()
@@ -364,6 +373,8 @@ def run_trial_c11(
         "n_nodes": meta.get("final_nodes", 1),
         "n_leaves": meta.get("final_active_leaves", 1),
         "intra_train_ram_kb": intra_train_ram_kb,
+        "final_bytes_used": dynamic_bytes,
+        "dynamic_ram_kb": dynamic_bytes / 1024.0,
         "train_rss_mb": train_rss_mb,
         "test_rss_mb": test_rss_mb,
         "peak_rss_mb": peak_rss_mb,
