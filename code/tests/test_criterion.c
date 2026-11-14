@@ -273,7 +273,7 @@ static void test_find_best_split_candidates_and_tie_breaking(void) {
 
     uint16_t stats_idx = ht_stats_alloc(&pool);
     HT_ASSERT_NEQ(stats_idx, HT_INVALID_IDX);
-    ht_leaf_stats_t *stats = &pool.stats_pool[stats_idx];
+    ht_leaf_stats_t *stats = ht_stats_get(&pool, stats_idx);
 
     /* Schema: 3 features
      * feat 0: numeric (poor/uninformative, class 0 and 1 overlapping)

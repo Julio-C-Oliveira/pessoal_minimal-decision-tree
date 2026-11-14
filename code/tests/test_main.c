@@ -26,8 +26,16 @@ static void test_config_constants(void) {
     HT_ASSERT_EQ(HT_GAUSSIAN_SPLITS, 10U);
 
     HT_ASSERT_EQ(HT_ADWIN_MAX_BUCKETS, 5U);
+#if HT_ADWIN_LEVELS == 14U
     HT_ASSERT_EQ(HT_ADWIN_LEVELS, 14U);
+#else
+    HT_ASSERT(HT_ADWIN_LEVELS >= 4U && HT_ADWIN_LEVELS <= 32U);
+#endif
+#if HT_MAX_ADWIN_DETECTORS == 128U
     HT_ASSERT_EQ(HT_MAX_ADWIN_DETECTORS, 128U);
+#else
+    HT_ASSERT(HT_MAX_ADWIN_DETECTORS > 0U);
+#endif
 
     HT_ASSERT_EQ(HT_INVALID_IDX, 0xFFFFU);
     HT_ASSERT_EQ(HT_NO_FEATURE, 0xFFU);
@@ -44,13 +52,13 @@ static void test_config_constants(void) {
 
     /* Versioning assertions (SemVer) */
     HT_ASSERT_EQ(HT_VERSION_MAJOR, 0U);
-    HT_ASSERT_EQ(HT_VERSION_MINOR, 2U);
-    HT_ASSERT_EQ(HT_VERSION_PATCH, 0U);
-    HT_ASSERT(HT_VERSION_CHECK(0, 2, 0));
-    HT_ASSERT(!HT_VERSION_CHECK(0, 2, 1));
+    HT_ASSERT_EQ(HT_VERSION_MINOR, 4U);
+    HT_ASSERT_EQ(HT_VERSION_PATCH, 1U);
+    HT_ASSERT(HT_VERSION_CHECK(0, 4, 1));
+    HT_ASSERT(!HT_VERSION_CHECK(0, 4, 2));
     HT_ASSERT(!HT_VERSION_CHECK(1, 0, 0));
-    HT_ASSERT_EQ(strcmp(HT_VERSION_STRING, "0.2.0"), 0);
-    HT_ASSERT_EQ(strcmp(ht_version(), "0.2.0"), 0);
+    HT_ASSERT_EQ(strcmp(HT_VERSION_STRING, "0.4.1"), 0);
+    HT_ASSERT_EQ(strcmp(ht_version(), "0.4.1"), 0);
 }
 
 static void test_config_types_and_sizes(void) {

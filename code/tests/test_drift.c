@@ -204,6 +204,37 @@ static void test_adwin_edge_cases_and_null(void) {
     HT_ASSERT_EQ(ad.clock, 32U);
 }
 
+static void test_adwin_highest_level_saturation_and_drop(void) {
+    ht_adwin_t ad;
+    HT_ASSERT_EQ(ht_adwin_init(&ad, NULL), HT_OK);
+
+    /* Insert enough constant items to cascade into the highest level (HT_ADWIN_LEVELS - 1)
+     * and trigger the overflow drop branch in ht_adwin_compress_buckets().
+     * Total window capacity before dropping oldest buckets is:
+     * sum_{i=0}^{L-2} (max_buckets * 2^i) + (max_buckets + 1) * 2^(L-1) = 11 * 2^(L-1) - 5.
+     * Feeding 12 * 2^(L-1) items strictly forces saturation and bucket drops.
+     */
+    uint32_t n_items = 12U * (1U << (HT_ADWIN_LEVELS - 1U));
+    for (uint32_t i = 0; i < n_items; ++i) {
+        ht_adwin_update(&ad, (ht_float_t)1.0);
+    }
+
+    HT_ASSERT(ad.width < n_items); /* Proof that oldest buckets were dropped */
+    HT_ASSERT(ad.total_variance >= (ht_float_t)0.0);
+    HT_ASSERT_EQ(ad.last_bucket_row, (uint8_t)(HT_ADWIN_LEVELS - 1U));
+    HT_ASSERT(ad.rows[HT_ADWIN_LEVELS - 1U].count <= ad.max_buckets);
+
+    /* Sum of all active buckets across all rows must equal ad.total_sum */
+    ht_float_t sum_all = (ht_float_t)0.0;
+    for (uint8_t r = 0; r < HT_ADWIN_LEVELS; ++r) {
+        for (uint8_t b = 0; b < ad.rows[r].count; ++b) {
+            sum_all += ad.rows[r].sum[b];
+        }
+    }
+    HT_ASSERT_FLOAT_NEAR(sum_all, ad.total_sum, (ht_float_t)1e-3);
+    HT_ASSERT_FLOAT_NEAR(ad.total_sum, (ht_float_t)ad.width, (ht_float_t)1e-3);
+}
+
 /* --- Level 2: Integration & River Parity Tests --- */
 
 static void test_adwin_drift_detection_step_change_river_parity(void) {
@@ -828,6 +859,7 @@ void test_drift_run(void) {
     HT_RUN_TEST(test_adwin_bucket_compression_powers_of_two);
     HT_RUN_TEST(test_adwin_cut_epsilon_analytical);
     HT_RUN_TEST(test_adwin_edge_cases_and_null);
+    HT_RUN_TEST(test_adwin_highest_level_saturation_and_drop);
 
     /* Nível 1: HAT Algoritmos e Casos de Borda */
     HT_RUN_TEST(test_hat_unilateral_error_filter);

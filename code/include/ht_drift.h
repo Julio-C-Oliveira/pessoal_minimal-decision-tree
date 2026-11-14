@@ -75,9 +75,21 @@ typedef struct {
 } ht_adwin_t;
 
 #ifndef HT_USE_DOUBLE
-_Static_assert(sizeof(ht_adwin_t) == 764, "ht_adwin_t must be exactly 764 bytes in float32");
+_Static_assert(sizeof(ht_adwin_t) == (HT_ADWIN_LEVELS * sizeof(ht_adwin_row_t) + 36U),
+               "ht_adwin_t size mismatch in float32 mode");
+#if HT_ADWIN_LEVELS == 14
+_Static_assert(sizeof(ht_adwin_t) == 764, "ht_adwin_t must be 764 bytes at 14 levels (float32)");
+#elif HT_ADWIN_LEVELS == 10
+_Static_assert(sizeof(ht_adwin_t) == 556, "ht_adwin_t must be 556 bytes at 10 levels (float32)");
+#endif
 #else
-_Static_assert(sizeof(ht_adwin_t) == 1504, "ht_adwin_t must be exactly 1504 bytes in float64");
+_Static_assert(sizeof(ht_adwin_t) == (HT_ADWIN_LEVELS * sizeof(ht_adwin_row_t) + 48U),
+               "ht_adwin_t size mismatch in float64 mode");
+#if HT_ADWIN_LEVELS == 14
+_Static_assert(sizeof(ht_adwin_t) == 1504, "ht_adwin_t must be 1504 bytes at 14 levels (float64)");
+#elif HT_ADWIN_LEVELS == 10
+_Static_assert(sizeof(ht_adwin_t) == 1088, "ht_adwin_t must be 1088 bytes at 10 levels (float64)");
+#endif
 #endif
 
 /**

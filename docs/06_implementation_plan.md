@@ -42,6 +42,13 @@
 | **6.4** | **Fase 6:** Observador Não-Paramétrico de Histograma na Árvore | `code/include/ht_memory.h`, `code/include/ht_observer.h`, `code/src/ht_observer.c`, `code/src/ht_criterion.c`, `code/src/ht_tree.c`, `code/tests/test_observer.c` | **N1:** fusão de bins `ht_hist_obs_t`, `cond_proba` e split suggestions<br/>**N2:** `union` estrita mantendo $80\text{ B}$/$160\text{ B}$ em `ht_feature_obs_t`<br/>**N3:** classificação bimodal com `HT_OBS_HISTOGRAM` | `[x]` | `52d762a` |
 | **6.5** | **Fase 6:** Normalização Z-Score Híbrida nas Folhas SGD, Pipeline Anexo e SemVer `0.2.0` | `VERSION`, `code/include/ht_config.h`, `code/include/ht_tree.h`, `code/src/ht_tree.c`, `code/Makefile`, `code/tests/test_tree.c`, `code/tests/test_e2e_flow.c`, `code/tests/test_main.c` | **N1:** credibilidade $\alpha$ e estabilização de SGD multi-escala<br/>**N2:** herança de pesos mãe $\to$ filhas sem descontinuidade pós-split<br/>**N3:** `ht_tree_set_prep_pipeline` no fluxo E2E + asserções `HT_VERSION_CHECK(0, 2, 0)` | `[x]` | `cec52ee` |
 | **6.6** | **Fase 6:** Benchmark Experimental de Pré-Processamento e Atualização da Wiki | `benchmarks/compare_prep.py`, `benchmarks/bench_c_runner.c`, `benchmarks/prep_benchmark_report.md`, `Makefile`, `wiki/*.md`, `README.md` | Avaliação em multi-escala (Bikes), ruído industrial de sensores (outliers) e distribuições multimodais; sincronização da GitHub Wiki | `[x]` | `22fb55e` |
+| **7.1** | **Fase 7:** Estudo Técnico e Arquitetura de Otimização Extrema de RAM | [`docs/09_extreme_ram_optimization.md`](docs/09_extreme_ram_optimization.md), [`docs/06_implementation_plan.md`](docs/06_implementation_plan.md) | Auditoria de layout C11, formalização das 7 hipóteses de engenharia, matriz de impacto acumulado e roadmap | `[x]` | `40d5739` |
+| **7.2** | **Fase 7:** Hipótese 1: Free-Lists Intrusivas em `ht_memory.c` (`free_nodes_head` e `free_stats_head`) | `code/include/ht_memory.h`, `code/src/ht_memory.c`, `code/tests/test_memory.c`, `code/tests/test_e2e_flow.c` | **N1:** alocação/liberação intrusiva $O(1)$, encadeamento em nós livres (`left_child`), eliminação de 8,7 KB de vetores externos<br/>**N2:** stress test de reciclagem 100k ciclos sem fragmentação nem corrupção<br/>**N3:** redução de $8.704\text{ B}$ comprovada por `_Static_assert` em `float` e `double` | `[x]` | `c5c2c98` |
+| **7.3** | **Fase 7:** Hipótese 2: Union Assimétrica de Topologia em `ht_node_t` (28 B $\to$ 20 B) | `code/include/ht_memory.h`, `code/src/ht_memory.c`, `code/src/ht_tree.c`, `code/tests/test_memory.c`, `code/tests/test_tree.c`, `code/tests/test_e2e_flow.c` | **N1:** union folha (`class_counts` / `reg_stats`, `stats_idx`) vs ramo (`split_val`, `left_child`, `right_child`, `feature_idx`) com $20\text{ B}$ ($40\text{ B}$ double)<br/>**N2:** integridade de split, transição folha $\to$ ramo sem perda de filhos e roteamento robusto<br/>**N3:** prequential e holdout idênticos bit-a-bit e save/load binário | `[x]` | `049bca9` |
+| **7.4** | **Fase 7:** Hipótese 3: Desacoplamento e Pool Dedicado de Drift (`node_drift` em HAT) | `code/include/ht_tree.h`, `code/include/ht_drift.h`, `code/src/ht_tree.c`, `code/src/ht_drift.c`, `code/tests/test_drift.c`, `code/tests/test_tree.c` | **N1:** pool de drift de 128 entradas ($2\text{ KB}$ em vez de $64\text{ KB}$) e mapeamento indexado `drift_idx` ou desativação em VFDT pura (`enable_hat == false`)<br/>**N2:** detecção de drift e switch de ramos preservados<br/>**N3:** benchmark HAT em stream de drift (SEA/Agrawal) com economia $\ge 62\text{ KB}$ | `[Falha]` | `7128ca6` |
+| **7.5** | **Fase 7:** Hipótese 4 & Hipótese 5: Union de Cabeçalho em `ht_leaf_stats_t` e Bounding Box Única por Atributo | `code/include/ht_memory.h`, `code/include/ht_observer.h`, `code/src/ht_observer.c`, `code/src/ht_tree.c`, `code/tests/test_observer.c`, `code/tests/test_tree.c` | **N1:** union de SGD ($68\text{ B}$) e NBA ($8\text{ B}$) + observador gaussiano com $\min/\max$ no nível do atributo ($80\text{ B} \to 56\text{ B}$)<br/>**N2:** split suggestions e Naive Bayes com probabilidades matematicamente equivalentes<br/>**N3:** economia de $113\text{ KB}$ em classificação mantendo paridade com River | `[Falha]` | `8095979` / `ec59602` |
+| **7.6** | **Fase 7:** Hipótese 6: Dynamic Feature Stride Slab em `stats_pool` (Compacted Feature Layout) | `code/include/ht_config.h`, `code/include/ht_memory.h`, `code/src/ht_memory.c`, `code/src/ht_tree.c`, `code/tests/test_memory.c`, `code/tests/test_tree.c`, `code/tests/test_criterion.c`, `code/tests/test_e2e_flow.c` | **⚠️ Leitura Prévia Obrigatória:** [`docs/09_extreme_ram_optimization.md#hipotese-6-dynamic-feature-stride-slab-em-stats_pool-compacted-feature-layout`](docs/09_extreme_ram_optimization.md#hipotese-6-dynamic-feature-stride-slab-em-stats_pool-compacted-feature-layout)<br/>**N1:** `ht_leaf_stats_t` reordenado (`offsetof(observers) == 16 B` / `32 B` + `ht_leaf_reg_weights`), `union` `_stats_type_anchor`, `HT_STATS_STORAGE_BYTES` (`default`/`HT_CLASSIF_ONLY`/override), `ht_memory_init_stride` com cap `<= HT_MAX_ACTIVE_LEAVES` e `_Static_assert`s (`430092`/`860176`)<br/>**N2:** canários de borda (`0xDEADBEEF`), migração de `test_tree.c`/`test_criterion.c`, `ht_memory_bytes_used()` via `leaf_stride` e bloqueio de regressão sob `HT_CLASSIF_ONLY`<br/>**N3:** redução para `20.148 B` (~`19,7 KB`, `-44,3%`) no Covertype Tier 2 (`SLOTS=5`, `-DHT_CLASSIF_ONLY`), paridade $100\%$ e QEMU ARM Cortex-M3 | `[x]` | `8c614f5` |
+| **7.7** | **Fase 7:** Hipótese 7: Perfil de Compilação ADWIN Compacto, Dimensionamento `.bss` por Dataset e Validação Global / QEMU | `code/include/ht_drift.h`, `code/include/ht_tree.h`, `code/src/ht_tree.c`, `code/tests/test_drift.c`, `main_benchmark/tune_hyperparams.py`, `main_benchmark/main_benchmark.py`, `emulation/esp32/CMakeLists.txt`, `emulation/cortex-m3/Makefile`, `wiki/*.md` | **N1:** `_Static_assert` parametrizado por `HT_ADWIN_LEVELS` (`764`/`556 B` em `float32`, `1504`/`1088 B` em `double64`), guarda `#ifndef HT_CLASSIF_ONLY` em `feat_stats`, teste de saturação do último nível em `test_drift.c`<br/>**N2:** compilação on-demand em `tune_hyperparams.py` / `main_benchmark.py` passando `HT_STATS_STORAGE_BYTES` por `n_features` real (`22,80 KB` $\to$ `18,93 KB` no Covertype Tier 2) + validação cruzada nos 8 datasets<br/>**N3:** QEMU bare-metal Cortex-M3 (`50 KB` SRAM) e ESP32 (`-DHT_ADWIN_LEVELS=10`), medição de ciclos e 3 commits atômicos (`code`, `bench`, `docs`/`wiki`) | `[x]` | `62ad533` / `b472713` |
 
 ---
 
@@ -86,6 +93,39 @@ _Static_assert(sizeof(ht_node_t) == 48, "ht_node_t deve ter exatamente 48 bytes 
 _Static_assert(sizeof(ht_leaf_stats_t) == 2584, "ht_leaf_stats_t deve ter exatamente 2584 bytes em float64");
 #endif
 _Static_assert(sizeof(ht_tree_t) <= (1024 * 1024), "ht_tree_t excedeu o orcamento de 1 MB de RAM!");
+```
+
+### 2.3 Diagnóstico Baseline vs. Matriz de Impacto das 7 Hipóteses de Otimização (Fase 7)
+
+Uma auditoria cirúrgica de `sizeof` e `offsetof` na compilação nativa C11 com os limites padrão (`HT_MAX_NODES = 4096`, `HT_MAX_ACTIVE_LEAVES = 256`, `HT_MAX_FEATURES = 16`, `HT_MAX_CLASSES = 4`, `HT_REG_NUM_SLOTS = 5`, `HT_ADWIN_MAX_BUCKETS = 5`, `HT_ADWIN_LEVELS = 14`) revelou que o código atual da versão `0.2.0` **já possui empacotamento denso sem nenhum buraco de alinhamento (*zero padding holes*)**:
+- `ht_node_t`: offset contínuo $0 \to 16 \to 20 \to 22 \to 24 \to 26 \to 27$ ($28\text{ B}$ exatos em `float32`).
+- `ht_node_drift_t`: offset contínuo $0 \to 4 \to 8 \to 12 \to 14$ ($16\text{ B}$ exatos em `float32`).
+- `ht_leaf_stats_t`: offset contínuo $0 \to 4 \to 8 \to 12 \to 76 \to 80$ ($1.360\text{ B}$ exatos em `float32`).
+
+Portanto, qualquer redução adicional de memória exige **otimizações estruturais, eliminação de assimetrias de estado, unificação de campos mutuamente exclusivos e slabs com stride adaptativo**.
+
+#### Matriz de Impacto Cumulativo das Otimizações da Fase 7:
+
+| Nível de Otimização | Hipóteses Aplicadas | Tamanho `sizeof(ht_tree_t)` em `float32` | Economia Absoluta (`float32`) | Redução Relativa (`float32`) | Tamanho `sizeof(ht_tree_t)` em `double64` | Margem p/ Limite de 1 MB |
+| :--- | :--- | :---: | :---: | :---: | :---: | :---: |
+| **Baseline Atual** | Nenhuma (versão 0.2.0) | **$537,49\text{ KB}$** ($537.488\text{ B}$) | $0\text{ KB}$ | Baseline ($0\%$) | **$977,12\text{ KB}$** ($1.000.576\text{ B}$) | $46,8\text{ KB}$ ($4,6\%$) |
+| **Nível 1 (Estrutural Pura)** | **H1** (Intrusive Lists) + **H2** (Union Nó 20B) + **H3** (Desacoplamento Drift) | **$430,73\text{ KB}$** ($441.064\text{ B}$) | **$-106,75\text{ KB}$** | **$-19,86\%$** | **$840,85\text{ KB}$** ($861.032\text{ B}$) | $183,1\text{ KB}$ ($17,9\%$) |
+| **Nível 2 (Packing Avançado)** | **Nível 1** + **H4** (Union SGD/NBA) + **H5** (Min/Max Feature Obs) | **$315,42\text{ KB}$** ($322.984\text{ B}$) | **$-222,06\text{ KB}$** | **$-41,31\%$** | **$609,43\text{ KB}$** ($624.056\text{ B}$) | $414,6\text{ KB}$ ($40,5\%$) |
+| **Nível 3 (Dynamic Stride)** | **Nível 2** + **H6** (Stride adaptado p/ 9 atributos - ex: Agrawal) | **$163,82\text{ KB}$** ($167.752\text{ B}$) | **$-373,67\text{ KB}$** | **$-69,52\%$** | **$305,98\text{ KB}$** ($313.320\text{ B}$) | $718,0\text{ KB}$ ($70,1\%$) |
+| **Ultra-Edge (SEA 3 features)** | **Nível 2** + **H6** (Stride adaptado p/ 3 atributos) | **$40,22\text{ KB}$** ($41.184\text{ B}$) | **$-497,27\text{ KB}$** | **$-92,52\%$** | **$78,78\text{ KB}$** ($80.672\text{ B}$) | $945,2\text{ KB}$ ($92,3\%$) |
+
+#### Metas de `_Static_assert` para a Fase 7:
+```c
+/* Metas progressivas validadas por static assert na Fase 7: */
+#ifndef HT_USE_DOUBLE
+_Static_assert(sizeof(ht_node_t) == 20, "ht_node_t H2 deve ter exatamente 20 bytes em float32");
+_Static_assert(sizeof(ht_tree_t) <= (450 * 1024), "ht_tree_t Nivel 1 deve ser <= 450 KB em float32");
+_Static_assert(sizeof(ht_tree_t) <= (330 * 1024), "ht_tree_t Nivel 2 deve ser <= 330 KB em float32");
+#else
+_Static_assert(sizeof(ht_node_t) == 40, "ht_node_t H2 deve ter exatamente 40 bytes em float64");
+_Static_assert(sizeof(ht_tree_t) <= (870 * 1024), "ht_tree_t Nivel 1 deve ser <= 870 KB em float64");
+_Static_assert(sizeof(ht_tree_t) <= (630 * 1024), "ht_tree_t Nivel 2 deve ser <= 630 KB em float64");
+#endif
 ```
 
 ---
@@ -775,4 +815,245 @@ flowchart LR
   2. **Rejeição de Espículas de Sensores Industriais:** Filtro Hampel MAD ($W=7, 3\sigma$) acoplado via `ht_prep_pipeline_t`, contendo espículas de $+2.000$ e reduzindo o erro de $MAE \approx 2.6 \times 10^{13}$ para **$MAE = 0.9992$** e **$R^2 = 0.9914$**.
   3. **Distribuições Bimodais Não-Paramétricas:** O observador `HT_OBS_HISTOGRAM` (Ben-Haim & Tom-Tov) atingiu 95.68% de acurácia com 7 nós na árvore, em paridade estrutural com o `HistogramSplitter` do River (7 nós), mantendo **0.0 KB de heap** e latência de apenas $0.75\,\mu\text{s}$/amostra.
 - Atualização e sincronização da Wiki (`wiki/Versionamento-Releases-e-Roadmap.md`, `wiki/Arquitetura-e-Fluxogramas.md`, `wiki/Home.md`) e `README.md` documentando a release `0.2.0` e os novos módulos da biblioteca companheira `libht_prep`.
+
+---
+
+## 8. Fase 7: Otimização Avançada e Redução Extrema de Memória RAM (SRAM Estática em C11)
+
+### 8.1 Diagnóstico do Consumo Baseline e Inviabilidade de Reordenação Simples
+
+A biblioteca `kansho` foi concebida sob o dogma de **zero alocação dinâmica em runtime** (`malloc`/`free` proibidos em `ht_learn_one` e `ht_predict`), acomodando toda a topologia da árvore e buffers de aprendizado em pools estáticos dentro de `ht_tree_t`.
+
+Na versão `0.2.0`, a árvore padrão com capacidade para 4.096 nós e 256 folhas ativas consome **$524,89\text{ KB}$ em `float32`** e **$977,12\text{ KB}$ em `double64`**.
+Uma auditoria cirúrgica de `sizeof` e `offsetof` comprovou que o código atual **já possui empacotamento denso sem nenhum buraco de alinhamento (*zero padding holes*)**:
+- `ht_node_t`: offset contínuo $0 \to 16 \to 20 \to 22 \to 24 \to 26 \to 27$ (28 bytes exatos em `float32`).
+- `ht_node_drift_t`: offset contínuo $0 \to 4 \to 8 \to 12 \to 14$ (16 bytes exatos em `float32`).
+- `ht_leaf_stats_t`: offset contínuo $0 \to 4 \to 8 \to 12 \to 76 \to 80$ (1.360 bytes exatos em `float32`).
+
+Portanto, reduções adicionais de memória exigem **otimizações estruturais, unificação de estados mutuamente exclusivos e slabs com stride adaptativo**.
+
+### 8.2 Mapa Conceitual das 7 Hipóteses de Otimização
+
+```mermaid
+flowchart TD
+    subgraph S1["Camada de Alocação e Memória (ht_memory)"]
+        H1["Hipótese 1: Intrusive Free-Lists<br/>(Eliminação de free_nodes e free_stats)<br/><b>-8,5 KB diretos</b>"]
+    end
+
+    subgraph S2["Camada de Topologia dos Nós (ht_node_t)"]
+        H2["Hipótese 2: Union Assimétrica Folha vs Nó Interno<br/>(28 B ➔ 20 B por nó)<br/><b>-32,0 KB diretos</b>"]
+    end
+
+    subgraph S3["Camada de Concept Drift (HAT & ADWIN)"]
+        H3["Hipótese 3: Desacoplamento do node_drift<br/>(Pool dedicado de 128 entradas)<br/><b>-62 a -64 KB diretos</b>"]
+        H7["Hipótese 7: ADWIN Compacto para MCU<br/>(10 níveis, 32 detectores)<br/><b>-80,2 KB no pool ADWIN</b>"]
+    end
+
+    subgraph S4["Camada de Folhas e Observadores (ht_leaf_stats_t)"]
+        H4["Hipótese 4: Union de Cabeçalho SGD / NBA<br/>(Elimina 68 B de SGD na Classificação)<br/><b>-17,0 KB na Classificação</b>"]
+        H5["Hipótese 5: Bounding Box Única por Feature<br/>(min/max compartilhado entre classes)<br/><b>-96,0 KB em float / -192 KB em double</b>"]
+        H6["Hipótese 6: Dynamic Feature Stride Slab<br/>(Alocação baseada em n_features real)<br/><b>-136 a -276 KB (-40% a -81% nas folhas)</b>"]
+    end
+
+    Baseline["Baseline kansho<br/>(524,9 KB float32 / 977,1 KB double64)"] --> H1
+    H1 --> H2
+    H2 --> H3
+    H3 --> H4
+    H4 --> H5
+    H5 --> H6
+    H3 --> H7
+    H6 --> Resultado["Árvore Otimizada kansho Extreme<br/><b>160 KB a 310 KB</b> (Full Features)<br/><b>< 10 KB</b> (Micro Tiers)"]
+```
+
+---
+
+### 8.3 Especificação Técnica Detalhada das Entregas da Fase 7
+
+#### Entrega 7.1: Estudo Técnico e Atualização do Plano Persistente
+- **Arquivos:** [`docs/09_extreme_ram_optimization.md`](docs/09_extreme_ram_optimization.md), [`docs/06_implementation_plan.md`](docs/06_implementation_plan.md)
+- **Objetivo:** Consolidação do relatório analítico de consumo de memória RAM, diagnóstico de empacotamento (`offsetof`), formalização matemática das 7 hipóteses de engenharia, matriz de impacto acumulado e detalhamento do roadmap de entregas atômicas.
+- **Validação:** Documentação técnica completa sincronizada entre o relatório teórico e o plano de implementação executável multi-chat.
+
+#### Entrega 7.2: Hipótese 1: Free-Lists Intrusivas (Eliminação das Pilhas Externas `free_nodes` e `free_stats`)
+- **Arquivos:** `code/include/ht_memory.h`, `code/src/ht_memory.c`, `code/tests/test_memory.c`, `code/tests/test_e2e_flow.c`
+- **Diagnóstico:** `free_nodes[4096]` ($8.192\text{ B}$) e `free_stats[256]` ($512\text{ B}$) consomem $8.704\text{ B}$ de overhead exclusivo de infraestrutura de free-list externa.
+- **Arquitetura C11:**
+  - Quando um nó está livre (`!(flags & HT_NODE_IN_USE)`), reutiliza-se `left_child` (ou os primeiros 2 bytes do nó) como ponteiro intrusivo `next_free_idx`.
+  - Quando uma folha do `stats_pool` está livre, reutilizam-se os primeiros 2 bytes do bloco inativo como `next_free_idx`.
+  - Substituição dos vetores em `ht_memory_pool_t` por dois escalares cabeça: `free_nodes_head` e `free_stats_head`.
+  - Operações `ht_node_alloc` e `ht_node_free` mantidas rigorosamente em tempo estritamente constante $O(1)$.
+- **Economia:** **$8.704\text{ bytes}$ ($8,50\text{ KB}$)** eliminados diretamente da struct `ht_tree_t` em `float32` e `double64`.
+- **Testes (N1, N2, N3):**
+  - **N1:** Alocação, desalocação e reset determinísticos com cabeças intrusivas.
+  - **N2:** Teste de estresse de 100k ciclos de reciclagem aleatória sem fragmentação ou corrupção de índices.
+  - **N3:** Validação no fluxo E2E mantendo equivalência e verificação de `sizeof`.
+
+#### Entrega 7.3: Hipótese 2: Union Assimétrica de Topologia em `ht_node_t` (28 B $\to$ 20 B)
+- **Arquivos:** `code/include/ht_memory.h`, `code/src/ht_tree.c`, `code/tests/test_memory.c`, `code/tests/test_tree.c`, `code/tests/test_e2e_flow.c`
+- **Diagnóstico:** Um nó é estritamente uma folha de predição OU um ramo de decisão interno, nunca ambos simultaneamente. Folhas desperdiçam 9 bytes (`left_child`, `right_child`, `split_val`, `feature_idx`). Ramos internos desperdiçam 14 a 18 bytes (`stats_idx` e `class_counts` detalhadas, pois o roteamento só avalia a condição de split).
+- **Layout C11:**
+  ```c
+  typedef struct {
+      union {
+          /* FOLHA (18 bytes em float32 / 34 bytes em double64) */
+          struct {
+              union {
+                  ht_float_t    class_counts[HT_MAX_CLASSES];
+                  ht_var_stat_t reg_stats;
+              };
+              uint16_t stats_idx;
+          } leaf;
+
+          /* RAMO INTERNO (14 bytes em float32 / 22 bytes em double64) */
+          struct {
+              union {
+                  ht_float_t threshold;
+                  int32_t    cat_val;
+              } split_val;
+              ht_float_t left_weight; /* Peso esquerdo para roteamento de missing values/NaN */
+              uint16_t   left_child;
+              uint16_t   right_child;
+              uint8_t    feature_idx;
+              uint8_t    pad_branch;
+          } branch;
+      };
+      uint8_t flags;
+      uint8_t reserved;
+  } ht_node_t;
+  ```
+- **Economia:** `sizeof(ht_node_t)` reduz de **$28\text{ B}$ para $20\text{ B}$** em `float32` (de **$48\text{ B}$ para $40\text{ B}$** em `double64`).
+  - Para $4.096$ nós: redução direta de **$32.768\text{ bytes}$ ($32,0\text{ KB}$)** no `node_pool`.
+- **Testes (N1, N2, N3):**
+  - **N1:** `_Static_assert(sizeof(ht_node_t) == 20)` (float32) e `40` (double64); acesso a membros de folha e ramo.
+  - **N2:** Transição de split: inicialização correta dos ramos filhos sem sobrescrever dados antes da separação; roteamento com desempate de missing values/NaN preservado.
+  - **N3:** Validação prequential e holdout com predições idênticas bit-a-bit contra a versão baseline.
+
+#### Entrega 7.4: Hipótese 3: Desacoplamento e Pool Dinâmico de Drift (`node_drift` em HAT)
+> [!WARNING]
+> **Status: Falha na Implementação (Commit `7128ca6`):**
+> A tentativa de desacoplamento de drift alocou o pool dentro de `ht_adwin_pool_t`, mas implementou a indexação em folhas ativas como busca linear $O(N)$ em vez de $O(1)$ determinístico (`ht_tree_node_drift`), e os benchmarks de validação N3 em fluxos de drift (SEA/Agrawal/Hyperplane) não foram executados nem documentados.
+
+- **Arquivos:** `code/include/ht_tree.h`, `code/include/ht_drift.h`, `code/src/ht_tree.c`, `code/src/ht_drift.c`, `code/tests/test_drift.c`, `code/tests/test_tree.c`
+- **Diagnóstico:** O array `node_drift[4096]` consome **$65,5\text{ KB}$** em `float32` ($98,3\text{ KB}$ em `double64`) incondicionalmente, mesmo quando `enable_hat == false`. Em modo HAT, `HT_MAX_ADWIN_DETECTORS = 128`, sendo matematicamente impossível existirem mais de 128 nós com drift ativo concorrente.
+- **Arquitetura C11:**
+  - Em VFDT pura (`enable_hat == false`): array de drift totalmente inativo (ponteiro `NULL` ou condicionado).
+  - Em HAT (`enable_hat == true`): pool de drift dedicado `ht_drift_pool_t` de 128 entradas ($128 \times 16\text{ B} = 2.048\text{ B} = 2\text{ KB}$). No nó interno (H2), reaproveita-se o slot `stats_idx` (livre em ramos) como `uint16_t drift_idx`.
+- **Economia:** **$65.536\text{ bytes}$ ($64,0\text{ KB}$ em float32)** em VFDT pura; **$63.488\text{ bytes}$ ($62,0\text{ KB}$)** em modo HAT.
+- **Testes (N1, N2, N3):**
+  - **N1:** Alocação e devolução de slots de drift no pool de 128 entradas.
+  - **N2:** Substituição de subárvore, poda e switch de ramos sob concept drift preservados.
+  - **N3:** Execução dos benchmarks de drift (SEA/Agrawal/Hyperplane) comprovando taxas de detecção e acurácia idênticas.
+
+#### Entrega 7.5: Hipótese 4 & Hipótese 5: Union de Cabeçalho em `ht_leaf_stats_t` e Bounding Box Única por Atributo
+> [!WARNING]
+> **Status: Falha na Implementação (Commit `8095979`, revertida no commit `ec59602`):**
+> A Hipótese 5 (Bounding Box Única por atributo) causou vazamento probabilístico da CDF gaussiana em distribuições concentradas (degradando a acurácia no Forest Covertype de 61.4% para <50%) e precisou ser revertida no commit `ec59602`, restaurando `min_val` e `max_val` por classe ($80\text{ B}$). A Hipótese 4 (Union SGD/NBA) foi inócua em arrays estáticos C11, pois `sizeof(ht_leaf_stats_t)` permaneceu fixado pelo tamanho do membro maior de regressão ($76\text{ B}$ de SGD). A economia de $113\text{ KB}$ não foi alcançada.
+
+- **Arquivos:** `code/include/ht_memory.h`, `code/include/ht_observer.h`, `code/src/ht_observer.c`, `code/src/ht_tree.c`, `code/tests/test_observer.c`, `code/tests/test_tree.c`
+- **Diagnóstico:**
+  - H4: Cada folha ativa reserva $68\text{ bytes}$ para SGD linear (`reg_weights` e `reg_intercept`), completamente ociosos em classificação ($256 \times 68\text{ B} = 17,4\text{ KB}$).
+  - H5: O observador Gaussiano armazena `min_val` e `max_val` em cada uma das 4 classes ($32\text{ bytes}$/feat), embora os pontos de corte candidatos dependam exclusivamente do range global $[\min(x_f), \max(x_f)]$.
+- **Layout C11:**
+  - **H4 (Union de Cabeçalho):**
+    ```c
+    typedef struct {
+        ht_float_t last_split_attempt_at;
+        union {
+            struct {
+                ht_float_t mc_correct_weight;
+                ht_float_t nb_correct_weight;
+            } classif;
+            struct {
+                ht_float_t fmse_mean;
+                ht_float_t fmse_model;
+                ht_float_t reg_weights[HT_MAX_FEATURES];
+                ht_float_t reg_intercept;
+            } reg;
+        };
+        ht_feature_obs_t observers[HT_MAX_FEATURES];
+    } ht_leaf_stats_t;
+    ```
+  - **H5 (Bounding Box Única):**
+    ```c
+    typedef struct {
+        ht_float_t count;
+        ht_float_t mean;
+        ht_float_t m2;
+    } ht_gaussian_class_stat_t;
+
+    typedef struct {
+        ht_gaussian_class_stat_t classes[HT_MAX_CLASSES];
+        ht_float_t               min_val;
+        ht_float_t               max_val;
+    } ht_gaussian_feature_obs_t; /* 56 bytes em float32 vs 80 bytes baseline */
+    ```
+- **Economia:**
+  - H4: **$17.408\text{ bytes}$ ($17,0\text{ KB}$ em float32)** na classificação.
+  - H5: **$98.304\text{ bytes}$ ($96,0\text{ KB}$ em float32)** e **$196.608\text{ bytes}$ ($192,0\text{ KB}$ em double64)**.
+  - Economia combinada de **$113,7\text{ KB}$ em float32**!
+- **Testes (N1, N2, N3):**
+  - **N1:** `_Static_assert` de tamanhos unitários; cálculo de Welford e atualização de $[\min, \max]$ global.
+  - **N2:** Discretização em 10 intervalos e cálculo de impureza Gini/Entropy com paridade numérica exata.
+  - **N3:** Validação prequential contra o River sem divergência de splits.
+
+#### Entrega 7.6: Hipótese 6: Dynamic Feature Stride Slab em `stats_pool` (Compacted Feature Layout)
+
+> [!IMPORTANT]
+> **LEITURA PRÉVIA OBRIGATÓRIA ANTES DE QUALQUER LINHA DE CÓDIGO:**
+> A Entrega 7.6 lida com engenharia de baixo nível em C11 (Classificada com **Risco 4 / 5**) ao transicionar de arrays estáticos homogêneos para um slab contíguo com stride em tempo de execução.
+> É **terminantemente obrigatório ler e cumprir a análise de risco e o protocolo de blindagem** detalhados em [`docs/09_extreme_ram_optimization.md#hipotese-6-dynamic-feature-stride-slab-em-stats_pool-compacted-feature-layout`](docs/09_extreme_ram_optimization.md#hipotese-6-dynamic-feature-stride-slab-em-stats_pool-compacted-feature-layout) antes de iniciar qualquer implementação.
+> O desenvolvedor ou agente deve implementar obrigatoriamente as 5 salvaguardas técnicas:
+> 1. **Alinhamento Natural, Union Anchor e Clamp de Capacidade:** `stats_storage` em `union` com `_Alignas(ht_leaf_stats_t)` e `ht_leaf_stats_t _stats_type_anchor` (C11 §6.5, removendo `stats_pool`), `leaf_stride` arredondado via `(raw_bytes + HT_ALIGN_MASK) & ~HT_ALIGN_MASK` (`HT_ALIGN_MASK = sizeof(ht_float_t) - 1`), e `max_leaves_capacity <= HT_MAX_ACTIVE_LEAVES` (preservando paridade algorítmica dos Tiers).
+> 2. **Layout Livre de Colisão & Helpers Inline:** `reg_intercept` no cabeçalho fixo (`offsetof(ht_leaf_stats_t, observers) == 16 B` em `float32` / `32 B` em `float64`) e `reg_weights` após `observers` via `ht_leaf_reg_weights(stats, n_features)`; bloqueio de regressão em `ht_tree_init` / `ht_tree_load` quando `-DHT_CLASSIF_ONLY` estiver definido.
+> 3. **Canários de Borda & Migração Completa de Call Sites:** Teste de estresse em `test_memory.c` com bytes mágicos (`0xDEADBEEF`) na fronteira entre folhas e migração de todos os acessos diretos a `stats_pool` (incluindo `test_tree.c` e `test_criterion.c`) para `ht_stats_get(...)`.
+> 4. **Serialização por Stride e Métrica Real:** `ht_tree_save` / `ht_tree_load` devem validar/aplicar `ht_memory_init_stride` e copiar estritamente `leaf_stride` bytes por folha ativa; `ht_memory_bytes_used()` deve contabilizar `stats_allocated * pool->leaf_stride`.
+> 5. **Gate Bare-Metal:** Validação obrigatória no QEMU ARM Cortex-M3 (TI Stellaris LM3S6965).
+
+- **Arquivos:** `code/include/ht_config.h`, `code/include/ht_memory.h`, `code/src/ht_memory.c`, `code/src/ht_tree.c`, `code/tests/test_memory.c`, `code/tests/test_tree.c`, `code/tests/test_criterion.c`, `code/tests/test_e2e_flow.c`
+- **Diagnóstico:** Datasets reais raramente utilizam a capacidade máxima de compilação (ex: SEA usa 3 features; Covertype usa 54 das 64 reservadas). No Covertype Tier 2 (`F=64, C=8, SLOTS=16`), o cabeçalho de cada folha ocupa `272 B` (incluindo `256 B` de `reg_weights[64]`) e cada observador infla de `160 B` para `256 B`, fazendo as 2 folhas ativas somarem **33.312 B (~32,5 KB, ou 92,2%) dos 36.144 B (~35,3 KB) da árvore**. Além disso, reduzir apenas em runtime sem parametrizar o tamanho do slab em `.bss` não diminuiria `sizeof(ht_tree_t)`.
+- **Arquitetura C11 (Híbrida: `.bss` em Compile-Time + Stride em Runtime):**
+  - **Reordenamento de `ht_leaf_stats_t` (sem FAM):** mover `reg_intercept` para o cabeçalho fixo e deslocar `reg_weights[HT_MAX_FEATURES]` para *após* `observers[HT_MAX_FEATURES]` (preservando `sizeof(ht_leaf_stats_t) == 1360 B` / `2720 B` e fixando `offsetof(ht_leaf_stats_t, observers) == 16` em `float32` e `32` em `float64`). Pesos de regressão passam a ser acessados via helpers inline `ht_leaf_reg_weights(stats, n_features)` e `ht_leaf_reg_weights_const(stats, n_features)`.
+  - **Slab Parametrizado (`HT_STATS_STORAGE_BYTES` + Union Anchor):** definir `HT_STATS_STORAGE_BYTES` em `ht_config.h`/`ht_memory.h` com 3 regimes — padrão completo (`HT_MAX_ACTIVE_LEAVES * sizeof(ht_leaf_stats_t)`), classificação pura (`-DHT_CLASSIF_ONLY`, sem reserva para `reg_weights`), ou override explícito (`-DHT_STATS_STORAGE_BYTES=<bytes>`). Substituir `stats_pool` em `ht_memory_pool_t` pela `union` `{ _Alignas(ht_leaf_stats_t) uint8_t stats_storage[HT_STATS_STORAGE_BYTES]; ht_leaf_stats_t _stats_type_anchor; }`, adicionando `uint16_t leaf_stride` e `uint16_t max_leaves_capacity` (`_Static_assert(sizeof(ht_memory_pool_t) == 430092)` em `float32` / `860176` em `float64`).
+  - **Contrato Dual de Inicialização:** `ht_memory_init(pool)` preserva o contrato padrão para testes unitários isolados (`leaf_stride = HT_LEAF_STRIDE_DEFAULT`, `max_leaves_capacity = HT_MAX_ACTIVE_LEAVES`); `ht_memory_init_stride(pool, n_features, task_type)` (chamada por `ht_tree_init` e `ht_tree_load`) calcula:
+    $$\text{leaf\_stride} = (\text{header\_bytes} + n\_features \times \text{sizeof(ht\_feature\_obs\_t)} + \text{reg\_bytes} + \text{HT\_ALIGN\_MASK}) \ \& \ \sim\text{HT\_ALIGN\_MASK}$$
+    onde `reg_bytes = (task_type == HT_TASK_REGRESSION) ? n_features * sizeof(ht_float_t) : 0`, e limita `max_leaves_capacity = min(HT_STATS_STORAGE_BYTES / leaf_stride, HT_MAX_ACTIVE_LEAVES)`.
+  - **Acesso $O(1)$ e Contabilidade:** `ht_stats_get(pool, idx)` indexa `(ht_leaf_stats_t *)(pool->stats_storage + ((size_t)idx * pool->leaf_stride))`; `ht_memory_bytes_used(pool)` soma `nodes_allocated * sizeof(ht_node_t) + stats_allocated * pool->leaf_stride`.
+- **Economia:**
+  - **Covertype Tier 2 (54 features, classificação, `-DHT_REG_NUM_SLOTS=5`, `-DHT_CLASSIF_ONLY` e `-DHT_STATS_STORAGE_BYTES=17312` ou `-DHT_MAX_FEATURES=54`):** Stride cai de $16.656\text{ B} \to 8.656\text{ B}$ (`16 B` cabeçalho + `54 * 160 B`). A árvore inteira reduz fisicamente em `.bss` de **$36.144\text{ B} \ (35,3\text{ KB}) \to 20.148\text{ B} \ (\approx 19,7\text{ KB})$ ($-44,3\%$)**!
+  - **SEA (3 features, classificação):** stride de $256\text{ B}$ vs $1.360\text{ B}$ (**$-81,2\%$** por folha).
+  - **Agrawal (9 features, classificação):** stride de $736\text{ B}$ vs $1.360\text{ B}$ (**$-45,9\%$** por folha).
+  - **Hyperplane (10 features, classificação):** stride de $816\text{ B}$ vs $1.360\text{ B}$ (**$-40,0\%$** por folha).
+- **Testes (N1, N2, N3):**
+  - **N1:** `_Static_assert` de `offsetof(ht_leaf_stats_t, observers)` (`16`/`32`) e `sizeof(ht_memory_pool_t)` (`430092`/`860176`); cálculo de stride, `max_leaves_capacity <= HT_MAX_ACTIVE_LEAVES`, e asserção de alinhamento natural `(uintptr_t)ptr % sizeof(ht_float_t) == 0`.
+  - **N2:** Teste de estresse com Canários de Borda (`0xDEADBEEF`) entre folhas vizinhas garantindo zero *buffer overrun*; reciclagem de folhas sem corrupção de `next_free`; serialização `save`/`load` por `leaf_stride`; validação de `ht_memory_init` vs `ht_memory_init_stride` e rejeição de `HT_TASK_REGRESSION` sob `HT_CLASSIF_ONLY`.
+  - **N3:** Execução dos testes completos (`float` e `double`), QEMU Cortex-M3 sem *HardFault* e verificação de `sizeof(ht_tree_t)` / `ht_memory_bytes_used()` no Covertype Tier 2 mantendo $100\%$ de paridade numérica no River.
+
+#### Entrega 7.7: Hipótese 7: Perfil de Compilação ADWIN Compacto, Dimensionamento `.bss` por Dataset e Validação Global de Benchmarks / QEMU
+> [!IMPORTANT]
+> **LEITURA PRÉVIA E REGRA DE COMMITS ATÔMICOS:**
+> Consulte a especificação completa e a tabela de impacto em [`docs/09_extreme_ram_optimization.md#hipotese-7-perfil-de-compilacao-adwin-compacto-dimensionamento-bss-por-dataset-e-validacao-global`](docs/09_extreme_ram_optimization.md#hipotese-7-perfil-de-compilacao-adwin-compacto-dimensionamento-bss-por-dataset-e-validacao-global).
+> Conforme [`AGENTS.md`](../AGENTS.md), esta entrega deve ser obrigatoriamente dividida em **3 commits atômicos independentes**:
+> 1. **Commit 1 (`feat(drift)` / `test(drift)` — Código C11 e Testes):** alterações em `code/include/ht_drift.h`, `code/include/ht_tree.h`, `code/src/ht_tree.c` e `code/tests/test_drift.c`, validados em `float` e `double` + compilação com `-DHT_ADWIN_LEVELS=10 -DHT_MAX_ADWIN_DETECTORS=32` e `-DHT_CLASSIF_ONLY`.
+> 2. **Commit 2 (`bench` — Benchmarks e Firmwares QEMU):** atualização de `main_benchmark/tune_hyperparams.py`, `main_benchmark/main_benchmark.py`, `emulation/esp32/CMakeLists.txt` e `emulation/cortex-m3/Makefile` (e relatórios gerados).
+> 3. **Commit 3 (`docs` — Documentação e Wiki):** atualização de `docs/06_implementation_plan.md`, `README.md` e sincronização da `wiki/*.md` (após avaliação SemVer).
+
+- **Arquivos:** `code/include/ht_drift.h`, `code/include/ht_tree.h`, `code/src/ht_tree.c`, `code/tests/test_drift.c`, `main_benchmark/tune_hyperparams.py`, `main_benchmark/main_benchmark.py`, `emulation/esp32/CMakeLists.txt`, `emulation/cortex-m3/Makefile`, `wiki/*.md`
+- **Diagnóstico:**
+  - 14 níveis de buckets ADWIN (`764 B` em `float32` / `1.504 B` em `double64`) × 128 detectores consomem **$98.068\text{ B}$ ($95,77\text{ KB}$)** em `float32`, e o `_Static_assert(sizeof(ht_adwin_t) == 764)` atual em `ht_drift.h` não é parametrizado por `HT_ADWIN_LEVELS`, bloqueando perfis compactos de 10 níveis.
+  - Em `code/include/ht_tree.h`, `feat_stats[HT_MAX_FEATURES]` ($64 \times 12\text{ B} = 768\text{ B}$) permanece alocado na árvore mesmo quando `-DHT_CLASSIF_ONLY` está ativo.
+  - Em `main_benchmark/tune_hyperparams.py`, `ensure_c11_binary()` não repassa `-DHT_STATS_STORAGE_BYTES` dimensionado para o `n_features` real do dataset, deixando $3.200\text{ B}$ ociosos em `.bss` no Forest Covertype Tier 2 (`23.352 B` = `22,80 KB`).
+- **Arquitetura C11:**
+  - **Parametrização de `_Static_assert` em `code/include/ht_drift.h`:** asserção algébrica `sizeof(ht_adwin_t) == (HT_ADWIN_LEVELS * sizeof(ht_adwin_row_t) + 36U)` em `float32` (`+ 48U` em `float64`), preservando verificações literais para `14` níveis (`764`/`1504 B`) e `10` níveis (`556`/`1088 B`).
+  - **Perfil ADWIN Compacto para MCUs:** `HT_ADWIN_LEVELS=10` (janela máxima de $\approx 5.115$ amostras) e `HT_MAX_ADWIN_DETECTORS=32` (ESP32) ou `2` (Cortex-M3) configurados diretamente em `emulation/esp32/CMakeLists.txt` e `emulation/cortex-m3/Makefile`.
+  - **Guarda `#ifndef HT_CLASSIF_ONLY` em `feat_stats`:** omitir `ht_var_stat_t feat_stats[HT_MAX_FEATURES]` em `code/include/ht_tree.h` e seu uso em `code/src/ht_tree.c` quando compilado apenas para classificação (`-768 B` no Covertype).
+  - **Dimensionamento `.bss` por Dataset em `main_benchmark/`:** atualizar `ensure_c11_binary()` para parametrizar `-DHT_STATS_STORAGE_BYTES` segundo o `n_features` exato do dataset.
+- **Economia:**
+  - Pool ADWIN (`10L / 32D`): de **$98.068\text{ B}$ ($95,77\text{ KB}$)** para **$17.864\text{ B}$ ($17,45\text{ KB}$)** (**$-78,32\text{ KB}$ / $-81,8\%$**).
+  - Forest Covertype Tier 2 (`54` features, `-DHT_CLASSIF_ONLY`, `-DHT_STATS_STORAGE_BYTES=17312` + guarda `feat_stats`): `sizeof(ht_tree_t)` cai de **$23.352\text{ B}$ ($22,80\text{ KB}$)** para **$20.152\text{ B}$ ($19,68\text{ KB}$)** via slab `.bss` e **$19.384\text{ B}$ ($18,93\text{ KB}$, $-17,0\%$)** com a guarda de `feat_stats`.
+- **Testes (N1, N2, N3):**
+  - **N1:** Compilação limpa em `float`, `double`, `-DHT_ADWIN_LEVELS=10 -DHT_MAX_ADWIN_DETECTORS=32` e `-DHT_CLASSIF_ONLY`; teste unitário em `code/tests/test_drift.c` saturando o último nível exponencial (`last_bucket_row == HT_ADWIN_LEVELS - 1`) para validar o descarte do bucket mais antigo sem *underflow* em `total_variance`.
+  - **N2:** Validação cruzada nos 8 datasets do `main_benchmark` verificando redução física de `.bss` e preservação de $100\%$ da acurácia/F1.
+  - **N3:** Execução bare-metal no ARM Cortex-M3 (`50 KB` SRAM) e ESP32 via QEMU com medição de ciclos, $\Delta\text{Heap} = 0$, e sincronização da Wiki e `README.md`.
+- **Status de Conclusão:** Concluído com sucesso nos commits `09972b8` (especificação docs), `62ad533` (feat C11 e testes de saturação ADWIN) e `b472713` (benchmarks, compilação sob demanda e firmwares QEMU). Redução de $22,80\text{ KB} \to 18,93\text{ KB}$ no Covertype Tier 2 e pool ADWIN de $95,77\text{ KB} \to 17,45\text{ KB}$ com 100% dos testes verdes em precisão simples e dupla.
+
 

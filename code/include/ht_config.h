@@ -17,9 +17,9 @@
 /* Versioning (Semantic Versioning 2.0.0: MAJOR.MINOR.PATCH)                  */
 /* ========================================================================== */
 #define HT_VERSION_MAJOR    0U
-#define HT_VERSION_MINOR    2U
-#define HT_VERSION_PATCH    0U
-#define HT_VERSION_STRING   "0.2.0"
+#define HT_VERSION_MINOR    4U
+#define HT_VERSION_PATCH    1U
+#define HT_VERSION_STRING   "0.4.1"
 
 /**
  * @brief Compile-time macro to check against a minimum library version.
@@ -97,6 +97,11 @@ typedef float ht_float_t;
 #ifndef HT_REG_NUM_SLOTS
 #define HT_REG_NUM_SLOTS     5U
 #endif
+
+/* Dynamic Feature Stride Slab in stats_pool (Phase 7 - Hypothesis 6)
+ * - Define HT_CLASSIF_ONLY to omit regression weights storage in stats_storage.
+ * - Define HT_STATS_STORAGE_BYTES to explicitly override static slab storage size in bytes.
+ */
 
 #ifndef HT_ADWIN_MAX_BUCKETS
 #define HT_ADWIN_MAX_BUCKETS 5U

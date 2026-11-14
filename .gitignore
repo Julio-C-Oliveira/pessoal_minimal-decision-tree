@@ -19,3 +19,5 @@ __pycache__/
 venv/
 benchmarks/data/
 *.csv
+*.backup.json
+*.backup.md

@@ -22,7 +22,7 @@ A biblioteca unifica **4 variantes de árvores de decisão em streaming** dentro
 - **Normalização SGD Híbrida nas Folhas:** Padronização online com fator de credibilidade $\alpha = \frac{N_{\text{slots}}}{N_{\text{slots}} + 10.0}$ para estabilização dos regressores lineares em variáveis multiescala com 0.0 KB de heap.
 - **Atributos Mistos e Valores Ausentes (`NaN`):** Suporte nativo a colunas numéricas (`HT_FEAT_NUMERIC`) e categóricas (`HT_FEAT_CATEGORICAL`), roteando leituras ausentes (`NAN` ou categoria `< 0`) pelo filho mais populoso com custo zero de RAM.
 - **Reciclagem Determinística (*Slab/Pool Allocators*):** Indexação 100% baseada em `uint16_t` (sem ponteiros) e desativação automática de folhas menos promissoras (*Promise Deactivation*) quando o pool atinge o limite.
-- **Serialização Binária Direta (`ht_tree_save` / `ht_tree_load`):** Exporta checkpoints completos de treino ou imagens enxutas somente-inferência ($28\text{ B}$ por nó em `float32`) prontas para Flash/EEPROM.
+- **Serialização Binária Direta (`ht_tree_save` / `ht_tree_load`):** Exporta checkpoints completos de treino ou imagens enxutas somente-inferência ($20\text{ B}$ por nó em `float32`) prontas para Flash/EEPROM.
 - **Precisão Configurável (`ht_float_t`):** `float` (32 bits) por padrão para FPU de microcontroladores ou `double` (64 bits) via `-DHT_USE_DOUBLE`.
 
 ---
@@ -98,11 +98,11 @@ O footprint de RAM de `ht_tree_t` é dimensionado estaticamente em tempo de comp
 
 | Perfil de Hardware Alvo | Flags de Compilação (`CFLAGS_EXTRA`) | Tamanho do Nó | Folha Ativa | RAM Total (`ht_tree_t`) | Flash (`.text` em `-Os`) |
 | :--- | :--- | :---: | :---: | :---: | :---: |
-| **Somente Inferência** | `-DHT_MAX_NODES=256 -DHT_MAX_ACTIVE_LEAVES=1 -DHT_MAX_FEATURES=8 -DHT_MAX_CLASSES=2` | $24\text{ B}$ | $688\text{ B}$ | **$\approx 11,3\text{ KB}$** | **$\approx 6\text{–}8\text{ KB}$** |
-| **MCU Ultra-Fraco (32–64 KB)** | `-DHT_MAX_NODES=128 -DHT_MAX_ACTIVE_LEAVES=16 -DHT_MAX_FEATURES=8 -DHT_MAX_CLASSES=2 -DHT_MAX_CATEGORIES=4 -DHT_REG_NUM_SLOTS=4` | $24\text{ B}$ | $560\text{ B}$ | **$\approx 14,2\text{ KB}$** | **$\approx 16\text{–}28\text{ KB}$** |
-| **MCU Compacto (64–128 KB)** | `-DHT_MAX_NODES=256 -DHT_MAX_ACTIVE_LEAVES=32 -DHT_MAX_FEATURES=8 -DHT_MAX_CLASSES=2` | $24\text{ B}$ | $688\text{ B}$ | **$\approx 32,2\text{ KB}$** | **$\approx 16\text{–}28\text{ KB}$** |
-| **MCU Intermediário (256–512 KB)** | `-DHT_MAX_NODES=1024 -DHT_MAX_ACTIVE_LEAVES=64 -DHT_MAX_FEATURES=12 -DHT_MAX_CLASSES=4` | $28\text{ B}$ | $1.024\text{ B}$ | **$\approx 110,3\text{ KB}$** | **$\approx 16\text{–}28\text{ KB}$** |
-| **Padrão do Repositório ($\le 1\text{ MB}$)** | *(Padrão: `NODES=4096`, `LEAVES=256`, `FEATURES=16`, `CLASSES=4`)* | $28\text{ B}$ | $1.360\text{ B}$ | **$\approx 524,7\text{ KB}$** | **$\approx 22\text{–}28\text{ KB}$** |
+| **Somente Inferência** | `-DHT_MAX_NODES=256 -DHT_MAX_ACTIVE_LEAVES=1 -DHT_MAX_FEATURES=8 -DHT_MAX_CLASSES=2` | $20\text{ B}$ | $688\text{ B}$ | **$\approx 9,9\text{ KB}$** | **$\approx 6\text{–}8\text{ KB}$** |
+| **MCU Ultra-Fraco (32–64 KB)** | `-DHT_MAX_NODES=128 -DHT_MAX_ACTIVE_LEAVES=16 -DHT_MAX_FEATURES=8 -DHT_MAX_CLASSES=2 -DHT_MAX_CATEGORIES=4 -DHT_REG_NUM_SLOTS=4` | $20\text{ B}$ | $560\text{ B}$ | **$\approx 13,5\text{ KB}$** | **$\approx 16\text{–}28\text{ KB}$** |
+| **MCU Compacto (64–128 KB)** | `-DHT_MAX_NODES=256 -DHT_MAX_ACTIVE_LEAVES=32 -DHT_MAX_FEATURES=8 -DHT_MAX_CLASSES=2` | $20\text{ B}$ | $688\text{ B}$ | **$\approx 30,8\text{ KB}$** | **$\approx 16\text{–}28\text{ KB}$** |
+| **MCU Intermediário (256–512 KB)** | `-DHT_MAX_NODES=1024 -DHT_MAX_ACTIVE_LEAVES=64 -DHT_MAX_FEATURES=12 -DHT_MAX_CLASSES=4` | $20\text{ B}$ | $1.024\text{ B}$ | **$\approx 100,3\text{ KB}$** | **$\approx 16\text{–}28\text{ KB}$** |
+| **Padrão do Repositório ($\le 1\text{ MB}$)** | *(Padrão: `NODES=4096`, `LEAVES=256`, `FEATURES=16`, `CLASSES=4`)* | $20\text{ B}$ | $1.360\text{ B}$ | **$\approx 484,4\text{ KB}$** *($468,2\text{ KB}$ c/ `-DHT_CLASSIF_ONLY`; até $\approx 6,7\text{ KB}$ no SEA Tier 8 c/ Dynamic Stride)* | **$\approx 22\text{–}28\text{ KB}$** |
 
 ---
 

@@ -33,6 +33,7 @@ import json
 import math
 import os
 import random
+import shutil
 import subprocess
 import sys
 import threading
@@ -93,7 +94,7 @@ def resolve_executable(bin_name: str) -> str:
 # C11 On-Demand Binary Compilation & Cache
 # ==============================================================================
 
-def calculate_safe_capacity(tier: int, slots: int, is_high_dim: bool) -> Tuple[int, int]:
+def calculate_safe_capacity(tier: int, slots: int, is_high_dim: bool, task: str = "classification") -> Tuple[int, int]:
     """
     Computes exact safe leaf and node capacities, strictly enforcing the <= 1 MB SRAM
     budget under any feature, class, or regression slot configuration before compilation.
@@ -105,9 +106,12 @@ def calculate_safe_capacity(tier: int, slots: int, is_high_dim: bool) -> Tuple[i
     node_size = (max_classes * 4) + 16
 
     # Leaf stats size estimate:
-    # Observers: max_features * max(max_classes * 20, slots * 16, 80)
-    obs_size = max(max_classes * 20, slots * 16, 80)
-    leaf_size = 16 + (max_features * 4) + (max_features * obs_size)
+    if task == "classification":
+        obs_size = max_classes * 20
+        leaf_size = 16 + (max_features * obs_size)
+    else:
+        obs_size = max(slots * 16, 80)
+        leaf_size = 16 + (max_features * 4) + (max_features * obs_size)
 
     leaves, nodes = TIER_MAP.get(tier, (tier, tier * 16))
     if is_high_dim and tier > 16:
@@ -126,15 +130,17 @@ def calculate_safe_capacity(tier: int, slots: int, is_high_dim: bool) -> Tuple[i
     return leaves, nodes
 
 
-def ensure_c11_binary(tier: int, slots: int, is_high_dim: bool) -> str:
+def ensure_c11_binary(tier: int, slots: int, is_high_dim: bool, task: str = "classification", n_features: int = 0) -> str:
     """
     Compiles or retrieves a cached C11 benchmark runner binary with the required
     tier (active leaves) and regression slot macros. Thread-safe with lock.
     """
     with _compile_lock:
         os.makedirs(BUILD_DIR, exist_ok=True)
-        suffix = "_main" if is_high_dim else ""
-        bin_name = f"bench_c_runner_t{tier}_s{slots}{suffix}"
+        task_suffix = "_classif" if task == "classification" else f"_s{slots}"
+        high_dim_suffix = "_main" if is_high_dim else ""
+        feat_suffix = f"_f{n_features}" if n_features > 0 else ""
+        bin_name = f"bench_c_runner_t{tier}{task_suffix}{high_dim_suffix}{feat_suffix}"
         bin_path = os.path.join(BUILD_DIR, bin_name)
 
         # Check if binary already exists and is newer than source files
@@ -149,6 +155,8 @@ def ensure_c11_binary(tier: int, slots: int, is_high_dim: bool) -> str:
             os.path.join(CODE_DIR, "include", "ht_config.h"),
             os.path.join(CODE_DIR, "include", "ht_memory.h"),
             os.path.join(CODE_DIR, "include", "ht_prep.h"),
+            os.path.join(CODE_DIR, "include", "ht_drift.h"),
+            os.path.join(CODE_DIR, "include", "ht_tree.h"),
         ]
 
         needs_compile = not os.path.exists(bin_path)
@@ -162,15 +170,34 @@ def ensure_c11_binary(tier: int, slots: int, is_high_dim: bool) -> str:
         if needs_compile:
             print(f"    [Compiling C11 binary: {bin_name}]...", end="", flush=True)
             
-            leaves, nodes = calculate_safe_capacity(tier, slots, is_high_dim)
+            leaves, nodes = calculate_safe_capacity(tier, slots, is_high_dim, task)
 
             macros = [
                 f"-DHT_MAX_ACTIVE_LEAVES={leaves}",
                 f"-DHT_MAX_NODES={nodes}",
-                f"-DHT_REG_NUM_SLOTS={slots}",
+                "-DHT_ADWIN_LEVELS=10",
+                "-DHT_MAX_ADWIN_DETECTORS=32",
             ]
+            if task == "classification":
+                macros.append("-DHT_CLASSIF_ONLY")
+            else:
+                macros.append(f"-DHT_REG_NUM_SLOTS={slots}")
+
             if is_high_dim:
                 macros.extend(["-DHT_MAX_FEATURES=64", "-DHT_MAX_CLASSES=8"])
+
+            if n_features > 0:
+                max_classes = 8 if is_high_dim else 4
+                if task == "classification":
+                    obs_size = max_classes * 20
+                    reg_size = 0
+                else:
+                    obs_size = max(slots * 16, max_classes * 20, 80)
+                    reg_size = 4
+                raw_bytes = 16 + (n_features * obs_size) + (n_features * reg_size)
+                leaf_stride = (raw_bytes + 3) & ~3
+                stats_storage_bytes = leaves * leaf_stride
+                macros.append(f"-DHT_STATS_STORAGE_BYTES={stats_storage_bytes}")
 
             src_files = [
                 os.path.join(CODE_DIR, "src", "ht_memory.c"),
@@ -302,10 +329,11 @@ def run_trial_c11(
     params: Dict[str, Any],
     y_test: List[float],
     is_high_dim: bool,
+    n_features: int = 0,
 ) -> Dict[str, Any]:
     tier = params.get("tier", 256)
     slots = params.get("reg_num_slots", 16)
-    bin_path = ensure_c11_binary(tier, slots, is_high_dim)
+    bin_path = ensure_c11_binary(tier, slots, is_high_dim, task, n_features=n_features)
 
     json_path = f"/tmp/tune_c11_{os.path.basename(bin_path)}_{time.time_ns()}_{random.randint(0, 10000000)}.json"
     cmd = [
@@ -345,8 +373,9 @@ def run_trial_c11(
     if os.path.exists(json_path):
         os.remove(json_path)
 
-    # Static model size
-    model_static_bytes = meta.get("final_bytes_used", 524720)
+    # Dynamic and static model size
+    dynamic_bytes = meta.get("final_bytes_used", 0)
+    model_static_bytes = dynamic_bytes
     for line in proc.stdout.splitlines():
         if "model static size =" in line:
             parts = line.split("model static size =")[1].split("bytes")[0].strip()
@@ -363,6 +392,8 @@ def run_trial_c11(
         "n_nodes": meta.get("final_nodes", 1),
         "n_leaves": meta.get("final_active_leaves", 1),
         "intra_train_ram_kb": intra_train_ram_kb,
+        "final_bytes_used": dynamic_bytes,
+        "dynamic_ram_kb": dynamic_bytes / 1024.0,
         "train_rss_mb": train_rss_mb,
         "test_rss_mb": test_rss_mb,
         "peak_rss_mb": peak_rss_mb,
@@ -960,6 +991,255 @@ def run_engine_trials(
 # Suite Orchestrator
 # ==============================================================================
 
+def extract_report_configs(
+    all_results: Dict[str, List[Dict[str, Any]]],
+    selected_datasets: List[str],
+    selected_engines: List[str],
+    top_k: int = 3,
+    report_path: Optional[str] = None,
+) -> Dict[str, Dict[str, List[Dict[str, Any]]]]:
+    """
+    Extracts configurations to replay.
+    If report_path is provided and exists, parses the exact configurations published
+    in the Markdown report tables 1:1, ensuring exact parity with the published report.
+    Otherwise, falls back to sorting top_k from all_results.
+    """
+    dataset_map = {
+        "SEA": "sea",
+        "Electricity": "electricity",
+        "Forest Covertype": "covertype",
+        "Airlines": "airlines",
+        "Friedman #1": "friedman",
+        "Bikes": "bikes",
+        "Appliances Energy": "appliances_energy",
+        "NYC Taxi": "nyc_taxi",
+    }
+    kansho_enabled = ("c11" in selected_engines or "kansho" in selected_engines or "all" in selected_engines)
+    river_enabled = ("river" in selected_engines or "all" in selected_engines)
+    sklearn_enabled = ("sklearn" in selected_engines or "all" in selected_engines)
+
+    if report_path and os.path.exists(report_path):
+        with open(report_path, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+
+        current_dataset = None
+        current_engine = "kansho"
+        extracted_from_md: Dict[str, Dict[str, List[Dict[str, Any]]]] = {}
+
+        for line in lines:
+            line_s = line.rstrip("\r\n")
+            if line_s.startswith("## Dataset:"):
+                current_dataset = None
+                for name, did in dataset_map.items():
+                    if name in line_s:
+                        current_dataset = did
+                        break
+                if current_dataset:
+                    extracted_from_md[current_dataset] = {"kansho": [], "river": [], "sklearn": []}
+                current_engine = "kansho"
+            elif line_s.startswith("#### Kansho"):
+                current_engine = "kansho"
+            elif line_s.startswith("#### River"):
+                current_engine = "river"
+            elif line_s.startswith("#### Sklearn"):
+                current_engine = "sklearn"
+            elif line_s.startswith("| #") and current_dataset:
+                parts = [p.strip() for p in line_s.split("|")]
+                if len(parts) >= 3:
+                    cfg_str = parts[2]
+                    tokens = [t.strip().strip("`") for t in cfg_str.split(",") if "=" in t]
+                    d: Dict[str, Any] = {}
+                    for tok in tokens:
+                        if "=" not in tok:
+                            continue
+                        k, v = tok.split("=", 1)
+                        k = k.strip()
+                        v = v.strip()
+                        if v == "None":
+                            d[k] = None
+                        elif v == "True":
+                            d[k] = True
+                        elif v == "False":
+                            d[k] = False
+                        else:
+                            try:
+                                d[k] = int(v) if v.isdigit() or (v.startswith("-") and v[1:].isdigit()) else float(v)
+                            except ValueError:
+                                d[k] = v
+                    if d:
+                        eng_key = current_engine
+                        if eng_key == "kansho" and not kansho_enabled:
+                            continue
+                        if eng_key == "river" and not river_enabled:
+                            continue
+                        if eng_key == "sklearn" and not sklearn_enabled:
+                            continue
+                        extracted_from_md[current_dataset][eng_key].append(d)
+
+        # Filter by selected_datasets
+        filtered: Dict[str, Dict[str, List[Dict[str, Any]]]] = {}
+        for did, eng_dict in extracted_from_md.items():
+            if selected_datasets and did not in selected_datasets and "all" not in selected_datasets:
+                continue
+            filtered[did] = eng_dict
+        if any(len(cfgs) > 0 for d in filtered.values() for cfgs in d.values()):
+            return filtered
+
+    extracted: Dict[str, Dict[str, List[Dict[str, Any]]]] = {}
+
+    for d_id, d_name, task, desc, is_high_dim in DATASETS_CONFIG:
+        if selected_datasets and d_id not in selected_datasets and "all" not in selected_datasets:
+            continue
+        trials = all_results.get(d_id, [])
+        if not trials:
+            continue
+
+        def sort_key(x):
+            if task == "classification":
+                return (x.get("f1_macro", 0.0), x.get("holdout_acc", 0.0), -x.get("avg_us_per_sample", 0.0))
+            else:
+                return (x.get("holdout_r2", -1e9), -x.get("holdout_rmse", 1e9), -x.get("avg_us_per_sample", 0.0))
+
+        dataset_extracted: Dict[str, List[Dict[str, Any]]] = {}
+
+        if kansho_enabled:
+            by_tier: Dict[int, List[Dict[str, Any]]] = {}
+            for t in trials:
+                if t.get("engine") in ("c11", "kansho"):
+                    tier = t.get("params", {}).get("tier", 0)
+                    by_tier.setdefault(tier, []).append(t)
+            c11_configs: List[Dict[str, Any]] = []
+            for tier in sorted(by_tier.keys()):
+                by_tier[tier].sort(key=sort_key, reverse=True)
+                for t in by_tier[tier][:top_k]:
+                    c11_configs.append(t["params"])
+            dataset_extracted["kansho"] = c11_configs
+
+        if river_enabled:
+            river_trials = [t for t in trials if t.get("engine") == "river"]
+            river_trials.sort(key=sort_key, reverse=True)
+            dataset_extracted["river"] = [t["params"] for t in river_trials[:top_k]]
+
+        if sklearn_enabled:
+            sklearn_trials = [t for t in trials if t.get("engine") == "sklearn"]
+            sklearn_trials.sort(key=sort_key, reverse=True)
+            dataset_extracted["sklearn"] = [t["params"] for t in sklearn_trials[:top_k]]
+
+        extracted[d_id] = dataset_extracted
+
+    return extracted
+
+
+def update_report_metrics_in_place(
+    baseline_report_path: str,
+    all_results: Dict[str, List[Dict[str, Any]]],
+    output_report_path: str,
+):
+    """
+    Updates the metrics in-place for every model row in baseline_report_path,
+    preserving the exact original row ordering and parameter strings 1:1.
+    """
+    if not os.path.exists(baseline_report_path):
+        return
+
+    def make_param_key(engine: str, params: Dict[str, Any]) -> Tuple:
+        eng = "c11" if engine in ("c11", "kansho") else engine
+        return (eng, tuple(sorted((k, str(v)) for k, v in params.items())))
+
+    indexed = {}
+    for did, trials in all_results.items():
+        for t in trials:
+            k = make_param_key(t.get("engine", ""), t.get("params", {}))
+            indexed[(did, k)] = t
+
+    dataset_map = {
+        "SEA": "sea",
+        "Electricity": "electricity",
+        "Forest Covertype": "covertype",
+        "Airlines": "airlines",
+        "Friedman #1": "friedman",
+        "Bikes": "bikes",
+        "Appliances Energy": "appliances_energy",
+        "NYC Taxi": "nyc_taxi",
+    }
+
+    current_dataset = None
+    current_engine = "kansho"
+    task = "classification"
+    out_lines = []
+
+    with open(baseline_report_path, "r", encoding="utf-8") as f:
+        lines = f.readlines()
+
+    for line in lines:
+        line_s = line.rstrip("\r\n")
+        if line_s.startswith("## Dataset:"):
+            for name, did in dataset_map.items():
+                if name in line_s:
+                    current_dataset = did
+                    break
+            task = "regression" if ("Regression" in line_s) else "classification"
+            current_engine = "kansho"
+            out_lines.append(line_s)
+        elif line_s.startswith("#### Kansho"):
+            current_engine = "kansho"
+            out_lines.append(line_s)
+        elif line_s.startswith("#### River"):
+            current_engine = "river"
+            out_lines.append(line_s)
+        elif line_s.startswith("#### Sklearn"):
+            current_engine = "sklearn"
+            out_lines.append(line_s)
+        elif line_s.startswith("| #"):
+            parts = [p.strip() for p in line_s.split("|")]
+            if len(parts) >= 7:
+                rank = parts[1]
+                cfg_str = parts[2]
+                tokens = [t.strip().strip("`") for t in cfg_str.split(",") if "=" in t]
+                d = {}
+                for tok in tokens:
+                    k, v = tok.split("=", 1)
+                    k = k.strip()
+                    v = v.strip()
+                    if v == "None":
+                        d[k] = None
+                    elif v == "True":
+                        d[k] = True
+                    elif v == "False":
+                        d[k] = False
+                    else:
+                        try:
+                            if "." in v or "e" in v.lower():
+                                d[k] = float(v)
+                            else:
+                                d[k] = int(v)
+                        except ValueError:
+                            d[k] = v
+                pk = make_param_key(current_engine, d)
+                matched = indexed.get((current_dataset, pk))
+                if matched and current_engine == "kansho":
+                    ram = matched.get("intra_train_ram_kb", 0.0)
+                    lat = matched.get("avg_us_per_sample", 0.0)
+                    if task == "classification":
+                        acc = matched.get("holdout_acc", 0.0)
+                        f1 = matched.get("f1_macro", 0.0)
+                        new_line = f"| {rank} | {cfg_str} | {acc:.2f}% | {f1:.2f}% | {ram:.1f} KB | {lat:.2f} µs |"
+                    else:
+                        mae = matched.get("holdout_mae", 0.0)
+                        r2 = matched.get("holdout_r2", 0.0)
+                        new_line = f"| {rank} | {cfg_str} | {mae:.4f} | {r2:.4f} | {ram:.1f} KB | {lat:.2f} µs |"
+                    out_lines.append(new_line)
+                else:
+                    out_lines.append(line_s)
+            else:
+                out_lines.append(line_s)
+        else:
+            out_lines.append(line_s)
+
+    with open(output_report_path, "w", encoding="utf-8") as f:
+        f.write("\n".join(out_lines) + "\n")
+
+
 def run_tuning_suite(
     data_dir: str,
     output_report: str,
@@ -972,7 +1252,186 @@ def run_tuning_suite(
     jobs: int,
     trials_per_tier: int = 30,
     target_tier: Optional[int] = None,
+    replay_report: bool = False,
+    report_only: bool = False,
 ):
+    if report_only:
+        if not os.path.exists(output_json):
+            print(f"[Error: JSON file '{output_json}' not found. Cannot generate report.]")
+            sys.exit(1)
+        with open(output_json, "r", encoding="utf-8") as f:
+            all_results = json.load(f)
+        generate_markdown_report(all_results, output_report)
+        print(f"[✔] Report generated successfully from {output_json} -> {output_report}")
+        return
+
+    norm_engines = [e.strip().lower() for e in selected_engines]
+    kansho_enabled = ("c11" in norm_engines or "kansho" in norm_engines or "all" in norm_engines)
+    river_enabled = ("river" in norm_engines or "all" in norm_engines)
+    sklearn_enabled = ("sklearn" in norm_engines or "all" in norm_engines)
+
+    if replay_report:
+        if not os.path.exists(output_json):
+            print(f"[Error: JSON file '{output_json}' not found for replay mode.]")
+            sys.exit(1)
+
+        backup_path = output_json.replace(".json", ".backup.json")
+        shutil.copyfile(output_json, backup_path)
+        backup_report_path = output_report.replace(".md", ".backup.md")
+        if os.path.exists(output_report):
+            shutil.copyfile(output_report, backup_report_path)
+        print("================================================================================")
+        print(" REPLAY MODE: Re-executando configurações do relatório")
+        print(f" Backup de segurança salvo em: {backup_path}")
+        print("================================================================================")
+
+        with open(output_json, "r", encoding="utf-8") as f:
+            all_results = json.load(f)
+
+        report_configs = extract_report_configs(
+            all_results,
+            selected_datasets=selected_datasets,
+            selected_engines=norm_engines,
+            top_k=3,
+            report_path=output_report,
+        )
+
+        def make_param_key(engine: str, params: Dict[str, Any]) -> Tuple:
+            eng = "c11" if engine in ("c11", "kansho") else engine
+            return (eng, tuple(sorted((k, str(v)) for k, v in params.items())))
+
+        # Build valid keys set for report view to ensure report only displays the exact evaluated models
+        valid_report_keys: Dict[str, set] = {}
+        for d_id, d_name, task, desc, is_high_dim in DATASETS_CONFIG:
+            valid_report_keys[d_id] = set()
+            if d_id in report_configs:
+                for eng, cfgs in report_configs[d_id].items():
+                    for c in cfgs:
+                        valid_report_keys[d_id].add(make_param_key(eng, c))
+            trials = all_results.get(d_id, [])
+            def sort_key_fn(x):
+                if task == "classification":
+                    return (x.get("f1_macro", 0.0), x.get("holdout_acc", 0.0), -x.get("avg_us_per_sample", 0.0))
+                else:
+                    return (x.get("holdout_r2", -1e9), -x.get("holdout_rmse", 1e9), -x.get("avg_us_per_sample", 0.0))
+            for eng in ["river", "sklearn"]:
+                eng_trials = [t for t in trials if t.get("engine") == eng]
+                eng_trials.sort(key=sort_key_fn, reverse=True)
+                for t in eng_trials[:3]:
+                    valid_report_keys[d_id].add(make_param_key(eng, t.get("params", {})))
+
+        total_planned_trials = sum(
+            len(cfgs)
+            for d_dict in report_configs.values()
+            for cfgs in d_dict.values()
+        )
+
+        tracker = ProgressTracker(total_planned_trials)
+
+        print(f" Datasets:     {', '.join(selected_datasets)} ({len(report_configs)} com ensaios para replay)")
+        print(f" Engines:      {', '.join(selected_engines)}")
+        print(f" Parallelism:  {jobs} job(s) / núcleo(s)")
+        print(f" Total Trials: {total_planned_trials} ensaios para replay")
+        print(f" Report Dest:  {output_report}")
+        print(f" JSON Dest:    {output_json}")
+        print("================================================================================")
+
+        for d_id, d_name, task, desc, is_high_dim in DATASETS_CONFIG:
+            if d_id not in report_configs:
+                continue
+
+            d_cfgs = report_configs[d_id]
+            print(f"\n================================================================================")
+            print(f" >>> Dataset: {d_name} [{task.upper()}] - {desc}")
+            print(f"================================================================================")
+
+            train_csv = os.path.join(data_dir, f"{d_id}_train.csv")
+            test_csv = os.path.join(data_dir, f"{d_id}_test.csv")
+
+            if not os.path.exists(train_csv) or not os.path.exists(test_csv):
+                print(f"  Dataset files not found for {d_id}. Running prepare_datasets.py...")
+                prep_script = os.path.join(os.path.dirname(__file__), "prepare_datasets.py")
+                subprocess.run([PYTHON_BIN, prep_script, "--outdir", data_dir, "--dataset", d_id], check=True)
+
+            y_test, n_features = load_test_ground_truth(test_csv, task)
+            replayed_trials: List[Dict[str, Any]] = []
+
+            # 1. Kansho
+            if "kansho" in d_cfgs and d_cfgs["kansho"]:
+                c11_cfgs = d_cfgs["kansho"]
+                print(f"  [1/3] Replay Kansho ({len(c11_cfgs)} ensaios, {jobs} workers)...")
+                c11_trials = run_engine_trials(
+                    "kansho",
+                    lambda cfg: run_trial_c11(train_csv, test_csv, task, cfg, y_test, is_high_dim, n_features=n_features),
+                    c11_cfgs,
+                    task,
+                    jobs,
+                    dataset_name=d_name,
+                    tracker=tracker,
+                )
+                replayed_trials.extend(c11_trials)
+
+            # 2. River
+            if "river" in d_cfgs and d_cfgs["river"]:
+                r_cfgs = d_cfgs["river"]
+                print(f"  [2/3] Replay River ({len(r_cfgs)} ensaios, {jobs} workers)...")
+                river_trials = run_engine_trials(
+                    "river",
+                    lambda cfg: run_trial_river(train_csv, test_csv, task, cfg),
+                    r_cfgs,
+                    task,
+                    jobs,
+                    dataset_name=d_name,
+                    tracker=tracker,
+                )
+                replayed_trials.extend(river_trials)
+
+            # 3. Sklearn
+            if "sklearn" in d_cfgs and d_cfgs["sklearn"]:
+                sk_cfgs = d_cfgs["sklearn"]
+                print(f"  [3/3] Replay Sklearn ({len(sk_cfgs)} ensaios, {jobs} workers)...")
+                sklearn_trials = run_engine_trials(
+                    "sklearn",
+                    lambda cfg: run_trial_sklearn(train_csv, test_csv, task, cfg),
+                    sk_cfgs,
+                    task,
+                    jobs,
+                    dataset_name=d_name,
+                    tracker=tracker,
+                )
+                replayed_trials.extend(sklearn_trials)
+
+            existing = all_results.get(d_id, [])
+            key_to_idx = {make_param_key(t.get("engine", ""), t.get("params", {})): idx for idx, t in enumerate(existing)}
+
+            for rt in replayed_trials:
+                k = make_param_key(rt.get("engine", ""), rt.get("params", {}))
+                if k in key_to_idx:
+                    existing[key_to_idx[k]] = rt
+                else:
+                    existing.append(rt)
+
+            all_results[d_id] = existing
+
+            # Incremental save after each dataset
+            os.makedirs(os.path.dirname(output_json), exist_ok=True)
+            with open(output_json, "w", encoding="utf-8") as f:
+                json.dump(all_results, f, indent=2)
+
+            if os.path.exists(backup_report_path):
+                update_report_metrics_in_place(backup_report_path, all_results, output_report)
+            else:
+                report_view = {
+                    did: [t for t in d_trials if make_param_key(t.get("engine", ""), t.get("params", {})) in valid_report_keys.get(did, set())]
+                    for did, d_trials in all_results.items()
+                }
+                generate_markdown_report(report_view, output_report)
+            print(f"  [✔] Checkpoint: Results and Report updated for {d_name}.")
+
+        print(f"\nFinal replayed results saved to JSON: {output_json}")
+        print(f"Final Markdown report updated: {output_report}")
+        return
+
     # Pre-calculate total planned trials across datasets and engines
     active_datasets = [
         d for d in DATASETS_CONFIG
@@ -1037,7 +1496,7 @@ def run_tuning_suite(
             prep_script = os.path.join(os.path.dirname(__file__), "prepare_datasets.py")
             subprocess.run([PYTHON_BIN, prep_script, "--outdir", data_dir, "--dataset", d_id], check=True)
 
-        y_test, _ = load_test_ground_truth(test_csv, task)
+        y_test, n_features = load_test_ground_truth(test_csv, task)
         dataset_trials: List[Dict[str, Any]] = []
 
         # 1. Kansho (C11)
@@ -1050,7 +1509,7 @@ def run_tuning_suite(
             print(f"  [1/3] Iniciando Kansho ({len(c11_configs)} ensaios, {jobs} workers)...")
             c11_trials = run_engine_trials(
                 "kansho",
-                lambda cfg: run_trial_c11(train_csv, test_csv, task, cfg, y_test, is_high_dim),
+                lambda cfg: run_trial_c11(train_csv, test_csv, task, cfg, y_test, is_high_dim, n_features=n_features),
                 c11_configs,
                 task,
                 jobs,
@@ -1135,6 +1594,8 @@ def main():
     parser.add_argument("--n-iter", type=int, default=30, help="Number of random search iterations per engine (legacy fallback).")
     parser.add_argument("--grid", action="store_true", help="Perform full exhaustive grid search.")
     parser.add_argument("--jobs", type=int, default=12, help="Number of parallel jobs.")
+    parser.add_argument("--replay-report", action="store_true", help="Re-run only the Top-3 configurations per tier/engine currently published in hyperparam_report.md.")
+    parser.add_argument("--report-only", action="store_true", help="Only re-render hyperparam_report.md from hyperparam_results.json without running trials.")
     
     args = parser.parse_args()
     
@@ -1160,6 +1621,8 @@ def main():
         args.jobs,
         args.trials_per_tier,
         target_tier,
+        args.replay_report,
+        args.report_only,
     )
 
 

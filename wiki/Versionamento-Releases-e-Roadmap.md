@@ -58,7 +58,7 @@ void print_system_info(void) {
 ### Via Linha de Comando / Build
 ```bash
 make version
-# Saida: kansho (libht) version 0.2.0
+# Saida: kansho (libht) version 0.4.1
 ```
 
 ---
@@ -91,13 +91,63 @@ Para lançar uma nova versão oficial no GitHub:
    git push origin main
    git push origin v0.1.0
    ```
-5. No GitHub, acesse a aba **Releases** $\rightarrow$ **Draft a new release** e selecione a tag `v0.2.0` recém-enviada para gerar as notas de lançamento e os pacotes `.tar.gz` e `.zip` correspondentes.
+5. No GitHub, acesse a aba **Releases** $\rightarrow$ **Draft a new release** e selecione a tag `v0.4.1` recém-enviada para gerar as notas de lançamento e os pacotes `.tar.gz` e `.zip` correspondentes.
 
 ---
 
 ## 4.1 Histórico de Releases (Changelog)
 
-### v0.2.0 (2026-11-09) — Micro-Pipelines de Pré-Processamento Zero-Malloc e Observadores Não-Paramétricos
+### v0.4.1 (2026-11-14) — Otimização de Footprint com Perfil ADWIN Compacto e Omissão de Feat Stats (Entrega 7.7)
+- **Perfil de Compilação ADWIN Compacto (`ht_drift`):**
+  - Parametrização algébrica das asserções estáticas para os níveis de histograma exponencial do ADWIN via macro `HT_ADWIN_LEVELS` (padrão `14`, configurável para `10` em perfis compactos de microcontroladores como Cortex-M3 / ESP32).
+  - Redução física de `sizeof(ht_adwin_t)` de $764\text{ B}$ para **$556\text{ B}$** em `float32` (e de $1.504\text{ B}$ para **$1.088\text{ B}$** em `double64`), reduzindo o `ht_adwin_pool_t` no perfil MCU (`10` níveis, `32` detectores) de **$98.068\text{ B}$ ($95,77\text{ KB}$) para $17.864\text{ B}$ ($17,45\text{ KB}$)** — economia de **$-78,32\text{ KB}$ ($-81,8\%$)**.
+  - Adição de teste unitário de saturação de nível superior (`test_adwin_highest_level_saturation_and_drop`), validando a reciclagem de buckets no horizonte temporal máximo sem *underflow* em `total_variance`.
+- **Omissão Condicional de `feat_stats` em Classificação (`ht_tree`) e Dimensionamento `.bss`:**
+  - Proteção de `feat_stats[HT_MAX_FEATURES]` de regressão sob `#ifndef HT_CLASSIF_ONLY`, eliminando o vetor nos caminhos puros de classificação em `ht_tree.c` e `ht_tree.h`.
+  - Parametrização exata de `-DHT_STATS_STORAGE_BYTES` por `n_features` real nos benchmarks (`main_benchmark/tune_hyperparams.py`, `main_benchmark/main_benchmark.py`) e atualização dos perfis compactos nos firmwares QEMU (`emulation/esp32/CMakeLists.txt` e `emulation/cortex-m3/Makefile`).
+- **Validação Experimental no Replay Benchmark (8 Datasets):**
+  - Forest Covertype (Tier 2, 54 features, 7 classes): redução de RAM de **$22,8\text{ KB}$ para $18,9\text{ KB}$ ($-17,1\%$)**, com acurácia ($61,43\%$) e F1 Macro ($58,51\%$) bit-a-bit idênticos.
+  - Reduções consistentes nos benchmarks de streaming e prequential nos 8 datasets avaliados.
+- **Suíte de Testes:** 119 testes unitários e de integração 100% aprovados ($227.173$ asserções em `float32` e $227.509$ asserções em `double64`) com zero warnings.
+
+### v0.4.0 (2026-11-14) — Otimização Extrema de Memória SRAM com Dynamic Feature Stride Slab (Entrega 7.6)
+- **Dynamic Feature Stride Slab Allocator (`ht_memory`) (Entrega 7.6):**
+  - Substituição do vetor estático homogêneo por um slab contíguo em `.bss` (`stats_storage[HT_STATS_STORAGE_BYTES]` em `union` com âncora `ht_leaf_stats_t` via `_Alignas`) inicializado por `ht_memory_init_stride(pool, n_features, task_type)` com alinhamento natural `sizeof(ht_float_t)` e capacidade limitada a `HT_MAX_ACTIVE_LEAVES`.
+  - Reordenação de `ht_leaf_stats_t` deslocando `reg_weights` para após `observers` (acesso via `ht_leaf_reg_weights`) e mantendo `offsetof(ht_leaf_stats_t, observers)` fixo em $16\text{ B}$ (`float32`) / $32\text{ B}$ (`float64`).
+  - Especialização condicional via macro `-DHT_CLASSIF_ONLY`: omite `reg_weights` na reserva do slab e bloqueia `HT_TASK_REGRESSION`, reduzindo a pegada de SRAM estática em **$-35,4\%$ a $-54\%$** e a pegada de RAM ativa em até **$-49,3\%$** em tarefas de classificação.
+  - Teste de integridade com canários de borda (`0xAA` / `0x55`) entre folhas adjacentes em `test_dynamic_stride_canary_boundary_protection` (`test_memory.c`), garantindo zero *buffer overrun*.
+- **Validação Experimental no Replay Benchmark (8 Datasets):**
+  - Forest Covertype (Tier 2, 54 features, 7 classes): redução de SRAM estática de **35,3 KB para 22,8 KB (-35,4%)** e RAM ativa para **17,9 KB (-49,3%)**, mantendo 100% de paridade preditiva bit-a-bit (Acurácia: 61,43%, F1 Macro: 58,51%).
+  - SEA (Tier 1): redução de SRAM estática de **5,0 KB para 2,3 KB (-54,0%)** (Acurácia: 94,87%).
+- **Suíte de Testes:** 118 testes unitários e de integração 100% aprovados com zero warnings em `float32` e `double64`.
+
+### v0.3.2 (2026-11-11) — Ciclo Experimental Revertido (Restauração de Bounding Box Gaussiana; ver Post-Mortem da Entrega 7.5)
+- **Restauração de Bounding Box por Classe em Observador Gaussiano (`ht_gaussian_obs_t`):**
+  - Correção na estimativa de divisão binária numérica restaurando `min_val` e `max_val` em nível de classe (`ht_gaussian_obs_t`), em conformidade com o algoritmo de referência do River (`river.tree.splitter.GaussianSplitter`).
+  - Eliminação do vazamento probabilístico de cauda da CDF gaussiana em atributos concentrados (como variáveis binárias/one-hot no Forest Covertype), restaurando a acurácia para **58,68%** (Tier 1) e **61,43%** (Tier 2).
+  - *Nota de Histórico:* As tentativas experimentais das Entregas 7.4 e 7.5 (`v0.3.1` e `v0.3.2`) foram formalmente revertidas ao baseline estável da `v0.3.0` (commit `bad03f9`), com post-mortem documentado em [`docs/09_extreme_ram_optimization.md`](../docs/09_extreme_ram_optimization.md), servindo de base para o modelo híbrido validado na `v0.4.0`.
+- **Suíte de Testes:** 118 testes unitários e de integração 100% aprovados ($226.977$ asserções) com zero warnings em `float32` e `double64`.
+
+### v0.3.1 (2026-11-11) — Ciclo Experimental Revertido (Tentativas das Entregas 7.4 e 7.5)
+- **Experimentos Avaliados e Posteriormente Revertidos (`bad03f9`):**
+  - Tentativa de desacoplamento de `node_drift` em pool dedicado (`ht_adwin_pool_t`) (Entrega 7.4) e união de cabeçalho + fatoração de bounding box `[min, max]` por atributo em `ht_gaussian_obs_t` (Entrega 7.5).
+  - Identificadas duas limitações empíricas e arquiteturais documentadas no post-mortem: busca linear $O(N)$ na indexação de drift das folhas e vazamento de cauda na CDF gaussiana em variáveis binárias esparsas (refutação empírica da H5).
+- **Suíte de Testes:** 118 testes unitários e de integração aprovados ($230.133$ asserções) em `float32` e `double64`.
+
+### v0.3.0 (2026-11-11) — Otimização Extrema de Memória SRAM (Free-lists Intrusivas e Topologia Assimétrica)
+- **Free-lists Intrusivas em `ht_memory_pool_t` (Hipótese 1 / Entrega 7.2):**
+  - Eliminação completa dos vetores externos de pilha `free_nodes[HT_MAX_NODES]` e `free_stats[HT_MAX_ACTIVE_LEAVES]`, gravando os índices intrusivos `next_free` diretamente dentro das estruturas inativas (`node_pool[idx].next_free` e `stats_pool[idx].next_free`).
+  - Economia imediata de **$8.704\text{ bytes}$ ($8,50\text{ KB}$)** de SRAM estática em `float32` e `double64`, preservando complexidade estritamente constante $O(1)$ em alocação e liberação.
+- **Topologia Assimétrica de Nós em `ht_node_t` (Hipótese 2 / Entrega 7.3):**
+  - Redesenho de `ht_node_t` como união mutuamente exclusiva entre estado de folha (`class_counts` / `reg_stats`, `stats_idx`) e estado de nó interno de decisão (`split_val`, `left_child`, `right_child`, `feature_idx`).
+  - Redução física de `sizeof(ht_node_t)` de $28\text{ B}$ para **$20\text{ B}$** por nó em `float32` (configuração padrão de 4 classes) e de $48\text{ B}$ para **$40\text{ B}$** em `double64`, gerando economia direta de **$32.768\text{ bytes}$ ($32,0\text{ KB}$)** no `node_pool` ($4.096$ nós).
+  - Introdução da macro de alinhamento dinâmico `HT_NODE_FLAGS_OFFSET`, garantindo posicionamento seguro de `flags` no boundary de multi-classes sem sobreposição de memória.
+- **Main Benchmark Atualizado com 8 Datasets:**
+  - Resultados consolidados com hiperparâmetros ótimos comprovando paridade preditiva e superioridade contra `River HTC/HTR` com speedups de **$53\times$ a $1.479\times$** por amostra.
+  - Consumo intra-treino rigorosamente contido em $\le 1\text{ MB}$ de RAM mesmo em datasets de alta dimensionalidade como Forest Covertype ($703,8\text{ KB}$ vs $57,8\text{ MB}$ do River).
+- **Suíte de Testes:** 115 testes unitários e de integração aprovados ($226.035$ asserções) com 0 warnings em `float32` e `double64`.
+
+### v0.2.0 (2026-11-10) — Micro-Pipelines de Pré-Processamento (`libht_prep`), Histogramas Dinâmicos e Normalização SGD
 - **Biblioteca de Pré-Processamento Embarcada (`libht_prep`):**
   - `ht_scaler_t`: Normalização online Z-score (Welford incremental) e Min-Max em $O(1)$ de RAM e tempo.
   - `ht_filter_hampel_t`: Filtro mediano deslizante com Desvio Absoluto da Mediana (MAD, $3\sigma$) com buffer circular estático para rejeição determinística de espículas (*outliers*) de sensores industriais.

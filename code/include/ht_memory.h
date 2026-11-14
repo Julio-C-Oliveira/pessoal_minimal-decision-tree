@@ -61,31 +61,51 @@ typedef struct {
     ht_var_stat_t cat_stats[HT_MAX_CATEGORIES];
 } ht_reg_categorical_obs_t;
 
+#define HT_NODE_FLAGS_OFFSET (sizeof(ht_float_t) * (HT_MAX_CLASSES >= 4 ? HT_MAX_CLASSES : 4) + sizeof(uint16_t))
+
 /**
- * @brief Permanent structural node in the decision tree (unified classification + regression).
+ * @brief Permanent structural node in the decision tree (asymmetric leaf vs branch union).
  *
- * Designed for binary relocatability and memory efficiency:
- * - 16 or 32 bytes: anonymous union between class_counts and reg_stats
- * - 4 or 8 bytes: split_val union
- * - 2 bytes: left_child, right_child, stats_idx
- * - 1 byte: feature_idx, flags
+ * Implements Phase 7 Hypothesis 2 (H2): Asymmetric Topology Union.
+ * In a Hoeffding tree, a node is strictly an active/inactive LEAF or an internal BRANCH,
+ * never both simultaneously:
+ * - LEAF: class_counts[HT_MAX_CLASSES] (or reg_stats) + stats_idx.
+ * - BRANCH: split_val (threshold / cat_val) + left_child + right_child + feature_idx (9-13 bytes).
+ * - INACTIVE: next_free intrusive free-list link (2 bytes).
+ * - HEADER: flags and reserved placed at offset HT_NODE_FLAGS_OFFSET, ensuring
+ *   flags never collides with leaf or branch payload regardless of HT_MAX_CLASSES macro.
  *
- * Sized at exactly 28 bytes in float32 and 48 bytes in float64 (zero bytes overhead).
+ * Sized at exactly 20 bytes in float32 and 40 bytes in float64 with default HT_MAX_CLASSES=4.
  */
 typedef struct {
     union {
-        ht_float_t    class_counts[HT_MAX_CLASSES];
-        ht_var_stat_t reg_stats;
+        /* Leaf node state */
+        struct {
+            union {
+                ht_float_t    class_counts[HT_MAX_CLASSES];
+                ht_var_stat_t reg_stats;
+            };
+            uint16_t stats_idx;
+        };
+        /* Branch (internal decision) node state */
+        struct {
+            union {
+                ht_float_t threshold;
+                int32_t    cat_val;
+            } split_val;
+            uint16_t left_child;
+            uint16_t right_child;
+            uint8_t  feature_idx;
+        };
+        /* Free list link when node is inactive */
+        uint16_t next_free;
+        /* Common node header at fixed offset ensuring flags never collides with payload */
+        struct {
+            uint8_t _pad_flags[HT_NODE_FLAGS_OFFSET];
+            uint8_t flags;
+            uint8_t reserved;
+        };
     };
-    union {
-        ht_float_t threshold;
-        int32_t    cat_val;
-    } split_val;
-    uint16_t left_child;
-    uint16_t right_child;
-    uint16_t stats_idx;
-    uint8_t  feature_idx;
-    uint8_t  flags;
 } ht_node_t;
 
 /**
@@ -156,34 +176,72 @@ typedef struct {
     union {
         ht_float_t mc_correct_weight;
         ht_float_t fmse_mean;
+        uint16_t   next_free; /**< Intrusive free-list next index when stats block is free */
     };
     union {
         ht_float_t nb_correct_weight;
         ht_float_t fmse_model;
     };
-    ht_float_t       reg_weights[HT_MAX_FEATURES];
-    ht_float_t       reg_intercept;
-    ht_feature_obs_t observers[HT_MAX_FEATURES];
+    ht_float_t       reg_intercept;               /**< Fixed header: 16 B (float32) / 32 B (float64) */
+    ht_feature_obs_t observers[HT_MAX_FEATURES];  /**< Feature observers at fixed offset 16 B (float32) / 32 B (float64) */
+    ht_float_t       reg_weights[HT_MAX_FEATURES];/**< Regression SGD weights placed after observers for compact stride */
 } ht_leaf_stats_t;
 
 /**
+ * @brief Helper accessors for regression weights in compacted leaf stats.
+ *
+ * In a compacted leaf with dynamic stride, regression weights begin immediately after observers[n_features].
+ */
+static inline ht_float_t *ht_leaf_reg_weights(ht_leaf_stats_t *stats, uint16_t n_features) {
+    return (ht_float_t *)&stats->observers[n_features];
+}
+
+static inline const ht_float_t *ht_leaf_reg_weights_const(const ht_leaf_stats_t *stats, uint16_t n_features) {
+    return (const ht_float_t *)&stats->observers[n_features];
+}
+
+#define HT_LEAF_HEADER_BYTES       (offsetof(ht_leaf_stats_t, observers))
+#define HT_LEAF_CLASSIF_MAX_BYTES  ((HT_LEAF_HEADER_BYTES) + ((size_t)HT_MAX_FEATURES * sizeof(ht_feature_obs_t)))
+
+#ifndef HT_STATS_STORAGE_BYTES
+#ifdef HT_CLASSIF_ONLY
+#define HT_STATS_STORAGE_BYTES ((size_t)HT_MAX_ACTIVE_LEAVES * (HT_LEAF_CLASSIF_MAX_BYTES))
+#else
+#define HT_STATS_STORAGE_BYTES ((size_t)HT_MAX_ACTIVE_LEAVES * sizeof(ht_leaf_stats_t))
+#endif
+#endif
+
+/**
  * @brief Deterministic slab/pool allocator managing node and leaf statistics pools.
+ *
+ * Employs intrusive free lists directly inside inactive node/stats buffers, eliminating
+ * external index arrays (free_nodes[] and free_stats[]) to save 8.7 KB of SRAM.
+ * Statistics storage uses a contiguous byte slab with dynamic feature stride.
  */
 typedef struct {
-    ht_node_t       node_pool[HT_MAX_NODES];
-    ht_leaf_stats_t stats_pool[HT_MAX_ACTIVE_LEAVES];
-    uint16_t        free_nodes[HT_MAX_NODES];
-    uint16_t        free_stats[HT_MAX_ACTIVE_LEAVES];
-    uint16_t        free_nodes_top;
-    uint16_t        free_stats_top;
-    uint16_t        nodes_allocated;
-    uint16_t        stats_allocated;
+    ht_node_t node_pool[HT_MAX_NODES];
+    union {
+        _Alignas(ht_leaf_stats_t) uint8_t stats_storage[HT_STATS_STORAGE_BYTES];
+        ht_leaf_stats_t _stats_type_anchor; /**< Type anchor for ISO C11 §6.5 effective type and alignment */
+    };
+    uint16_t leaf_stride;         /**< Machine-aligned size in bytes of each active leaf */
+    uint16_t max_leaves_capacity; /**< Real maximum leaf capacity: min(HT_STATS_STORAGE_BYTES / leaf_stride, HT_MAX_ACTIVE_LEAVES) */
+    uint16_t free_nodes_head;     /**< Head index of intrusive free-nodes list */
+    uint16_t free_stats_head;     /**< Head index of intrusive free-stats list */
+    uint16_t nodes_allocated;     /**< Number of currently active nodes */
+    uint16_t stats_allocated;     /**< Number of currently active leaf stats blocks */
 } ht_memory_pool_t;
 
 /* Compile-time static assertions for exact memory layout in default configuration */
+#ifndef HT_USE_DOUBLE
+_Static_assert(offsetof(ht_leaf_stats_t, observers) == 16, "offsetof(observers) must be exactly 16 bytes in float32 mode");
+#else
+_Static_assert(offsetof(ht_leaf_stats_t, observers) == 32, "offsetof(observers) must be exactly 32 bytes in float64 mode");
+#endif
+
 #if HT_MAX_CLASSES == 4 && HT_MAX_FEATURES == 16 && HT_REG_NUM_SLOTS == 5
 #ifndef HT_USE_DOUBLE
-_Static_assert(sizeof(ht_node_t) == 28, "ht_node_t must be exactly 28 bytes in float32 mode");
+_Static_assert(sizeof(ht_node_t) == 20, "ht_node_t must be exactly 20 bytes in float32 mode (H2 asymmetric union)");
 _Static_assert(sizeof(ht_gaussian_obs_t) == 20, "ht_gaussian_obs_t must be 20 bytes in float32 mode");
 _Static_assert(sizeof(ht_categorical_obs_t) == 80, "ht_categorical_obs_t must be 80 bytes in float32 mode");
 _Static_assert(sizeof(ht_var_stat_t) == 12, "ht_var_stat_t must be exactly 12 bytes in float32 mode");
@@ -195,7 +253,7 @@ _Static_assert(sizeof(ht_hist_obs_t) == 80, "ht_hist_obs_t must be exactly 80 by
 _Static_assert(sizeof(ht_feature_obs_t) == 80, "ht_feature_obs_t must be 80 bytes in float32 mode");
 _Static_assert(sizeof(ht_leaf_stats_t) == 1360, "ht_leaf_stats_t must be exactly 1360 bytes in float32 mode");
 #else
-_Static_assert(sizeof(ht_node_t) == 48, "ht_node_t must be exactly 48 bytes in float64 mode");
+_Static_assert(sizeof(ht_node_t) == 40, "ht_node_t must be exactly 40 bytes in float64 mode (H2 asymmetric union)");
 _Static_assert(sizeof(ht_gaussian_obs_t) == 40, "ht_gaussian_obs_t must be 40 bytes in float64 mode");
 _Static_assert(sizeof(ht_categorical_obs_t) == 160, "ht_categorical_obs_t must be 160 bytes in float64 mode");
 _Static_assert(sizeof(ht_var_stat_t) == 24, "ht_var_stat_t must be exactly 24 bytes in float64 mode");
@@ -208,7 +266,27 @@ _Static_assert(sizeof(ht_feature_obs_t) == 160, "ht_feature_obs_t must be 160 by
 _Static_assert(sizeof(ht_leaf_stats_t) == 2720, "ht_leaf_stats_t must be exactly 2720 bytes in float64 mode");
 #endif
 #endif
+#if HT_MAX_CLASSES == 4 && HT_MAX_FEATURES == 16 && HT_REG_NUM_SLOTS == 5 && HT_MAX_NODES == 4096 && HT_MAX_ACTIVE_LEAVES == 256 && !defined(HT_CLASSIF_ONLY)
+#ifndef HT_USE_DOUBLE
+_Static_assert(sizeof(ht_memory_pool_t) == 430092, "ht_memory_pool_t must be exactly 430092 bytes in float32 mode");
+#else
+_Static_assert(sizeof(ht_memory_pool_t) == 860176, "ht_memory_pool_t must be exactly 860176 bytes in float64 mode");
+#endif
+#endif
 _Static_assert(sizeof(ht_memory_pool_t) <= (1024 * 1024), "ht_memory_pool_t exceeds 1 MB RAM budget!");
+
+/**
+ * @brief Configures memory pool with dynamic leaf stride based on features and task.
+ *
+ * Calculates natural aligned stride, clamps capacity to HT_MAX_ACTIVE_LEAVES,
+ * initializes intrusive free lists, and zeroes the memory pool.
+ *
+ * @param pool Pointer to memory pool.
+ * @param n_features Number of stream features (1 .. HT_MAX_FEATURES).
+ * @param task_type Machine learning task type (classification or continuous regression).
+ * @return true on success, false if arguments are invalid or slab buffer is too small.
+ */
+bool ht_memory_init_stride(ht_memory_pool_t *pool, uint16_t n_features, ht_task_type_t task_type);
 
 /**
  * @brief Initializes memory pool free lists and zero-initializes memory.
