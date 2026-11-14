@@ -21,7 +21,8 @@ CONFIG_DEFS = -DHT_MAX_ACTIVE_LEAVES=4 \
               -DHT_MAX_FEATURES=64 \
               -DHT_MAX_CLASSES=8 \
               -DHT_MAX_NODES=128 \
-              -DHT_MAX_ADWIN_DETECTORS=2
+              -DHT_MAX_ADWIN_DETECTORS=2 \
+              -DHT_ADWIN_LEVELS=10
 
 CFLAGS = $(ARCH_FLAGS) \
          -std=c11 -Wall -Wextra -Werror -pedantic -Os -g3 \

@@ -130,7 +130,7 @@ def calculate_safe_capacity(tier: int, slots: int, is_high_dim: bool, task: str 
     return leaves, nodes
 
 
-def ensure_c11_binary(tier: int, slots: int, is_high_dim: bool, task: str = "classification") -> str:
+def ensure_c11_binary(tier: int, slots: int, is_high_dim: bool, task: str = "classification", n_features: int = 0) -> str:
     """
     Compiles or retrieves a cached C11 benchmark runner binary with the required
     tier (active leaves) and regression slot macros. Thread-safe with lock.
@@ -139,7 +139,8 @@ def ensure_c11_binary(tier: int, slots: int, is_high_dim: bool, task: str = "cla
         os.makedirs(BUILD_DIR, exist_ok=True)
         task_suffix = "_classif" if task == "classification" else f"_s{slots}"
         high_dim_suffix = "_main" if is_high_dim else ""
-        bin_name = f"bench_c_runner_t{tier}{task_suffix}{high_dim_suffix}"
+        feat_suffix = f"_f{n_features}" if n_features > 0 else ""
+        bin_name = f"bench_c_runner_t{tier}{task_suffix}{high_dim_suffix}{feat_suffix}"
         bin_path = os.path.join(BUILD_DIR, bin_name)
 
         # Check if binary already exists and is newer than source files
@@ -154,6 +155,8 @@ def ensure_c11_binary(tier: int, slots: int, is_high_dim: bool, task: str = "cla
             os.path.join(CODE_DIR, "include", "ht_config.h"),
             os.path.join(CODE_DIR, "include", "ht_memory.h"),
             os.path.join(CODE_DIR, "include", "ht_prep.h"),
+            os.path.join(CODE_DIR, "include", "ht_drift.h"),
+            os.path.join(CODE_DIR, "include", "ht_tree.h"),
         ]
 
         needs_compile = not os.path.exists(bin_path)
@@ -172,6 +175,8 @@ def ensure_c11_binary(tier: int, slots: int, is_high_dim: bool, task: str = "cla
             macros = [
                 f"-DHT_MAX_ACTIVE_LEAVES={leaves}",
                 f"-DHT_MAX_NODES={nodes}",
+                "-DHT_ADWIN_LEVELS=10",
+                "-DHT_MAX_ADWIN_DETECTORS=32",
             ]
             if task == "classification":
                 macros.append("-DHT_CLASSIF_ONLY")
@@ -180,6 +185,19 @@ def ensure_c11_binary(tier: int, slots: int, is_high_dim: bool, task: str = "cla
 
             if is_high_dim:
                 macros.extend(["-DHT_MAX_FEATURES=64", "-DHT_MAX_CLASSES=8"])
+
+            if n_features > 0:
+                max_classes = 8 if is_high_dim else 4
+                if task == "classification":
+                    obs_size = max_classes * 20
+                    reg_size = 0
+                else:
+                    obs_size = max(slots * 16, 80)
+                    reg_size = 4
+                raw_bytes = 16 + (n_features * obs_size) + (n_features * reg_size)
+                leaf_stride = (raw_bytes + 3) & ~3
+                stats_storage_bytes = leaves * leaf_stride
+                macros.append(f"-DHT_STATS_STORAGE_BYTES={stats_storage_bytes}")
 
             src_files = [
                 os.path.join(CODE_DIR, "src", "ht_memory.c"),
@@ -311,10 +329,11 @@ def run_trial_c11(
     params: Dict[str, Any],
     y_test: List[float],
     is_high_dim: bool,
+    n_features: int = 0,
 ) -> Dict[str, Any]:
     tier = params.get("tier", 256)
     slots = params.get("reg_num_slots", 16)
-    bin_path = ensure_c11_binary(tier, slots, is_high_dim, task)
+    bin_path = ensure_c11_binary(tier, slots, is_high_dim, task, n_features=n_features)
 
     json_path = f"/tmp/tune_c11_{os.path.basename(bin_path)}_{time.time_ns()}_{random.randint(0, 10000000)}.json"
     cmd = [
@@ -1334,7 +1353,7 @@ def run_tuning_suite(
                 prep_script = os.path.join(os.path.dirname(__file__), "prepare_datasets.py")
                 subprocess.run([PYTHON_BIN, prep_script, "--outdir", data_dir, "--dataset", d_id], check=True)
 
-            y_test, _ = load_test_ground_truth(test_csv, task)
+            y_test, n_features = load_test_ground_truth(test_csv, task)
             replayed_trials: List[Dict[str, Any]] = []
 
             # 1. Kansho
@@ -1343,7 +1362,7 @@ def run_tuning_suite(
                 print(f"  [1/3] Replay Kansho ({len(c11_cfgs)} ensaios, {jobs} workers)...")
                 c11_trials = run_engine_trials(
                     "kansho",
-                    lambda cfg: run_trial_c11(train_csv, test_csv, task, cfg, y_test, is_high_dim),
+                    lambda cfg: run_trial_c11(train_csv, test_csv, task, cfg, y_test, is_high_dim, n_features=n_features),
                     c11_cfgs,
                     task,
                     jobs,
@@ -1477,7 +1496,7 @@ def run_tuning_suite(
             prep_script = os.path.join(os.path.dirname(__file__), "prepare_datasets.py")
             subprocess.run([PYTHON_BIN, prep_script, "--outdir", data_dir, "--dataset", d_id], check=True)
 
-        y_test, _ = load_test_ground_truth(test_csv, task)
+        y_test, n_features = load_test_ground_truth(test_csv, task)
         dataset_trials: List[Dict[str, Any]] = []
 
         # 1. Kansho (C11)
@@ -1490,7 +1509,7 @@ def run_tuning_suite(
             print(f"  [1/3] Iniciando Kansho ({len(c11_configs)} ensaios, {jobs} workers)...")
             c11_trials = run_engine_trials(
                 "kansho",
-                lambda cfg: run_trial_c11(train_csv, test_csv, task, cfg, y_test, is_high_dim),
+                lambda cfg: run_trial_c11(train_csv, test_csv, task, cfg, y_test, is_high_dim, n_features=n_features),
                 c11_configs,
                 task,
                 jobs,
