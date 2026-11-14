@@ -94,7 +94,9 @@ typedef struct {
     const ht_criterion_vtable_t *criterion_vtable;
     ht_adwin_pool_t             *adwin_pool;
     struct ht_prep_pipeline     *prep_pipeline;
+#ifndef HT_CLASSIF_ONLY
     ht_var_stat_t                feat_stats[HT_MAX_FEATURES];
+#endif
     ht_node_drift_t              node_drift[HT_MAX_NODES];
     ht_float_t                   train_weight_seen;
     uint32_t                     rng_state;

@@ -671,9 +671,9 @@ static void test_dynamic_stride_classif_only_and_edge_cases(void) {
     /* Test regression vs classification stride difference */
     bool ok_class = ht_memory_init_stride(&s_test_pool, 4, HT_TASK_CLASSIFICATION);
     HT_ASSERT(ok_class);
-    uint16_t stride_class = s_test_pool.leaf_stride;
 
 #ifndef HT_CLASSIF_ONLY
+    uint16_t stride_class = s_test_pool.leaf_stride;
     bool ok_reg = ht_memory_init_stride(&s_test_pool, 4, HT_TASK_REGRESSION);
     HT_ASSERT(ok_reg);
     uint16_t stride_reg = s_test_pool.leaf_stride;

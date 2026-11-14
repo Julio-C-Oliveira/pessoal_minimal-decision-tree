@@ -68,6 +68,7 @@ static ht_float_t ht_tree_normalize_feature_for_sgd(const ht_tree_t *tree,
                                                     const ht_leaf_stats_t *stats,
                                                     uint8_t f,
                                                     ht_float_t val) {
+#ifndef HT_CLASSIF_ONLY
     /* 1. Global tree-level prior */
     ht_float_t mu_tree = (ht_float_t)0.0;
     ht_float_t sigma2_tree = (ht_float_t)1.0;
@@ -116,6 +117,12 @@ static ht_float_t ht_tree_normalize_feature_for_sgd(const ht_tree_t *tree,
     }
 
     return (val - mu_eff) / HT_SQRT(sigma2_eff);
+#else
+    (void)tree;
+    (void)stats;
+    (void)f;
+    return val;
+#endif
 }
 
 static ht_float_t ht_leaf_predict_linear_model(const ht_tree_t *tree,
@@ -1955,6 +1962,7 @@ ht_status_t ht_tree_learn_one_reg(ht_tree_t *tree,
         x_in = x_prep;
     }
 
+#ifndef HT_CLASSIF_ONLY
     for (uint8_t f = 0; f < tree->params.n_features; ++f) {
         if (tree->params.feature_types[f] == HT_FEAT_NUMERIC) {
             if (!HT_ISNAN(x_in[f].num)) {
@@ -1962,6 +1970,7 @@ ht_status_t ht_tree_learn_one_reg(ht_tree_t *tree,
             }
         }
     }
+#endif
 
     tree->train_weight_seen += weight;
 
