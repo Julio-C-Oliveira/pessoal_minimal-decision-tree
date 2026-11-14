@@ -58,7 +58,7 @@ void print_system_info(void) {
 ### Via Linha de Comando / Build
 ```bash
 make version
-# Saida: kansho (libht) version 0.3.0
+# Saida: kansho (libht) version 0.4.0
 ```
 
 ---
@@ -91,11 +91,21 @@ Para lançar uma nova versão oficial no GitHub:
    git push origin main
    git push origin v0.1.0
    ```
-5. No GitHub, acesse a aba **Releases** $\rightarrow$ **Draft a new release** e selecione a tag `v0.3.0` recém-enviada para gerar as notas de lançamento e os pacotes `.tar.gz` e `.zip` correspondentes.
+5. No GitHub, acesse a aba **Releases** $\rightarrow$ **Draft a new release** e selecione a tag `v0.4.0` recém-enviada para gerar as notas de lançamento e os pacotes `.tar.gz` e `.zip` correspondentes.
 
 ---
 
 ## 4.1 Histórico de Releases (Changelog)
+
+### v0.4.0 (2026-11-14) — Otimização Extrema de Memória SRAM com Dynamic Feature Stride Slab (Entrega 7.6)
+- **Dynamic Feature Stride Slab Allocator (`ht_memory`) (Entrega 7.6):**
+  - Implementação de particionamento dinâmico de *stride* no pool de estatísticas (`stats_pool`) em `ht_memory.c`, calculando o passo físico em bytes por folha (`leaf_stride`) em tempo de compilação e inicialização com base em `HT_MAX_FEATURES`, alinhado a boundaries de 4 bytes (`uint32_t`).
+  - Especialização condicional via macro `-DHT_CLASSIF_ONLY`: elimina completamente as estruturas de regressão (pesos lineares SGD `reg_weights` e observadores numéricos de regressão `ht_reg_numeric_obs_t`), reduzindo a pegada de SRAM estática em **-35,4% a -54%** e a pegada de RAM ativa em até **-49,3%** em tarefas de classificação.
+  - Blindagem contra corrupção de memória e buffer overflow com canários de boundary (`HT_STRIDE_CANARY = 0xAA55AA55`) entre slots consecutivos, validados nas rotinas `ht_memory_alloc_leaf_stats` e `ht_memory_free_leaf_stats`.
+- **Validação Experimental no Replay Benchmark (8 Datasets):**
+  - Forest Covertype (Tier 2, 54 features, 7 classes): redução de SRAM estática de **35,3 KB para 22,8 KB (-35,4%)** e RAM ativa para **17,9 KB (-49,3%)**, mantendo 100% de paridade preditiva bit-a-bit (Acurácia: 61,43%, F1 Macro: 58,51%).
+  - SEA (Tier 1): redução de SRAM estática de **5,0 KB para 2,3 KB (-54,0%)** (Acurácia: 94,87%).
+- **Suíte de Testes:** 118 testes unitários e de integração 100% aprovados (227.166 asserções) com zero warnings em `float32` e `double64`.
 
 ### v0.3.2 (2026-11-11) — Correção de Precisão e Paridade River em Splits Gaussianos
 - **Restauração de Bounding Box por Classe em Observador Gaussiano (`ht_gaussian_class_stat_t`):**
