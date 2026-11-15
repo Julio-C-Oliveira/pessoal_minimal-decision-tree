@@ -38,12 +38,19 @@ Além das páginas desta Wiki, o repositório principal mantém notas matemátic
 - [`docs/07_regression_trees_fimtdd.md`](../docs/07_regression_trees_fimtdd.md) — Árvores de regressão incremental (`FIMT-DD` / `VFDT-R` e `HAT-R`), variância paralela de Chan e folhas lineares com SGD.
 - [`docs/08_data_preprocessing_and_nonparametric.md`](../docs/08_data_preprocessing_and_nonparametric.md) — Micro-pipelines embarcados zero-malloc (`libht_prep`), Hampel MAD, Ben-Haim & Tom-Tov e normalização SGD híbrida.
 
-### Relatórios de Benchmark e Paridade (`benchmarks/`)
-- [`benchmarks/benchmark_report.md`](../benchmarks/benchmark_report.md) — Paridade de Classificação Estacionária (`VFDT` C11 vs River vs Scikit-Learn).
-- [`benchmarks/triple_benchmark_report.md`](../benchmarks/triple_benchmark_report.md) — Benchmark Triplo no dataset MNIST com *profiling* de RAM e Heap.
-- [`benchmarks/drift_benchmark_report.md`](../benchmarks/drift_benchmark_report.md) — Adaptação a *Concept Drift* (`HAT` C11 vs River `HAT`).
-- [`benchmarks/regression_benchmark_report.md`](../benchmarks/regression_benchmark_report.md) — Regressão Contínua e Drift (`VFDT-R` / `HAT-R` vs River `HTR` / `HATR` vs Scikit-Learn).
-- [`benchmarks/prep_benchmark_report.md`](../benchmarks/prep_benchmark_report.md) — Micro-pipelines de pré-processamento (`libht_prep`), normalização Z-score SGD e observador de histograma vs River.
+### Suítes e Relatórios de Benchmark
+- **Suíte Principal de Desempenho ([`main_benchmark/`](../main_benchmark/README.md)):**
+  - [`main_benchmark/main_benchmark_report.md`](../main_benchmark/main_benchmark_report.md) — Avaliação comparativa completa nos 8 datasets reais e sintéticos (Peak RSS, acurácia holdout/prequential, speedup e Tiers de memória).
+  - [`main_benchmark/hyperparam_report.md`](../main_benchmark/hyperparam_report.md) — Estudo de sensibilidade e curvas de Pareto de hiperparâmetros.
+- **Suíte Especializada de Paridade e Algoritmos ([`benchmarks/`](../benchmarks/README.md)):**
+  - [`benchmarks/benchmark_report.md`](../benchmarks/benchmark_report.md) — Paridade de Classificação Estacionária (`VFDT` C11 vs River vs Scikit-Learn).
+  - [`benchmarks/memory_benchmark_report.md`](../benchmarks/memory_benchmark_report.md) — Escalonamento sob extrema restrição de RAM (Tier 256, Tier 8 e Tier 4 com *Promise Deactivation*).
+  - [`benchmarks/drift_benchmark_report.md`](../benchmarks/drift_benchmark_report.md) — Adaptação a *Concept Drift* (`HAT` C11 vs River `HAT` com ADWIN2).
+  - [`benchmarks/regression_benchmark_report.md`](../benchmarks/regression_benchmark_report.md) — Regressão Contínua e Drift (`VFDT-R` / `HAT-R` vs River `HTR` / `HATR` vs Scikit-Learn).
+  - [`benchmarks/prep_benchmark_report.md`](../benchmarks/prep_benchmark_report.md) — Micro-pipelines de pré-processamento (`libht_prep`), normalização Z-score SGD e observador de histograma vs River.
+  - [`benchmarks/triple_benchmark_report.md`](../benchmarks/triple_benchmark_report.md) — Benchmark Triplo no dataset MNIST e limites teóricos em dados não-tabulares.
+- **Emulação Hardware-in-the-Loop em ESP32 ([`emulation/esp32/`](../emulation/esp32/esp32_emulation_report.md)):**
+  - [`emulation/esp32/esp32_emulation_report.md`](../emulation/esp32/esp32_emulation_report.md) — Validação em firmware ESP-IDF FreeRTOS sob emulação QEMU Xtensa @ 240 MHz com cronometria de ciclos de clock e comprovação de 0 B de Heap dinâmico.
 
 ---
 
