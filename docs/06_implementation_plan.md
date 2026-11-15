@@ -58,6 +58,9 @@
 | **9.2** | **Fase 9:** Estruturas `ht_ensemble_t`, Subespaços (`feature_map`) e Observador Compartilhado | `code/include/ht_config.h`, `code/include/ht_ensemble.h`, `code/src/ht_ensemble.c`, `code/tests/test_ensemble.c` | **⚠️ Plano Já Disponível:** [`docs/11_embedded_micro_ensembles.md`](file:///home/julio/Documentos/pessoal_minimal-decision-tree/docs/11_embedded_micro_ensembles.md)<br/>**N1:** sorteio determinístico de subespaços $k$ com cobertura global, `leaf_stride` reduzido e `shared_root_obs`<br/>**N2:** `_Static_assert(sizeof(ht_ensemble_t) <= 100 * 1024)` e *Warm-Start* na raiz | `[ ]` | `—` |
 | **9.3** | **Fase 9:** Treino *Leveraging Bagging* ($\text{Poisson}(\lambda)$), Votação Ponderada e Persistência | `code/src/ht_ensemble.c`, `code/Makefile`, `code/tests/test_ensemble.c`, `code/tests/test_e2e_flow.c` | **N1:** gerador $\text{Poisson}(\lambda)$, atualização de $\hat{e}_m$ e votação $1/(\hat{e}_m^2 + \epsilon)$ / Uniforme (Classif + Reg)<br/>**N2:** adaptação com `shared_adwin_pool` e renovação guiada por `feat_importance`<br/>**N3:** fluxo E2E completo (incluindo `-DHT_USE_FIXED_POINT`) e `ht_ensemble_save`/`load` | `[ ]` | `—` |
 | **9.4** | **Fase 9:** Benchmark de Micro-Ensembles nos 8 Datasets (Foco Covertype) e Emulação QEMU | `benchmarks/`, `main_benchmark/`, `emulation/`, `wiki/*.md`, `README.md` | Ganho de Macro F1 no Forest Covertype e $R^2$ nas regressões com SRAM $< 100\text{ KB}$ e zero heap + SemVer `0.6.0` | `[ ]` | `—` |
+| **10.1** | **Fase 10:** Estudo Técnico e Especificação do Welford-Adaptive SGD / AdaGrad Embarcado | [`docs/12_welford_adaptive_sgd.md`](file:///home/julio/Documentos/pessoal_minimal-decision-tree/docs/12_welford_adaptive_sgd.md), [`docs/06_implementation_plan.md`](file:///home/julio/Documentos/pessoal_minimal-decision-tree/docs/06_implementation_plan.md) | Formalização de `ht_sgd_type_t`, extração de $(n_f, \mu_f, \sigma_f^2)$ com **zero bytes extras**, modos Z-Score AdaGrad / Raw Welford-NLMS, Ridge $\ell_2$ desacoplado e clipping $3\hat{\sigma}_y$ | `[x]` | `HEAD` |
+| **10.2** | **Fase 10:** Otimizador `HT_SGD_WELFORD_ADAGRAD` nas Folhas de Regressão (`ht_tree`) | `code/include/ht_tree.h`, `code/src/ht_tree.c`, `code/tests/test_tree.c`, `code/tests/test_e2e_flow.c` | **⚠️ Plano Já Disponível:** [`docs/12_welford_adaptive_sgd.md`](file:///home/julio/Documentos/pessoal_minimal-decision-tree/docs/12_welford_adaptive_sgd.md)<br/>**N1:** `ht_tree_get_feature_moments`, $\eta_{t,f}$ por atributo, clipping $3\hat{\sigma}_y$ e `sizeof(ht_leaf_stats_t) == 1360 B`<br/>**N2:** herança de pesos pós-split e retrocompatibilidade `HT_SGD_STANDARD`<br/>**N3:** E2E multiescala (`float` e `double`) com `NaN` | `[ ]` | `—` |
+| **10.3** | **Fase 10:** Benchmark Experimental em Regressão Contínua e Atualização da Wiki | `benchmarks/`, `main_benchmark/`, `wiki/*.md`, `README.md` | Comparativo `HT_SGD_STANDARD` vs `HT_SGD_WELFORD_ADAGRAD` (*Bikes*, *NYC Taxi*, *Friedman #1*, *Appliances Energy*) + avaliação SemVer | `[ ]` | `—` |
 
 ---
 
@@ -1108,6 +1111,29 @@ flowchart TD
 - **Entrega 9.2 (`[ ]`):** Definição das macros (`HT_ENSEMBLE_MAX_TREES`, `HT_ENSEMBLE_MAX_SUBSPACE`), structs e protótipos em `code/include/ht_ensemble.h`, inicialização determinística de subespaços com cobertura global, `shared_root_obs` e `_Static_assert` $\le 100\text{ KB}$ em `code/tests/test_ensemble.c`.
 - **Entrega 9.3 (`[ ]`):** Implementação do ciclo *Test-Then-Train* com $\text{Poisson}(\lambda)$, votação ponderada $1/(\hat{e}_m^2 + \epsilon)$ para Classificação e Regressão, adaptação com `shared_adwin_pool`, renovação guiada de subespaço e serialização binária `ht_ensemble_save`/`ht_ensemble_load`, integrados ao `test_e2e_flow.c` (inclusive em `Q16.16`).
 - **Entrega 9.4 (`[ ]`):** Avaliação experimental nos 8 datasets do `main_benchmark` (com destaque para Macro F1 no *Forest Covertype* e $R^2$ nas regressões) e emulação QEMU abaixo de $100\text{ KB}$ de SRAM, seguida de avaliação SemVer (`0.6.0`) e sincronização da Wiki.
+
+---
+
+## 11. Fase 10: Taxa de Aprendizado Adaptativa por Atributo (Welford-Adaptive SGD / AdaGrad Embarcado)
+
+> [!IMPORTANT]
+> **Plano Dedicado Já Existente (Leitura Prévia Obrigatória):**
+> A análise do gargalo do SGD escalar atual, a formulação matemática dos modos Z-Score AdaGrad e Raw-Coordinate Welford-NLMS com **zero bytes extras em `ht_leaf_stats_t`**, o desacoplamento da regularização Ridge $\ell_2$, o clipping adaptativo por $3\hat{\sigma}_y$ da folha e a segurança numérica para `Q16.16` **já existem e estão documentados em [`docs/12_welford_adaptive_sgd.md`](file:///home/julio/Documentos/pessoal_minimal-decision-tree/docs/12_welford_adaptive_sgd.md)**. Consulte-o integralmente antes de iniciar qualquer entrega `10.2` ou `10.3`.
+
+### 11.1 Visão Arquitetural e Zero Overhead de Memória
+- **Zero Bytes Extras em RAM:** Em vez de alocar um vetor `grad_sq[HT_MAX_FEATURES]` por folha, os momentos marginais $(n_{f,\text{eff}}, \mu_{f,\text{eff}}, \sigma_{f,\text{eff}}^2)$ são extraídos em $O(1)$ combinando os 5 slots de Chan já presentes na folha (`stats->observers[f].reg_num.slots`) com `tree->feat_stats[f]` via credibilidade $\alpha_f = n_{f,\text{slots}} / (n_{f,\text{slots}} + 10)$, preservando `sizeof(ht_leaf_stats_t) == 1.360 B` (`float32` / `Q16.16`) e `2.720 B` (`double64`).
+- **Seletor `ht_sgd_type_t` em `ht_config_params_t` (`code/include/ht_tree.h`):**
+  - `HT_SGD_STANDARD = 0` *(padrão retrocompatível)*: mantém $\eta = \eta_0 / (1 + \lambda_{\text{reg}} \cdot n)$.
+  - `HT_SGD_WELFORD_ADAGRAD = 1`:
+    - Com `leaf_sgd_normalize == true`: Z-Score AdaGrad com passo individual $\eta_{t,f} = \eta_0 / \sqrt{1 + n_{f,\text{eff}}}$.
+    - Com `leaf_sgd_normalize == false`: Raw-Coordinate Welford-NLMS com inferência direta em coordenadas brutas e passo $\eta_{t,f} = \eta_0 / \big(\sqrt{1 + n_{f,\text{eff}}} \cdot (\sigma_{f,\text{eff}}^2 + \mu_{f,\text{eff}}^2 + 1{,}0)\big)$.
+- **Estabilidade Estrutural:** Regularização Ridge $\ell_2$ desacoplada ($1 - \eta_0 \lambda_{\text{reg}}$) e clipping adaptativo do erro residual $|e_t| \le \max(3\hat{\sigma}_y, 10{,}0)$ usando a variância do alvo em `leaf->reg_stats`, mantendo o *hard-switch* padrão de `HT_LEAF_ADAPTIVE` intacto.
+
+### 11.2 Resumo das Entregas Planejadas (10.1 a 10.3)
+- **Entrega 10.1 (`[x]`):** Estudo técnico completo e formalização matemática em [`docs/12_welford_adaptive_sgd.md`](file:///home/julio/Documentos/pessoal_minimal-decision-tree/docs/12_welford_adaptive_sgd.md).
+- **Entrega 10.2 (`[ ]`):** Adição de `ht_sgd_type_t` em `code/include/ht_tree.h`, implementação de `ht_tree_get_feature_moments` e do otimizador em `code/src/ht_tree.c` e validação em 3 níveis (`code/tests/test_tree.c` e `code/tests/test_e2e_flow.c`).
+- **Entrega 10.3 (`[ ]`):** Benchmark comparativo em regressão contínua (*Bikes*, *NYC Taxi*, *Friedman #1*, *Appliances Energy*), avaliação SemVer e sincronização da Wiki e `README.md`.
+
 
 
 
