@@ -542,10 +542,10 @@ def run_main_suite(
     client: Esp32Client,
     data_dir: str,
     max_samples: Optional[int] = None,
-    window_size: int = 16,
+    window_size: int = 8,
 ) -> List[Dict[str, Any]]:
     """Runs all 8 datasets from main_benchmark sequentially through the emulated ESP32."""
-    # Tier 8 configurations from main_benchmark (Campeões Rank #1)
+    # Tier 8 configurations from main_benchmark (Campeões Rank #1 / Rank #2 Gaussiano)
     datasets = [
         # (d_id, name, task, grace, delta, tau, criterion, leaf, prep_scaler, leaf_normalize)
         ("sea", "SEA", "classification", 100, 0.01, 0.10, "info_gain", "nba", False, False),
@@ -554,7 +554,7 @@ def run_main_suite(
         ("airlines", "Airlines", "classification", 200, 1e-07, 0.10, "info_gain", "nb", True, False),
         ("friedman", "Friedman #1", "regression", 200, 1e-07, 0.01, "variance_reduction", "model", True, False),
         ("bikes", "Bikes", "regression", 50, 0.01, 0.05, "variance_reduction", "mean", True, False),
-        ("appliances_energy", "Appliances Energy", "regression", 200, 0.0001, 0.15, "variance_reduction", "model", False, True),
+        ("appliances_energy", "Appliances Energy", "regression", 100, 1e-07, 0.01, "variance_reduction", "adaptive", False, True),
         ("nyc_taxi", "NYC Taxi", "regression", 100, 0.0001, 0.05, "variance_reduction", "adaptive", True, False),
     ]
 
@@ -721,7 +721,7 @@ def main():
     parser.add_argument("--data-dir", default=None, help="Data directory containing benchmark CSVs")
     parser.add_argument("--report", default=None, help="Path to write output markdown report")
     parser.add_argument("--max-samples", type=int, default=None, help="Max samples per dataset for quick smoke tests")
-    parser.add_argument("--window-size", type=int, default=16, help="Sliding window size for flow control (default: 16)")
+    parser.add_argument("--window-size", type=int, default=8, help="Sliding window size for flow control (default: 8)")
 
     args = parser.parse_args()
 
