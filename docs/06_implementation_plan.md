@@ -68,6 +68,7 @@
 | **11.5** | **Fase 11:** Modo 1 — Floresta Federada (`ht_fed_proto` & `ht_fed_forest`) | `code/include/federated/ht_fed_proto.h`, `code/src/federated/ht_fed_proto.c`, `code/include/federated/ht_fed_forest.h`, `code/src/federated/ht_fed_forest.c`, `code/tests/federated/test_fed_forest.c` | **N1:** framing `HFED` + CRC32 + políticas `ALL`/`TOP_M`/`ROUND_ROBIN` + `exclude_self`<br/>**N2/N3:** ganho Non-IID, regressão e adaptação a drift (HAT local + votação ponderada) com cliente de `21,03 KB` SRAM | `[x]` | `5b097de` |
 | **11.6** | **Fase 11:** Modo 2 — `Fed-VFDT` Global (`Coordinated Splitting` & `Stats-Merge`) | `code/include/federated/ht_fed_vfdt.h`, `code/src/federated/ht_fed_vfdt.c`, `code/tests/federated/test_fed_vfdt.c`, `code/tests/test_main.c` | **N1/N2:** consenso `QUORUM`/`MAJORITY`/`MERIT` e fusão exata `STATS_MERGE` (Classif + Reg) mantendo topologia 100% idêntica<br/>**N3:** recuperação de *stragglers* via `split_log` e `FULL_SNAPSHOT` + reset coordenado por drift | `[x]` | `7612cf6` |
 | **11.7** | **Fase 11:** Simulador Multi-Cliente e Benchmark Federado (`fed_simulator.c`) | `benchmarks/fed_simulator.c`, `code/Makefile`, `Makefile` | Comparativo C11 puro (**Local-Only vs Centralized vs Fed-Forest vs Fed-VFDT Coordinated vs Fed-VFDT Stats-Merge**) em IID, Non-IID, Regressão e Drift medindo Acurácia/RMSE, Bytes Transmitidos e SRAM | `[x]` | `c59cb2b` |
+| **11.8** | **Fase 11:** Auditoria e Alinhamento Estrito ao Paper/Código Oficial **Fed-VFDT** (ICTAI 2025) | `docs/13_federated_learning.md`, `code/include/federated/ht_fed_vfdt.h`, `code/src/federated/ht_fed_vfdt.c`, `code/tests/federated/test_fed_vfdt.c` | Auditoria linha-a-linha contra `paularaissa/project-vfdt`, alinhamento de `QUORUM` por atributo, `BEST-MERIT` (`max(G_k)` + `WEIGHTED_MERIT`), `MAJORITY` (pluralidade), `HT_FED_THRESH_MAX_MERIT`/`WEIGHTED_MEAN`, `require_locally_ready` e `max_splits_per_round` (`134/134` testes em `float32`/`double64`) | `[x]` | `a976b13` |
 
 ---
 
@@ -1163,6 +1164,7 @@ flowchart TD
 - **Entrega 11.5 (`[x]` — `5b097de`):** Protocolo `ht_fed_proto` (framing + CRC32) e Modo 1 `ht_fed_forest` (cliente + servidor) com testes em 3 níveis (`test_fed_forest.c`).
 - **Entrega 11.6 (`[x]` — `7612cf6`):** Modo 2 `ht_fed_vfdt` (`COORDINATED` + `STATS_MERGE` + *stragglers* + drift reset) com testes em 3 níveis (`test_fed_vfdt.c`).
 - **Entrega 11.7 (`[x]` — `c59cb2b`):** Simulador multi-cliente C11 (`benchmarks/fed_simulator.c`) e target `make bench-federated`.
+- **Entrega 11.8 (`[x]` — `a976b13`):** Auditoria formal contra o paper/código oficial Fed-VFDT (`paularaissa/project-vfdt`, IEEE ICTAI 2025) e alinhamento estrito das regras de consenso, threshold e filtro `require_locally_ready`.
 
 
 
