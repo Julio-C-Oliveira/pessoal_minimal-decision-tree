@@ -185,6 +185,9 @@ int main(void) {
     /* Nível 1 & 2: Fundação Compartilhada de Ensembles (ht_compact_tree & ht_voting) */
     test_compact_tree_run();
 
+    /* Nível 1, 2 & 3: Aprendizado Federado Modo 1 (Fed-Forest) */
+    test_fed_forest_run();
+
     /* Nível 3: Fluxo Ponta a Ponta Acumulado */
     test_e2e_flow_run();
 
