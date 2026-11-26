@@ -207,22 +207,22 @@ A suíte reproduzível `make bench-main-federated` (`main_benchmark/federated_be
 
 ### 8.1 Síntese sob Non-IID (`Dirichlet α=0.3`)
 
-| Dataset | Tarefa | Local-Only | Melhor Fed-Forest | Melhor Fed-VFDT (Coord.) | Fed-VFDT (`Stats-Merge`) | Central Oracle (T8) | Pico SRAM Cliente |
-| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
-| **SEA** | Classif. | 76.41% | 95.06% (`TOP_M`) | 93.68% (`MAJ`/`MERIT`) | **96.78%** | 99.02% | 13.12 KB |
-| **Electricity** | Classif. | 50.65% | 54.78% (`TOP_M`) | 57.61% (`QUORUM`) | **60.37%** | 64.37% | 16.38 KB |
-| **Forest Covertype** (54 feat, 7 cls) | Classif. | 30.91% | 25.83% (`RR`) | 35.00% (`MERIT`) | **65.52%** | 67.28% | **77.01 KB** |
-| **Airlines** | Classif. | 49.60% | **76.39%** (`TOP_M`) | 56.78% (`MAJ`/`MERIT`) | 61.43% | 76.09% | 15.89 KB |
-| **Friedman #1** | Regr. (MAE) | 2.8288 | 2.8813 (`TOP_M`) | **2.4963** (`QUORUM`) | 2.7318 | 2.1537 | 32.11 KB |
-| **Bikes** | Regr. (MAE) | 61.6123 | **41.7974** (`RR`) | 73.6779 (`MAJ`) | 46.6150 | 40.4648 | 60.29 KB |
-| **Appliances Energy** (28 feat) | Regr. (MAE) | 78.5876 | **35.4504** (`TOP_M`) | 59.1440 (`MAJ`) | 50.5366 | 29.7630 | 41.15 KB |
-| **NYC Taxi** | Regr. (MAE) | 397.0585 | **351.5022** (`RR`) | 381.5276 (`QUORUM`) | 372.1993 | 339.2442 | 18.81 KB |
+| Dataset | Tarefa | Local-Only | Melhor Fed-Forest | Melhor Fed-VFDT (Coord.) | Fed-VFDT (`Stats-Merge`) | Central Oracle (T8) | RAM Cli Venc. (Mod + Com) | RAM Srv Venc. (Mod + Com) |
+| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **SEA** | Classif. | 76.41% | 95.06% (`TOP_M`) | 93.68% (`MAJ`/`MERIT`) | **96.78%** | 99.02% | 6.7 + 2.2 = 8.8 KB | 6.7 + 12.0 = 18.6 KB |
+| **Electricity** | Classif. | 50.65% | 54.78% (`TOP_M`) | 57.61% (`QUORUM`) | **60.37%** | 64.37% | 9.8 + 5.3 = 15.1 KB | 9.8 + 15.1 = 24.9 KB |
+| **Forest Covertype** (54 feat, 7 cls) | Classif. | 30.91% | 25.83% (`RR`) | 35.00% (`MERIT`) | **65.52%** | 67.28% | **65.5 + 59.5 = 125.0 KB** | **65.5 + 75.6 = 141.2 KB** |
+| **Airlines** | Classif. | 49.60% | **76.39%** (`TOP_M`) | 56.78% (`MAJ`/`MERIT`) | 61.43% | 76.09% | 15.8 + 0.9 = 16.7 KB | 20.8 + 1.1 = 21.9 KB |
+| **Friedman #1** | Regr. (MAE) | 2.8288 | 2.8813 (`TOP_M`) | **2.4963** (`QUORUM`) | 2.7318 | 2.1537 | 25.5 + 0.2 = 25.7 KB | 25.2 + 10.0 = 35.3 KB |
+| **Bikes** | Regr. (MAE) | 61.6123 | **41.7974** (`RR`) | 73.6779 (`MAJ`) | 46.6150 | 40.4648 | 60.2 + 3.1 = 63.3 KB | 21.2 + 3.3 = 24.5 KB |
+| **Appliances Energy** (28 feat) | Regr. (MAE) | 78.5876 | **35.4504** (`TOP_M`) | 59.1440 (`MAJ`) | 50.5366 | 29.7630 | 41.1 + 4.7 = 45.8 KB | 22.4 + 4.9 = 27.3 KB |
+| **NYC Taxi** | Regr. (MAE) | 397.0585 | **351.5022** (`RR`) | 381.5276 (`QUORUM`) | 372.1993 | 339.2442 | 18.8 + 3.8 = 22.6 KB | 20.8 + 4.1 = 24.9 KB |
 
-### 8.2 Complementaridade Comprovada entre os Dois Modos
-- **Orçamento Embarcado Comprovado ($\le 100\text{ KB}$):** Mesmo no cenário mais pesado (*Forest Covertype* com 54 features e 7 classes), a SRAM estática por cliente ficou em **77.01 KB** (`Fed-Forest`, $M=5$) e **65.56 KB** (`Fed-VFDT`).
+### 8.2 Complementaridade Comprovada entre os Dois Modos (Acurácia × RAM Modelo + Comunicação)
+- **Orçamento de RAM Decomposto (Modelo vs. Comunicação):** Isolando apenas o **modelo estático**, o pico no cliente no *Forest Covertype* (54 features, 7 classes) é de **76.95 KB** (`Fed-Forest`, $M=5$) e **65.55 KB** (`Fed-VFDT`). Ao somar o **buffer half-duplex de comunicação (`wire_buf`) + coordenação**, **`Fed-VFDT Coordenado`** (**66.25 KB** cliente / **82.38 KB** servidor) e **`Fed-Forest`** (**81.00 KB** cliente / **40.76 KB** servidor para 16 árvores) permanecem folgadamente abaixo de **100 KB**; já **`Fed-VFDT (STATS-MERGE)`** demanda até **59.48 KB** de buffer TX no *Covertype* (**125.04 KB** total cliente / **141.16 KB** servidor, com stack pico de **7.61 KB** no servidor) e **48.68 KB** no *Bikes* (**102.30 KB** cliente).
 - **Classificação Multi-Classe Non-IID Severo → `Fed-VFDT (STATS-MERGE)`:** No *Forest Covertype* (7 classes fortemente enviesadas por cliente), o `Stats-Merge` saltou de **30.91% (F1 17.52%)** no `Local-Only` para **65.52% (F1 63.04%)** — a apenas 1.76 pp do Oráculo Centralizado (67.28%).
-- **Regressão Contínua Non-IID → `Fed-Forest`:** Dominou 3 dos 4 datasets de regressão (*Bikes* -32.2% MAE, *Appliances Energy* -54.9% MAE, *NYC Taxi* -11.5% MAE), beneficiando-se da redução de variância e cancelamento de viés ao combinar árvores especialistas compactas ($M=5$).
-- **Links de Banda Ultrabaixa (LPWAN/LoRa/BLE) → `Fed-VFDT Coordenado`:** Opera entre **114 e 564 bytes/cliente/rodada** (até $90\times$ menos tráfego que `Stats-Merge`), confirmando também empiricamente a necessidade da estratégia `MAJORITY` (pluralidade) e `BEST-MERIT` em alta dimensionalidade (*Covertype* 54 features, onde `QUORUM` estrito por atributo atingiu 0 splits sob `min_quorum=3`).
+- **Regressão Contínua Non-IID → `Fed-Forest`:** Dominou 3 dos 4 datasets de regressão (*Bikes* -32.2% MAE, *Appliances Energy* -54.9% MAE, *NYC Taxi* -11.5% MAE), beneficiando-se da redução de variância e cancelamento de viés ao combinar árvores especialistas compactas ($M=5$) e exigindo um servidor muito mais leve (**22.05–40.76 KB** totais).
+- **Links de Banda Ultrabaixa (LPWAN/LoRa/BLE) → `Fed-VFDT Coordenado`:** Opera entre **114 e 564 bytes/cliente/rodada** (buffer TX/RX **< 1 KB** observado, até $90\times$ menos tráfego que `Stats-Merge`), confirmando também empiricamente a necessidade da estratégia `MAJORITY` (pluralidade) e `BEST-MERIT` em alta dimensionalidade (*Covertype* 54 features, onde `QUORUM` estrito por atributo atingiu 0 splits sob `min_quorum=3`).
 
 ---
 
