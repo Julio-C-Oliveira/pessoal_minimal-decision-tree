@@ -3,7 +3,7 @@ name: version-upgrade
 description: >-
   Use this skill whenever evaluating version upgrade eligibility after commits,
   presenting justifications for user approval, and atomically updating VERSION,
-  code/include/ht_config.h, code/tests/test_main.c, and the Wiki release notes.
+  code/include/core/ht_config.h, code/tests/test_main.c, and the Wiki release notes.
 ---
 
 # Semantic Versioning Upgrade Skill (`version-upgrade`)
@@ -11,7 +11,7 @@ description: >-
 No projeto **kansho**, o versionamento segue estritamente o padrão [Semantic Versioning 2.0.0](https://semver.org/lang/pt-BR/) (`MAJOR.MINOR.PATCH`). Como uma biblioteca em C11 para sistemas embarcados sem dependência de gerenciadores como o `pip` ou `cargo`, a versão canônica reside em **três pontos de contato obrigatórios** mantidos em perfeita sincronia:
 
 1. **[`VERSION`](../../../VERSION):** Arquivo de texto simples na raiz do repositório, lido por regras de build (`Makefile`, `code/Makefile`), scripts de empacotamento e suítes de benchmark em Python.
-2. **[`code/include/ht_config.h`](../../../code/include/ht_config.h):** Símbolos do pré-processador (`HT_VERSION_MAJOR`, `HT_VERSION_MINOR`, `HT_VERSION_PATCH`, `HT_VERSION_STRING`, `HT_VERSION_CHECK`), garantindo checagens de compatibilidade em tempo de compilação com zero overhead de RAM/Flash.
+2. **[`code/include/core/ht_config.h`](../../../code/include/core/ht_config.h):** Símbolos do pré-processador (`HT_VERSION_MAJOR`, `HT_VERSION_MINOR`, `HT_VERSION_PATCH`, `HT_VERSION_STRING`, `HT_VERSION_CHECK`), garantindo checagens de compatibilidade em tempo de compilação com zero overhead de RAM/Flash.
 3. **[`code/tests/test_main.c`](../../../code/tests/test_main.c):** Asserções unitárias que validam as macros, a função de runtime `ht_version()` e a macro `HT_VERSION_CHECK`.
 
 ---
@@ -75,7 +75,7 @@ python3 .agents/skills/version-upgrade/scripts/bump_version.py apply <patch|mino
 
 O modo `apply` realiza as seguintes etapas de forma determinística:
 1. Valida que a árvore de trabalho está limpa (`git status --porcelain`).
-2. Atualiza sincronizadamente `VERSION`, `code/include/ht_config.h` e `code/tests/test_main.c`.
+2. Atualiza sincronizadamente `VERSION`, `code/include/core/ht_config.h` e `code/tests/test_main.c`.
 3. Executa o **Gate de Testes Obrigatório**:
    - `make clean && make test` (precisão simples `float`)
    - `make clean && make test CFLAGS_EXTRA="-DHT_USE_DOUBLE"` (precisão dupla `double`)

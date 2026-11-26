@@ -53,15 +53,18 @@ Nenhuma parte ou módulo em `src/` é considerado concluído sem que seus testes
 
 ### Arquitetura Modular da Suíte em `code/tests/`
 
-A pasta `code/tests/` deve ser organizada de forma modular, com um cabeçalho de asserções e arquivos dedicados por camada orquestrados por `test_main.c`:
+A pasta `code/tests/` é organizada de forma modular (espelhando `core/`, `ensemble/` e `federated/` de `include/` e `src/`), com um cabeçalho de asserções e arquivos dedicados por camada orquestrados por `test_main.c`:
 
 - `code/tests/test_harness.h`: Macros leves de asserção sem dependências externas (`HT_ASSERT(cond)`, `HT_ASSERT_EQ(a, b)`, `HT_ASSERT_FLOAT_EQ(a, b)` com tolerância adaptativa `1e-5f` para `float` e `1e-12` para `double`) e contadores de testes executados/aprovados.
-- `code/tests/test_memory.c`: Testes unitários, de stress e reciclagem do `ht_memory`.
-- `code/tests/test_observer.c`: Testes das funções de atualização e busca de split em `ht_observer` (Gaussiano de Welford e Categórico).
-- `code/tests/test_criterion.c`: Testes de Gini, Info Gain, Hoeffding Bound e integração com observadores.
-- `code/tests/test_tree.c`: Testes de roteamento, folhas (MC, NB, NBA), ciclo `learn_one`, splits, desativação de folhas e serialização.
-- `code/tests/test_drift.c`: Testes de ADWIN com pool de buckets fixos e subárvores alternativas da HAT.
-- `code/tests/test_e2e_flow.c`: Testes do **fluxo total acumulado** (pipeline ponta a ponta integrando todos os módulos implementados até o momento).
+- `code/tests/core/test_memory.c`: Testes unitários, de stress e reciclagem do `ht_memory`.
+- `code/tests/core/test_observer.c`: Testes das funções de atualização, merge e busca de split em `ht_observer` (Gaussiano de Welford, Histograma e Categórico).
+- `code/tests/core/test_criterion.c`: Testes de Gini, Info Gain, Reduction of Variance, Hoeffding Bound e integração com observadores.
+- `code/tests/core/test_tree.c`: Testes de roteamento, folhas (MC, NB, NBA, Mean/Model/Adaptive), ciclo `learn_one`, splits, desativação de folhas e serialização.
+- `code/tests/core/test_drift.c`: Testes de ADWIN com pool de buckets fixos e subárvores alternativas da HAT.
+- `code/tests/core/test_prep.c`: Testes dos micro-pipelines de pré-processamento (`libht_prep`).
+- `code/tests/core/test_e2e_flow.c`: Testes do **fluxo total acumulado** (pipeline ponta a ponta integrando todos os módulos implementados até o momento).
+- `code/tests/ensemble/test_compact_tree.c`: Testes de compactação BFS somente-inferência (`ht_compact_tree`) e motor de votação compartilhado (`ht_voting`).
+- `code/tests/federated/test_fed_forest.c` e `code/tests/federated/test_fed_vfdt.c`: Testes em 3 níveis do protocolo `HFED` com CRC32, Modo 1 `Fed-Forest` e Modo 2 `Fed-VFDT` (`COORDINATED` + `STATS_MERGE` + catch-up de *stragglers*).
 - `code/tests/test_main.c`: Ponto de entrada único que executa sequencialmente todas as suítes de nível 1, 2 e 3 disponíveis e retorna código `0` apenas se 100% passarem.
 
 ### Os 3 Níveis Obrigatórios de Teste a Cada Entrega
@@ -84,7 +87,7 @@ Sempre que implementar uma nova parte, escreva testes cobrindo obrigatoriamente:
      - **Após `ht_tree` / `ht_drift`:** Integração entre roteamento iterativo, predição nas folhas (MC/NB/NBA), execução de split com devolução imediata do `ht_leaf_stats_t` ao `stats_pool` e rotina VFDT de desativação de folhas menos promissoras ($p_l \cdot e_l$).
 
 3. **Nível 3 — Teste de Fluxo Total / Ponta a Ponta Acumulado (Macro / E2E):**
-   - Ao final de cada entrega, atualize e execute `tests/test_e2e_flow.c` para exercitar o **fluxo completo do sistema disponível até aquele momento**:
+   - Ao final de cada entrega, atualize e execute `tests/core/test_e2e_flow.c` para exercitar o **fluxo completo do sistema disponível até aquele momento**:
      - Enquanto os módulos de base estão sendo criados, o fluxo E2E simula o pipeline completo de dados desde a entrada `ht_value_t[]` até a decisão de split e reciclagem de memória.
      - Assim que `ht_tree` (e posteriormente `ht_drift`) estiverem implementados, o teste de fluxo total deve rodar um mini-stream sintético determinístico ponta a ponta validando:
        1. Inicialização 100% estática (`ht_init`) sem chamadas ao heap.

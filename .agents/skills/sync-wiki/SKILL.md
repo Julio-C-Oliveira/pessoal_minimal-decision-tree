@@ -43,7 +43,7 @@ python3 .agents/skills/sync-wiki/scripts/sync_wiki.py --dry-run
 ### O que o Script Realiza Automaticamente:
 1. **Clonagem Dinâmica:** Clona ou atualiza o repositório `pessoal_minimal-decision-tree.wiki.git` em diretório temporário (`/tmp/mdt-wiki`).
 2. **Tradução Inteligente de Links:**
-   - **Links para Arquivos Externos (`../`):** Transforma referências relativas do repositório local (ex: `../VERSION`, `../code/include/ht_tree.h`, `../docs/01_...`) em URLs canônicas completas (`https://github.com/Julio-C-Oliveira/pessoal_minimal-decision-tree/blob/main/...`), garantindo que funcionem na interface web da Wiki.
+   - **Links para Arquivos Externos (`../`):** Transforma referências relativas do repositório local (ex: `../VERSION`, `../code/include/core/ht_tree.h`, `../docs/01_...`) em URLs canônicas completas (`https://github.com/Julio-C-Oliveira/pessoal_minimal-decision-tree/blob/main/...`), garantindo que funcionem na interface web da Wiki.
    - **Links Internos da Wiki:** Converte referências entre páginas `[Texto](Pagina.md)` para a sintaxe limpa nativa do GitHub Wiki `[Texto](Pagina)`.
 3. **Verificação de Idempotência:** Inspeciona `git status --porcelain`. Se nenhuma alteração for detectada, não cria commits vazios.
 4. **Commit & Push Atômico:** Adiciona as mudanças, comita com a mensagem especificada e envia via `git push origin master`.
