@@ -182,6 +182,9 @@ int main(void) {
     /* Nível 1 & 2: Micro-Pipelines de Pré-Processamento (libht_prep) */
     test_prep_run();
 
+    /* Nível 1 & 2: Fundação Compartilhada de Ensembles (ht_compact_tree & ht_voting) */
+    test_compact_tree_run();
+
     /* Nível 3: Fluxo Ponta a Ponta Acumulado */
     test_e2e_flow_run();
 
