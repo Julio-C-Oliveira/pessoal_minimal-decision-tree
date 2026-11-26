@@ -6,7 +6,7 @@ Esta página documenta todos os hiperparâmetros configuráveis em tempo de exec
 
 ## 1. Parâmetros de Configuração em Runtime (`ht_config_params_t`)
 
-Todos os campos abaixo pertencem à struct [`ht_config_params_t`](../code/include/ht_tree.h) e são inicializados automaticamente pelas funções `ht_default_params()`, `ht_default_hat_params()`, `ht_default_reg_params()` ou `ht_default_hat_reg_params()`:
+Todos os campos abaixo pertencem à struct [`ht_config_params_t`](../code/include/core/ht_tree.h) e são inicializados automaticamente pelas funções `ht_default_params()`, `ht_default_hat_params()`, `ht_default_reg_params()` ou `ht_default_hat_reg_params()`:
 
 | Parâmetro (`ht_config_params_t`) | Tipo | Padrão (VFDT / HAT) | Padrão (VFDT-R / HAT-R) | Descrição e Efeito no Modelo |
 | :--- | :--- | :---: | :---: | :--- |
@@ -33,12 +33,14 @@ Todos os campos abaixo pertencem à struct [`ht_config_params_t`](../code/includ
 | `l2_regularization` ($\lambda$) | `ht_float_t` | `1e-4` | `1e-4` | *(Regressão `MODEL` / `ADAPTIVE`)* Penalidade de regularização L2 e fator de decaimento da taxa de aprendizado ($\eta_t = \eta_0 / (1 + \lambda n)$). |
 | `model_selector_decay` ($\alpha$) | `ht_float_t` | `0.95` | `0.95` | *(Regressão `ADAPTIVE`)* Fator de esquecimento exponencial do erro quadrático médio ponderado (*Faded MSE*: $\text{fmse}_t = \alpha \cdot \text{fmse}_{t-1} + e_t^2$). |
 | `min_samples_split` | `ht_float_t` | `5.0` | `5.0` | *(Regressão)* Peso mínimo de amostras exigido em cada ramo filho (esquerdo e direito) para validar um candidato de split de regressão. |
+| `numeric_obs_type` | `ht_numeric_obs_type_t` | `HT_OBS_GAUSSIAN` | `HT_OBS_GAUSSIAN` | *(Classificação)* Estratégia de observador numérico: `HT_OBS_GAUSSIAN` (Welford por classe) ou `HT_OBS_HISTOGRAM` (histograma dinâmico não-paramétrico Ben-Haim & Tom-Tov de 4 bins em 80 B). |
+| `leaf_sgd_normalize` | `bool` | `false` | `false` | *(Regressão `MODEL` / `ADAPTIVE`)* Ativa normalização Z-score online híbrida nas folhas SGD (fusão com credibilidade $\kappa = 10$ entre slots da folha e prior global da árvore). |
 
 ---
 
 ## 2. Parâmetros do Detector ADWIN (`ht_adwin_config_t`)
 
-O detector [`ht_adwin_t`](../code/include/ht_drift.h) também pode ser usado de forma independente (*standalone*) para monitorar qualquer fluxo de dados numéricos ou taxas de erro:
+O detector [`ht_adwin_t`](../code/include/core/ht_drift.h) também pode ser usado de forma independente (*standalone*) para monitorar qualquer fluxo de dados numéricos ou taxas de erro:
 
 | Parâmetro (`ht_adwin_config_t`) | Tipo | Valor Padrão | Significado |
 | :--- | :--- | :---: | :--- |
@@ -52,7 +54,7 @@ O detector [`ht_adwin_t`](../code/include/ht_drift.h) também pode ser usado de 
 
 ## 3. Macros de Compilação para Dimensionamento de RAM (`ht_config.h`)
 
-Como a biblioteca **não utiliza alocação dinâmica (`malloc`/`free`)**, todo o espaço de memória da árvore (`ht_tree_t`) é definido estaticamente em tempo de compilação através das macros em [`code/include/ht_config.h`](../code/include/ht_config.h).
+Como a biblioteca **não utiliza alocação dinâmica (`malloc`/`free`)**, todo o espaço de memória da árvore (`ht_tree_t`) é definido estaticamente em tempo de compilação através das macros em [`code/include/core/ht_config.h`](../code/include/core/ht_config.h).
 
 Você pode sobrescrever qualquer uma dessas macros diretamente no comando do compilador usando a flag `-D<MACRO>=<VALOR>` (ou via `make CFLAGS_EXTRA="-D..."`) sem precisar editar os arquivos `.h` do código-fonte.
 
@@ -73,6 +75,17 @@ Você pode sobrescrever qualquer uma dessas macros diretamente no comando do com
 | **`HT_MAX_ADWIN_DETECTORS`** | `128` | Capacidade de detectores de mudança de conceito no `ht_adwin_pool_t` (usado apenas quando `enable_hat = true`). | Cada detector ADWIN ocupa **$764\text{ B}$** em `float32`. Se você **não usa HAT/Drift** (`enable_hat = false`), nem precisa instanciar `ht_adwin_pool_t` no seu código (`tree.adwin_pool = NULL`), economizando 100% dessa memória! Se usar HAT em MCU pequeno, reduza para `16` ou `32`. |
 | **`HT_ADWIN_MAX_BUCKETS`** | `5` | Máximo de buckets ($M$) de capacidade $2^k$ por nível antes de comprimir os 2 mais antigos no nível $k+1$. | Controla o compromisso entre resolução temporal e memória dentro do detector ADWIN ($M=5$ é o padrão clássico de Bifet & Gavaldà). Reduzir para `3` ou `4` economiza RAM dentro de cada detector ADWIN. |
 | **`HT_ADWIN_LEVELS`** | `14` | Quantidade de níveis logarítmicos do histograma exponencial de cada detector ADWIN. | Com `14` níveis e $M=5$, cada detector cobre janelas históricas de até $5 \times (2^{14}-1) = 81.915$ amostras sem perda. Reduzir para `10` ($5.115$ amostras) economiza $208\text{ B}$ por detector ADWIN ($764\text{ B} \to 556\text{ B}$ em `float32`). |
+| **`HT_HIST_MAX_BINS`** | `4` | Quantidade de bins dinâmicos no observador de histograma Ben-Haim (`ht_hist_obs_t`). | Cabe exatamente nos $80\text{ B}$ compartilhados em `union ht_feature_obs_t` ($4 \times 20\text{ B}$ em `float32`). Alterar impacta `sizeof(ht_feature_obs_t)` se exceder o tamanho da Gaussiana. |
+| **`HT_HAMPEL_WINDOW_SIZE`** | `7` | Tamanho ímpar da janela deslizante circular do filtro mediano de Hampel (`libht_prep`). | Controla quantas amostras históricas compõem mediana e MAD por atributo (`HT_MAX_FEATURES`), com ordenação em stack zero-malloc. |
+| **`HT_PREP_MAX_CENTROIDS`** | `16` | Capacidade de centróides do quantizador streaming `ht_quantizer_t` em `libht_prep`. | Define a resolução da CDF trapezoidal empírica para discretização/transformação uniforme em `ht_prep_pipeline_t`. |
+| **`HT_PREP_MAX_CAT_SLOTS`** | `16` | Capacidade máxima da tabela *Space-Saving* em `ht_encoder_freq_t` (`libht_prep`). | Controla o limite máximo de erro $\le N_{\text{total}}/K$ no rastreamento *Heavy Hitters* de variáveis categóricas de alta cardinalidade. |
+| **`HT_COMPACT_MAX_NODES`** | `128` | Capacidade de nós em cada árvore BFS compactada (`ht_compact_tree_t`, módulo `ensemble/`). | Em `float32`, ocupa `2.656 B` para `128` nós ou `1.376 B` ($\approx 1{,}34\text{ KB}$) quando reduzida para `-DHT_COMPACT_MAX_NODES=64`. |
+| **`HT_FED_FOREST_MAX_TREES`** | `8` | Máximo $M$ de árvores pares armazenadas simultaneamente em cada cliente `Fed-Forest`. | Escala diretamente a SRAM do cliente `Fed-Forest` (`M * sizeof(ht_compact_tree_t)`). Reduzir (ex: `=5`) garante $\le 78\text{ KB}$ até em MCUs no Covertype. |
+| **`HT_FED_SERVER_MAX_TREES`** | `16` | Capacidade máxima de registros de árvores de clientes mantida no servidor `Fed-Forest`. | Deve ser $\ge K$ clientes simultâneos na federação para evitar sobrescrita de entradas na tabela do servidor. |
+| **`HT_FED_MAX_CLIENTS`** | `16` | Limite estático de clientes rastreados para votação de reset por drift no servidor `Fed-VFDT`. | Dimensiona os arrays `drift_vote_nodes[]` e `drift_vote_counts[]` em `ht_fed_vfdt_server_t`. |
+| **`HT_FED_MAX_PROPOSALS`** | `16` | Máximo de propostas de split por cliente em cada mensagem uplink do modo `Fed-VFDT` Coordenado. | Limita o payload máximo de propostas emitidas em uma única rodada pelo cliente. |
+| **`HT_FED_SPLIT_LOG_CAP`** | `64` | Capacidade do buffer circular de comandos de topologia (`split_log`) no servidor `Fed-VFDT`. | Define quantos splits/resets passados podem ser recuperados incrementalmente via `SPLIT_BROADCAST` antes de exigir `FULL_SNAPSHOT`. |
+| **`HT_FED_SERVER_MAX_PROPOSALS`** *(em `ht_fed_vfdt.h`)* | `64` | Capacidade de propostas acumuladas por rodada no servidor `Fed-VFDT` (`HT_FED_VFDT_COORDINATED`). | Permite elevar para $\sum K$ folhas ativas (ex: `-DHT_FED_SERVER_MAX_PROPOSALS=128`) em federações densas. |
 
 ---
 

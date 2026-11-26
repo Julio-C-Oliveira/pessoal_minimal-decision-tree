@@ -34,9 +34,9 @@ $$\epsilon = \sqrt{\frac{R^2 \ln(1/\delta)}{2n}}$$
 4. **Representação de Atributos ($O(1)$ por Atributo):**
    - **Numéricos (Classificação):**
      - *Paramétrico Gaussiano (`HT_OBS_GAUSSIAN`):* Aproximação incremental via **Algoritmo de Welford** (`count`, `mean`, `M2`, `min`, `max` por classe), avaliando 10 pontos candidatos entre `min` e `max` no split.
-     - *Não-Paramétrico de Histograma (`HT_OBS_HISTOGRAM`, v0.2.0):* Baseado em **Ben-Haim & Tom-Tov**, mantém até 8 centróides dinâmicos que se fundem deterministicamente quando cheios, estimando probabilidades via interpolação trapezoidal. Compartilha exatamente os mesmos $80\text{ B}$ (em `float32`) via `union ht_feature_obs_t`.
+     - *Não-Paramétrico de Histograma (`HT_OBS_HISTOGRAM`, v0.2.0):* Baseado em **Ben-Haim & Tom-Tov**, mantém até `HT_HIST_MAX_BINS` ($4$) bins dinâmicos que se fundem deterministicamente quando cheios, estimando probabilidades via interpolação trapezoidal. Compartilha exatamente os mesmos $80\text{ B}$ (em `float32`) via `union ht_feature_obs_t`.
    - **Numéricos (Regressão):** Quantização dinâmica em **5 slots ordenados** combinados via **Fórmulas Paralelas de Chan** (`ht_var_combine` / `ht_var_subtract`), ocupando exatamente os mesmos $80\text{ B}$ em `float32`.
-   - **Categóricos Nominais:** Tabela de frequência ou estatísticas de variância limitada pela cardinalidade máxima configurada (`HT_MAX_CATEGORIES`).
+   - **Categóricos Nominais:** Tabela de frequência ou estatísticas de variância limitada pela cardinalidade máxima configurada (`HT_MAX_CATEGORIES`, padrão `5`).
 
 5. **Polimorfismo Híbrido (Inspirado em `sklearn/tree` + Data-Oriented Design):**
    - **Nível da Árvore:** Polimorfismo via *function pointers* (`ht_criterion_vtable_t`) para o critério de impureza, já que há apenas 1 instância por árvore.
@@ -49,21 +49,21 @@ $$\epsilon = \sqrt{\frac{R^2 \ln(1/\delta)}{2n}}$$
 7. **Gerenciamento de Memória Determinístico e Indexação Livre de Ponteiros (`uint16_t`):**
    - **Índices em vez de Ponteiros:** Inspirado no `sklearn/tree/_tree.pxd`, todas as referências entre nós (`left_child`, `right_child`, `stats_idx`) usam índices inteiros (`uint16_t`, com `HT_INVALID_IDX = 0xFFFF`) em arrays contíguos. Isso economiza RAM em arquiteturas 32/64-bit e torna a estrutura **100% relocável para serialização binária direta**.
    - **Separação entre Topologia e Estado de Aprendizado:**
-     - `ht_node_t` (**Nó da Árvore - Leve**): Guarda apenas índices dos filhos (`left`, `right`), índice do estado (`stats_idx`), condição de split (`feature_idx`, `threshold`/`cat_val`) e contadores de classe (`class_counts`) ou variância do alvo (`reg_stats`).
-     - `ht_leaf_stats_t` (**Estado de Aprendizado da Folha - Pesado**): Guarda os observadores de atributos, acumuladores do NBA / fMSE e pesos lineares do SGD.
-   - **Slab / Pool Allocator Estático:** Dois pools de blocos de tamanho fixo (`node_pool` e `stats_pool` com *free-list* em $O(1)$) dentro do buffer de RAM de $\le 1\text{ MB}$:
-     - Quando uma folha faz um split, ela vira um nó interno e **devolve imediatamente seu `ht_leaf_stats_t` para o `stats_pool`**.
+     - `ht_node_t` (**Nó da Árvore - Leve**): Guarda apenas índices dos filhos (`left`, `right`), índice do estado (`stats_idx`), condição de split (`feature_idx`, `threshold`/`cat_val`) e contadores de classe (`class_counts`) ou variância do alvo (`reg_stats`) em `union` assimétrica de apenas **$20\text{ B}$**.
+     - `ht_leaf_stats_t` (**Estado de Aprendizado da Folha - Pesado**): Guarda os observadores de atributos, acumuladores do NBA / fMSE e pesos lineares do SGD (suportando também *Dynamic Feature Stride* via `ht_memory_init_stride`).
+   - **Slab / Pool Allocator Estático:** Dois pools de blocos de tamanho fixo (`node_pool` e `stats_storage` com *free-list* intrusiva em $O(1)$ e 0 B de overhead) dentro do buffer de RAM de $\le 1\text{ MB}$:
+     - Quando uma folha faz um split, ela vira um nó interno e **devolve imediatamente seu `stats_idx` para a free-list**.
      - **Desativação de Folhas (VFDT Memory Management):** Quando o `stats_pool` atinge o limite, as folhas menos promissoras são **desativadas** — liberando seu `ht_leaf_stats_t` de volta ao pool, mas mantendo `class_counts` / `reg_stats` no `ht_node_t` para continuar fazendo predições.
 
 ---
 
 ## 3. Visão Geral da Arquitetura de Memória e Estruturas (`ht_tree_t`)
 
-O design separa estritamente a **topologia permanente** da árvore (`ht_node_t`, $28\text{ B}$ em `float32`) do **estado pesado de aprendizado** (`ht_leaf_stats_t`, $1.360\text{ B}$ em `float32`), que só existe enquanto uma folha está ativa. Além disso, o uso de `union` anônimas do C11 unifica Classificação e Regressão Contínua sem adicionar 1 único byte de sobrecarga.
+O design separa estritamente a **topologia permanente** da árvore (`ht_node_t`, $20\text{ B}$ em `float32`) do **estado pesado de aprendizado** (`ht_leaf_stats_t`, $1.360\text{ B}$ em `float32`), que só existe enquanto uma folha está ativa. Além disso, o uso de `union` anônimas do C11 unifica Classificação e Regressão Contínua sem adicionar 1 único byte de sobrecarga (`sizeof(ht_tree_t) = 496.024 B ≈ 484,4 KB` em `float32`).
 
 ```mermaid
 flowchart TB
-    subgraph TREE["Instancia Principal: ht_tree_t (<= 1 MB RAM)"]
+    subgraph TREE["Instancia Principal: ht_tree_t (484,4 KB float32 <= 1 MB RAM)"]
         direction TB
         PARAMS["Configuracao e Schema: ht_config_params_t\n(task_type, feature_types, grace_period, delta, tau, ...)"]
         VTABLE["Polimorfismo de Criterio: ht_criterion_vtable_t\n(Info Gain | Gini Impurity | Variance Reduction)"]
@@ -71,8 +71,8 @@ flowchart TB
 
         subgraph MEMPOOL["Alocador Deterministico O(1): ht_memory_pool_t"]
             direction LR
-            NODEPOOL["Pool Estrutural: node_pool[4096]\nht_node_t (28 B float32 / 48 B float64)\n- class_counts[4] UNION reg_stats (n, mean, m2)\n- split_val (threshold UNION cat_val)\n- left_child, right_child, stats_idx (uint16_t)\n- feature_idx, flags"]
-            STATSPOOL["Pool de Aprendizado: stats_pool[256]\nht_leaf_stats_t (1360 B float32 / 2720 B float64)\n- last_split_attempt_at\n- mc/nb_correct_weight UNION fmse_mean/model\n- reg_weights[16], reg_intercept (SGD)\n- observers[16]: union { num[4], cat, reg_num, reg_cat }"]
+            NODEPOOL["Pool Estrutural: node_pool[4096]\nht_node_t (20 B float32 / 40 B float64)\n- class_counts[4] UNION reg_stats / leaf slots\n- split_val, left_child, right_child, stats_idx\n- feature_idx, flags"]
+            STATSPOOL["Pool de Aprendizado: stats_storage (256 folhas)\nht_leaf_stats_t (1360 B float32 / 2720 B float64)\n- last_split_attempt_at\n- mc/nb_correct_weight UNION fmse_mean/model\n- reg_weights[16], reg_intercept (SGD)\n- observers[16]: union { num[4], cat, hist[4], reg_num, reg_cat }"]
         end
     end
 
@@ -111,11 +111,11 @@ stateDiagram-v2
 
 ## 4. Como Funcionam os Nós de Split e os Nós Folha
 
-Na arquitetura C11 da biblioteca, tanto os **Nós de Split** (nós de decisão internos) quanto os **Nós Folha** (nós terminais) utilizam exatamente a mesma estrutura base leve [`ht_node_t`](../code/include/ht_memory.h) ($28\text{ B}$ em `float32`) armazenada no `node_pool`. O que diferencia o papel do nó na árvore são seus bits de `flags` e a presença (ou ausência) do bloco pesado de aprendizado [`ht_leaf_stats_t`](../code/include/ht_memory.h) ($1.360\text{ B}$ em `float32`) apontado por `stats_idx`.
+Na arquitetura C11 da biblioteca, tanto os **Nós de Split** (nós de decisão internos) quanto os **Nós Folha** (nós terminais) utilizam exatamente a mesma estrutura base leve [`ht_node_t`](../code/include/core/ht_memory.h) ($20\text{ B}$ em `float32`) armazenada no `node_pool`. O que diferencia o papel do nó na árvore são seus bits de `flags` e a presença (ou ausência) do bloco pesado de aprendizado [`ht_leaf_stats_t`](../code/include/core/ht_memory.h) ($1.360\text{ B}$ em `float32`) apontado por `stats_idx`.
 
 ```mermaid
 flowchart LR
-    subgraph SPLIT_NODE["1. No de Split (Interno) — Custo: 28 B"]
+    subgraph SPLIT_NODE["1. No de Split (Interno) — Custo: 20 B"]
         direction TB
         SN_HEAD["ht_node_t (node_pool[idx])\nflags: HT_NODE_IN_USE (HT_NODE_IS_LEAF = 0)"]
         SN_RULE["Condicao de Teste:\n- feature_idx = f\n- split_val: threshold (float) OU cat_val (int32)"]
@@ -125,7 +125,7 @@ flowchart LR
         SN_HEAD --> SN_RULE --> SN_CH --> SN_W --> SN_ST
     end
 
-    subgraph INACTIVE_LEAF["2. No Folha Inativa — Custo: 28 B"]
+    subgraph INACTIVE_LEAF["2. No Folha Inativa — Custo: 20 B"]
         direction TB
         IL_HEAD["ht_node_t (node_pool[idx])\nflags: HT_NODE_IN_USE | HT_NODE_IS_LEAF"]
         IL_CH["Filhos:\nleft_child = 0xFFFF, right_child = 0xFFFF"]
@@ -134,7 +134,7 @@ flowchart LR
         IL_HEAD --> IL_CH --> IL_W --> IL_ST
     end
 
-    subgraph ACTIVE_LEAF["3. No Folha Ativa — Custo: 28 B + 1.360 B"]
+    subgraph ACTIVE_LEAF["3. No Folha Ativa — Custo: 20 B + 1.360 B"]
         direction TB
         AL_HEAD["ht_node_t (node_pool[idx])\nflags: HT_NODE_IN_USE | HT_NODE_IS_LEAF"]
         AL_W["Acumuladores Base:\nclass_counts[C] UNION reg_stats"]
@@ -164,7 +164,7 @@ Um **Nó de Split** é um nó que já acumulou amostras suficientes no passado, 
 #### B) Tratamento de Valores Ausentes (`NaN` ou Categoria `< 0`) no Nó de Split
 Mesmo depois de se tornar um nó interno, ele continua atualizando `class_counts[y]` (na classificação) ou `reg_stats.count` (na regressão) toda vez que uma amostra passa por ele durante o treinamento.
 - Quando uma amostra chega com `x[f]` ausente (`HT_ISNAN(x[f].num)` ou `x[f].cat < 0`), o nó de split não pode avaliar a desigualdade do `split_val`.
-- Em vez de abortar, ele chama `ht_most_common_child(tree, node)` em [`ht_tree.c`](../code/src/ht_tree.c), que consulta a soma de pesos de `left_child` e `right_child` em $O(1)$ e roteia a amostra pelo **filho mais populoso** (*most common path*).
+- Em vez de abortar, ele chama `ht_most_common_child(tree, node)` em [`ht_tree.c`](../code/src/core/ht_tree.c), que consulta a soma de pesos de `left_child` e `right_child` em $O(1)$ e roteia a amostra pelo **filho mais populoso** (*most common path*).
 
 #### C) Papel do Nó de Split na Adaptação a *Concept Drift* (HAT / HAT-R)
 Quando `enable_hat = true`, cada nó de split atua como uma sentinela da subárvore abaixo dele através de `tree->node_drift[node_idx]`:
@@ -182,7 +182,7 @@ Um **Nó Folha** é identificado pelo bit `(node->flags & HT_NODE_IS_LEAF) != 0`
 
 | Característica | Folha Ativa (`stats_idx != 0xFFFF`) | Folha Inativa (`stats_idx == 0xFFFF`) |
 | :--- | :--- | :--- |
-| **Consumo de Memória (`float32`)** | **$1.388\text{ B}$** ($28\text{ B}$ no `node_pool` + $1.360\text{ B}$ no `stats_pool`) | **Apenas $28\text{ B}$** (somente `ht_node_t` no `node_pool`) |
+| **Consumo de Memória (`float32`)** | **$1.380\text{ B}$** ($20\text{ B}$ no `node_pool` + $1.360\text{ B}$ no `stats_pool`) | **Apenas $20\text{ B}$** (somente `ht_node_t` no `node_pool`) |
 | **Observadores de Atributos (`observers[F]`)** | **Ativos:** atualiza as distribuições de todos os $F$ atributos a cada amostra. | **Desativados:** não mantém observadores de atributos. |
 | **Tentativa de Split (`grace_period`)** | **Sim:** avalia candidatos de split e o *Hoeffding Bound* a cada `grace_period` amostras. | **Não:** permanece como folha terminal (a menos que seja reativada). |
 | **Aprendizado do Alvo no `learn_one`** | Atualiza `class_counts` / `reg_stats`, observadores, pesos SGD e contadores NBA/fMSE. | Atualiza **apenas** `class_counts[y]` (classificação) ou `reg_stats` (regressão). |
@@ -237,7 +237,7 @@ Quando uma folha ativa completa um ciclo de `grace_period` amostras e o melhor c
 
 ## 5. Fluxograma Completo de Inferência (`predict`, `predict_proba` e `predict_reg`)
 
-O caminho de inferência em [`ht_tree.c`](../code/src/ht_tree.c) é **100% iterativo** (zero recursão na stack) e trata valores ausentes (`NaN` ou categoria `< 0`) roteando para o filho mais populoso em tempo real.
+O caminho de inferência em [`ht_tree.c`](../code/src/core/ht_tree.c) é **100% iterativo** (zero recursão na stack) e trata valores ausentes (`NaN` ou categoria `< 0`) roteando para o filho mais populoso em tempo real.
 
 ```mermaid
 flowchart TD
@@ -424,7 +424,7 @@ flowchart TD
 
 ## 8. Fluxograma de Detecção de Concept Drift (ADWIN2) e Adaptação (HAT / HAT-R)
 
-Quando `enable_hat = true`, cada nó interno e folha mantém um detector **ADWIN2** baseado em histograma exponencial estático ([`ht_drift.h`](../code/include/ht_drift.h)) e pode cultivar uma **subárvore alternativa** (`alt_tree_idx`) em background até que ela prove ser estatisticamente superior ao ramo principal.
+Quando `enable_hat = true`, cada nó interno e folha mantém um detector **ADWIN2** baseado em histograma exponencial estático ([`ht_drift.h`](../code/include/core/ht_drift.h)) e pode cultivar uma **subárvore alternativa** (`alt_tree_idx`) em background até que ela prove ser estatisticamente superior ao ramo principal.
 
 ```mermaid
 flowchart TD
@@ -476,7 +476,7 @@ flowchart LR
         direction TB
         S1["Inspeciona node_pool e stats_pool"] --> S2{"include_training_stats?"}
         S2 -- "true (Modo Checkpoint Completo)" --> S3["Grava Header ('VFDT') +\nNos em uso (idx + ht_node_t) +\nStats de folhas ativas (idx + ht_leaf_stats_t)"]
-        S2 -- "false (Modo Somente-Inferencia)" --> S4["Grava apenas Header ('VFDT') +\nNos estruturais em uso (28 B por no)\nDescarta 100% dos blocos pesados ht_leaf_stats_t!"]
+        S2 -- "false (Modo Somente-Inferencia)" --> S4["Grava apenas Header ('VFDT') +\nNos estruturais em uso (20 B por no + 2 B idx)\nDescarta 100% dos blocos pesados ht_leaf_stats_t!"]
     end
 
     subgraph FLASH["Imagem Binaria Contigua"]
@@ -486,7 +486,7 @@ flowchart LR
     subgraph LOAD["Desserializacao: ht_tree_load()"]
         direction TB
         L1["Valida Magic ('VFDT'), Versao,\nTamanho do float (32/64-bit) e Tamanho do Buffer"] --> L2["Restaura ht_node_t[] e (se presente) ht_leaf_stats_t[]\nnas posicoes originais"]
-        L2 --> L3["Reconstroi pilhas free_nodes[] e free_stats[]\nem passagem linear O(N)"]
+        L2 --> L3["Reconstroi free-lists intrusivas (free_nodes_head / free_stats_head)\nem passagem linear O(N)"]
     end
 
     S3 --> IMG
@@ -498,17 +498,22 @@ flowchart LR
 
 ## 10. Mapa de Módulos e Fontes de Referência
 
-### 10.1 Módulos do Código-Fonte (`code/`)
+### 10.1 Módulos do Código-Fonte (`code/`: `core/`, `ensemble/`, `federated/`)
 
 | Módulo | Header Público | Implementação | Responsabilidade Principal |
 | :--- | :--- | :--- | :--- |
-| **Configuração & Tipos** | [`ht_config.h`](../code/include/ht_config.h) | — | Macros de precisão (`ht_float_t`), limites estáticos (`HT_MAX_*`), `ht_value_t` e códigos `ht_status_t`. |
-| **Gerenciador de Memória** | [`ht_memory.h`](../code/include/ht_memory.h) | [`ht_memory.c`](../code/src/ht_memory.c) | *Slab/Pool Allocator* $O(1)$ (`node_pool` e `stats_pool`), definições de `ht_node_t` e `ht_leaf_stats_t`. |
-| **Observadores de Atributos** | [`ht_observer.h`](../code/include/ht_observer.h) | [`ht_observer.c`](../code/src/ht_observer.c) | Welford Gaussiano (`ht_gaussian_*`), matriz nominal (`ht_categorical_*`), variância paralela de Chan (`ht_var_*`) e 5 slots de regressão (`ht_reg_*`). |
-| **Critérios de Split & Bound** | [`ht_criterion.h`](../code/include/ht_criterion.h) | [`ht_criterion.c`](../code/src/ht_criterion.c) | *Gini Impurity*, *Information Gain*, *Variance Reduction*, *Hoeffding Bound* e seleção estável dos 2 melhores candidatos (`ht_split_candidate_t`). |
-| **Concept Drift (ADWIN & HAT)** | [`ht_drift.h`](../code/include/ht_drift.h) | [`ht_drift.c`](../code/src/ht_drift.c) | Histograma exponencial ADWIN2 (`ht_adwin_t`), pool de detectores, filtro unilateral de erro e testes estatísticos de troca/poda (Hoeffding e Welch Z-test). |
-| **Árvore de Decisão (Core API)** | [`ht_tree.h`](../code/include/ht_tree.h) | [`ht_tree.c`](../code/src/ht_tree.c) | Inicialização, roteamento iterativo, predição (MC/NB/NBA e Mean/Model SGD/Adaptive), ciclo `learn_one`, desativação por `Promise`, pipeline anexo e `save`/`load`. |
-| **Micro-Pipelines de Pré-Processamento** | [`ht_prep.h`](../code/include/ht_prep.h) | [`ht_prep.c`](../code/src/ht_prep.c) | Normalização Z-score/Min-Max (`ht_scaler_t`), filtro Hampel MAD (`ht_filter_hampel_t`), codificador Space-Saving (`ht_encoder_freq_t`) e quantizador Ben-Haim (`ht_quantizer_bh_t`). |
+| **`core/` — Configuração & Tipos** | [`core/ht_config.h`](../code/include/core/ht_config.h) | — | Macros de precisão (`ht_float_t`), limites estáticos (`HT_MAX_*`), `ht_value_t` e códigos `ht_status_t`. |
+| **`core/` — Gerenciador de Memória** | [`core/ht_memory.h`](../code/include/core/ht_memory.h) | [`core/ht_memory.c`](../code/src/core/ht_memory.c) | *Slab/Pool Allocator* $O(1)$ com free-list intrusiva e *Dynamic Feature Stride*, definições de `ht_node_t` ($20\text{ B}$) e `ht_leaf_stats_t`. |
+| **`core/` — Observadores de Atributos** | [`core/ht_observer.h`](../code/include/core/ht_observer.h) | [`core/ht_observer.c`](../code/src/core/ht_observer.c) | Welford Gaussiano (`ht_gaussian_*`), matriz nominal (`ht_categorical_*`), histograma Ben-Haim (`ht_hist_*`), variância de Chan (`ht_var_*`), 5 slots de regressão e merges federados. |
+| **`core/` — Critérios de Split & Bound** | [`core/ht_criterion.h`](../code/include/core/ht_criterion.h) | [`core/ht_criterion.c`](../code/src/core/ht_criterion.c) | *Gini Impurity*, *Information Gain*, *Variance Reduction*, *Hoeffding Bound* e seleção estável dos 2 melhores candidatos (`ht_split_candidate_t`). |
+| **`core/` — Concept Drift (ADWIN & HAT)** | [`core/ht_drift.h`](../code/include/core/ht_drift.h) | [`core/ht_drift.c`](../code/src/core/ht_drift.c) | Histograma exponencial ADWIN2 (`ht_adwin_t`), pool de detectores, filtro unilateral de erro e testes estatísticos de troca/poda (Hoeffding e Welch Z-test). |
+| **`core/` — Árvore de Decisão (Core API)** | [`core/ht_tree.h`](../code/include/core/ht_tree.h) | [`core/ht_tree.c`](../code/src/core/ht_tree.c) | Inicialização, roteamento iterativo, predição (MC/NB/NBA e Mean/SGD/Adaptive), ciclo `learn_one`, desativação por `Promise`, primitivas de coordenação (`HT_TREE_FLAG_DEFER_SPLITS`), pipeline anexo e `save`/`load`. |
+| **`core/` — Micro-Pipelines de Pré-Processamento** | [`core/ht_prep.h`](../code/include/core/ht_prep.h) | [`core/ht_prep.c`](../code/src/core/ht_prep.c) | Normalização Z-score/Min-Max (`ht_scaler_t`), filtro Hampel MAD (`ht_filter_hampel_t`), codificador Space-Saving (`ht_encoder_freq_t`) e quantizador Ben-Haim (`ht_quantizer_t`). |
+| **`ensemble/` — Árvore Compacta BFS** | [`ensemble/ht_compact_tree.h`](../code/include/ensemble/ht_compact_tree.h) | [`ensemble/ht_compact_tree.c`](../code/src/ensemble/ht_compact_tree.c) | Compactação iterativa BFS somente-inferência ($\approx 1{,}34\text{ KB}$ em 64 nós), mapeamento opcional de subespaços e serialização wire portátil (`HTCT`). |
+| **`ensemble/` — Motor de Votação** | [`ensemble/ht_voting.h`](../code/include/ensemble/ht_voting.h) | [`ensemble/ht_voting.c`](../code/src/ensemble/ht_voting.c) | Votação uniforme (`HT_VOTE_UNIFORM`) e ponderada pelo inverso do erro prequential (`HT_VOTE_WEIGHTED`) para Classificação e Regressão. |
+| **`federated/` — Protocolo Binário HFED** | [`federated/ht_fed_proto.h`](../code/include/federated/ht_fed_proto.h) | [`federated/ht_fed_proto.c`](../code/src/federated/ht_fed_proto.c) | Framing binário agnóstico de transporte de `32 B` (`HFED`), versionamento (`topology_version`) e checksum CRC32 IEEE 802.3 com tabela nibble de `64 B`. |
+| **`federated/` — Fed-Forest (Modo 1)** | [`federated/ht_fed_forest.h`](../code/include/federated/ht_fed_forest.h) | [`federated/ht_fed_forest.c`](../code/src/federated/ht_fed_forest.c) | Cliente embarcado (`1` árvore treinável + $M$ árvores compactas) e servidor estático com seleção `ALL`, `TOP_M` e `ROUND_ROBIN`. |
+| **`federated/` — Fed-VFDT (Modo 2)** | [`federated/ht_fed_vfdt.h`](../code/include/federated/ht_fed_vfdt.h) | [`federated/ht_fed_vfdt.c`](../code/src/federated/ht_fed_vfdt.c) | Árvore global coordenada (`QUORUM`/`MAJORITY`/`MERIT`/`WEIGHTED_MERIT` e `STATS_MERGE`), `split_log[64]` para *stragglers*, fallback `FULL_SNAPSHOT` e reset coordenado por drift. |
 
 ### 10.2 Fontes e Referências no Repositório (`references/`)
 

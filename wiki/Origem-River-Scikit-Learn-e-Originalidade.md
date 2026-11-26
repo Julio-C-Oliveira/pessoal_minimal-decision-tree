@@ -24,7 +24,7 @@ flowchart TD
 
     subgraph ORIGINAL["Inovações Originais (kansho em C11)"]
         O1["Zero Alocação Dinâmica em Runtime:<br/>0,0 KB de malloc/free, Pools estáticos O(1)"]
-        O2["Separação Topologia Leve vs Estado Pesado:<br/>ht_node_t (28 B) vs ht_leaf_stats_t (1,3 KB)<br/>com reciclagem imediata no split"]
+        O2["Separação Topologia Leve vs Estado Pesado:<br/>ht_node_t (20 B) vs ht_leaf_stats_t (1,3 KB)<br/>com reciclagem imediata no split"]
         O3["Índices Compactos uint16_t (16-bit):<br/>Serialização direta para Flash sem pointer swizzling"]
         O4["Dimensionamento Estrito por Macros:<br/>Escalonamento de 11 KB a 1 MB de RAM"]
         O5["Precisão Configurável ht_float_t:<br/>float 32-bit (MCU FPU) vs double 64-bit"]
@@ -65,7 +65,7 @@ O [`online-ml/river`](https://github.com/online-ml/river) é a principal referê
   - *Majority Class* (MC): Predição proporcional às probabilidades a priori das classes.
   - *Naive Bayes* (NB): Predição pela regra de Bayes com verossimilhanças Gaussianas e categóricas.
   - *Naive Bayes Adaptive* (NBA): Chaveamento automático entre MC e NB com base no rastreamento contínuo de acertos cumulativos (`_mc_correct_weight` e `_nb_correct_weight`). Crucialmente, **os acertos são testados antes de atualizar o estado da folha com a nova amostra** ([`htc_nodes.py#L182-L192`](../references/river_tree/nodes/htc_nodes.py#L182-L192)).
-- **Detector de Mudança de Conceito (`ADWIN2`):** Algoritmo de janelas adaptativas baseado em histogramas exponenciais de baldes com capacidades crescentes em potências de 2 ($2^m$), corte estatístico de médias com o limite de Hoeffding e compressão em $O(\log W)$ ([Bifet & Gavaldà, 2007](../references/papers/bifet2007learning.pdf)).
+- **Detector de Mudança de Conceito (`ADWIN2`):** Algoritmo de janelas adaptativas baseado em histogramas exponenciais de baldes com capacidades crescentes em potências de 2 ($2^m$), corte estatístico de médias com o limite de Hoeffding e compressão em $O(\log W)$ (Bifet & Gavaldà, 2007; código de referência em [`adwin.py`](../references/river_tree/drift/adwin.py)).
 - **Hoeffding Adaptive Tree (`HAT` / `HAT-R`):** Monitoramento contínuo do erro em cada nó com instâncias de ADWIN2. Ao detectar drift, cria-se uma subárvore alternativa na raiz do ramo obsoleto; se a árvore alternativa atingir acurácia superior comprovada por um segundo ADWIN, ela substitui o ramo antigo ([`hatc_nodes.py`](../references/river_tree/nodes/hatc_nodes.py)).
 
 ### 2.5 Tratamento de Valores Ausentes (`NaN`)
@@ -127,15 +127,15 @@ As inovações originais do **kansho** resolvem esse abismo de arquitetura:
 ### 4.2 Desacoplamento Físico: Topologia Leve (`ht_node_t`) vs Estado Pesado (`ht_leaf_stats_t`) com Reciclagem Imediata
 No River, uma folha mantém seus observadores permanentemente associados. No Scikit-Learn, cada nó da struct `Node` (96 bytes) carrega buffers fixos para a vida toda.
 - **Nossa Inovação:** Separamos o nó em duas entidades físicas completamente distintas:
-  1. `ht_node_t` (**Topologia - Leve**): Ocupa apenas **$28\text{ Bytes}$** (em `float32`). Contém apenas os índices dos filhos, índice do estado, regra de corte binário e contadores de classe/regressão. Permanece em memória após o split.
-  2. `ht_leaf_stats_t` (**Estado de Aprendizado - Pesado**): Ocupa **$\approx 1.360\text{ Bytes}$** (em `float32`). Contém os observadores de Welford, matrizes categóricas e estatísticas do Naive Bayes / fMSE.
-- **Reciclagem Imediata no Split:** O estado pesado é **alugado temporariamente** do `stats_pool` apenas enquanto a folha está ativa. No exato instante em que a folha sofre split e se transforma em nó interno de decisão, seu `ht_leaf_stats_t` é **imediatamente devolvido à free-list do pool**. Isso permite que o modelo crie milhares de nós internos de árvore mantendo apenas um pequeno pool de folhas ativas simultâneas!
+  1. `ht_node_t` (**Topologia - Leve**): Ocupa apenas **$20\text{ Bytes}$** (em `float32`). Contém os índices compactados, flags e uma união assimétrica para contadores de classe/regressão (folhas) ou regra de corte binário e filhos (nós internos). Permanece em memória após o split.
+  2. `ht_leaf_stats_t` (**Estado de Aprendizado - Pesado**): Ocupa **$\approx 1.360\text{ Bytes}$** (em `float32`, reduzível por atributo via *Dynamic Feature Stride*). Contém os observadores de Welford/Histograma, matrizes categóricas e estatísticas do Naive Bayes / fMSE.
+- **Reciclagem Imediata no Split:** O estado pesado é **alugado temporariamente** do `stats_pool` apenas enquanto a folha está ativa. No exato instante em que a folha sofre split e se transforma em nó interno de decisão, seu `ht_leaf_stats_t` é **imediatamente devolvido à free-list intrusiva do pool**. Isso permite que o modelo crie milhares de nós internos de árvore mantendo apenas um pequeno pool de folhas ativas simultâneas!
 - **Desativação de Folhas (VFDT Memory Management):** Quando o pool de estatísticas se esgota, as folhas menos promissoras têm seu `ht_leaf_stats_t` devolvido ao pool, mantendo as contagens no `ht_node_t` para continuar predizendo com zero perda de estrutura.
 
 ```mermaid
 sequenceDiagram
     participant Tree as ht_tree_t
-    participant NodePool as node_pool (28 B cada)
+    participant NodePool as node_pool (20 B cada)
     participant StatsPool as stats_pool (~1.3 KB cada)
     
     Note over Tree,StatsPool: Folha 0 Ativa (Aluga 1 nó + 1 stats)
@@ -203,7 +203,7 @@ sequenceDiagram
 
 ### 4.11 Micro-Pipelines de Pré-Processamento Zero-Malloc (`libht_prep` e `ht_prep_pipeline_t`)
 No River, pipelines de streaming (`pipe = scaler | model`) instanciam múltiplos objetos encadeados no heap de Python gerenciados pelo Garbage Collector. No Scikit-Learn, transformadores alocam matrizes intermediárias completas em cada chamada a `fit_transform()`.
-- **Inovação no kansho:** Desenvolvemos a biblioteca embarcada `libht_prep` ([`code/include/ht_prep.h`](../code/include/ht_prep.h)), um micro-pipeline contíguo de pré-processamento alocado inteiramente na memória estática (`.bss`) ou stack via struct `ht_prep_pipeline_t`:
+- **Inovação no kansho:** Desenvolvemos a biblioteca embarcada `libht_prep` ([`code/include/core/ht_prep.h`](../code/include/core/ht_prep.h)), um micro-pipeline contíguo de pré-processamento alocado inteiramente na memória estática (`.bss`) ou stack via struct `ht_prep_pipeline_t`:
   - **Pegada Física Estática Ultracompacta:** Ocupa apenas **$\approx 4{,}6\text{ KB}$ em `float32`** ($\approx 8{,}4\text{ KB}$ em `double64`), mesmo configurado com todos os 4 estágios ativos para até 16 atributos.
   - **Anexação Transparente à Árvore:** Pode ser acoplado à árvore via `ht_tree_set_prep_pipeline(&tree, &pipe)`. Com isso, tanto `ht_tree_learn_one` quanto `ht_tree_predict` realizam o pré-processamento dos atributos de forma nativa e transparente antes de alimentar o roteamento ou os observadores de divisão, com **zero chamadas a `malloc`** e **zero cópias extras de dados**.
 
@@ -237,6 +237,12 @@ Em regressão em streaming com regressores lineares nas folhas (`HT_LEAF_MODEL` 
     $$\alpha = \frac{N_{\text{slots}}}{N_{\text{slots}} + \kappa}, \qquad \mu_f = \alpha \mu_{\text{slots}} + (1 - \alpha) \mu_{\text{tree}}, \qquad \sigma_f^2 = \alpha \sigma_{\text{slots}}^2 + (1 - \alpha) \sigma_{\text{tree}}^2$$
   - **Resultado:** No instante do split ($N_{\text{slots}} = 0$), $\alpha = 0$, garantindo continuidade matemática perfeita de escala com a mãe. Conforme a folha amadurece ($N_{\text{slots}} \gg \kappa$), o Z-score especializa-se gradualmente no hiperplano local da folha. **Custo adicional em RAM no pool de folhas: exatamente 0 bytes.**
 
+### 4.16 Aprendizado Federado Embarcado Zero-Malloc (`Fed-Forest`, `Fed-VFDT` & `HFED` — `v0.5.0`)
+Enquanto implementações federadas clássicas como o protótipo acadêmico **Fed-VFDT** (*Silva, Vinagre & Gama, IEEE ICTAI 2025*, `paularaissa/project-vfdt`) dependem de Flower, Python, River, serialização JSON/Pickle/Base64, caminhos textuais de nós (`uuid4`) e congelamento de fluxo (`_frozen`), o **kansho** traz uma arquitetura federada integralmente estática em C11 (`< 78 KB` SRAM por cliente):
+- **Modo 1 (`Fed-Forest` — `ht_fed_forest.{h,c}`):** Cada MCU treina 1 árvore local completa e troca com o servidor árvores somente-inferência compactadas via BFS iterativa (`ht_compact_tree_t`, $\approx 1{,}34\text{ KB}$ para 64 nós), realizando votação adaptativa ponderada pelo inverso do erro prequential (`ht_voting.{h,c}`).
+- **Modo 2 (`Fed-VFDT` — `ht_fed_vfdt.{h,c}`):** Mantém uma árvore global única com `HT_TREE_FLAG_DEFER_SPLITS` (**0 bytes extras** em `ht_tree_t`), suportando tanto o modo coordenado fiel ao paper (`QUORUM`, `MAJORITY`, `BEST-MERIT` em 114–564 B/rodada) quanto a extensão **autoral `STATS_MERGE`** (fusão paralela exata sem contagem dupla via Chan/Welford, matrizes categóricas e FedAvg para SGD), que resolve cenários Non-IID extremos com clientes 100% puros.
+- **Protocolo Binário `HFED` e Recuperação de *Stragglers* (`ht_fed_proto.{h,c}`):** Framing binário agnóstico de transporte de **32 bytes** com CRC32 IEEE 802.3 (tabela nibble de 64 B), endereçamento `uint16_t`, versionamento `topology_version`, log circular `split_log[64]` para *catch-up* incremental com fallback automático para `FULL_SNAPSHOT`, e reset coordenado por *concept drift*.
+
 ---
 
 ## 5. Matriz Comparativa Tripla: River vs Scikit-Learn vs kansho
@@ -248,7 +254,7 @@ Em regressão em streaming com regressores lineares nas folhas (`HT_LEAF_MODEL` 
 | **Orçamento de RAM Típico** | $> 100\text{ MB}$ (Python VM + heap) | $> 50\text{ MB}$ ($O(N)$ em amostras) | **$\le 1\text{ MB}$ (escalável até $11\text{ KB}$)** | Autoral |
 | **Alocação Dinâmica (`malloc`)** | Contínua (Python GC e objetos) | Dinâmica via `realloc` e NumPy | **ZERO (0,0 KB em runtime)** | Autoral |
 | **Indexação entre Nós** | Referências a objetos no heap | Inteiros 64-bit (`intp_t`, 8 B) | **Inteiros 16-bit (`uint16_t`, 2 B)** | **Sklearn** (conceito) + Autoral (16-bit) |
-| **Separação Topologia vs Estado** | Não (nó carrega observadores) | Não (nó carrega buffers) | **Sim (`ht_node_t` 28 B / `stats_t` 1,3 KB reciclado)** | Autoral |
+| **Separação Topologia vs Estado** | Não (nó carrega observadores) | Não (nó carrega buffers) | **Sim (`ht_node_t` 20 B / `stats_t` 1,3 KB reciclado)** | Autoral |
 | **Critério de Divisão** | Hoeffding Bound ($\epsilon$) + $\tau$ | CART Impurity Decrease ($\Delta I$) | **Hoeffding Bound ($\epsilon$) + $\tau$** | **River** |
 | **Otimização de Gini (FPU)** | Fórmula clássica com divisões | Divisão única fatorando $W^2$ | **Divisão única fatorando $W^2$** | **Scikit-Learn** |
 | **Navegação na Árvore** | Recursiva / laços de objetos | Iterativa `while` em `_apply_dense` | **Iterativa `while` estrita (zero recursão)** | **Scikit-Learn** |
@@ -263,6 +269,7 @@ Em regressão em streaming com regressores lineares nas folhas (`HT_LEAF_MODEL` 
 | **Alta Cardinalidade Categórica** | Dicionários dinâmicos de tamanho variável | `OneHotEncoder` / matrizes esparsas batch | **Space-Saving determinístico ($K=16$ slots Heavy Hitters)** | Autoral (Metwally et al. adaptado para MCU) |
 | **Observadores Numéricos de Split** | Gaussiano Welford unimodal contínuo | Histogramas exatos em batch (`HistGradientBoosting`) | **Gaussiano Welford + Histograma Ben-Haim & Tom-Tov em 80 B** | **River** (Gaussiano) + Autoral (Ben-Haim em union) |
 | **Normalização Local para Regressão SGD** | Normalização apenas a montante via scaler global | Pré-processamento global offline | **Z-Score Híbrido com Credibilidade (fusão árvore/slots sem custo)** | Autoral (herança suave de pesos pós-split) |
+| **Aprendizado Federado Embarcado** | Inexistente no núcleo (requer Flower externo no `project-vfdt`) | Não suportado nativamente | **`Fed-Forest` (BFS + votação), `Fed-VFDT` Coordenado & `Stats-Merge` + `HFED` CRC32** | **Fed-VFDT** (ICTAI 2025) + Autoral (`Fed-Forest`, `Stats-Merge`, `HFED`) |
 
 ---
 
@@ -274,7 +281,7 @@ O diagrama abaixo ilustra graficamente a principal inovação de engenharia que 
 flowchart TD
     subgraph POOLS["Memória Estática Pré-Alocada (SRAM <= 1 MB)"]
         direction LR
-        NP["node_pool (ht_node_t, 28 B cada)\nAté HT_MAX_NODES (ex: 4096)"]
+        NP["node_pool (ht_node_t, 20 B cada)\nAté HT_MAX_NODES (ex: 4096)"]
         SP["stats_pool (ht_leaf_stats_t, ~1.3 KB cada)\nAté HT_MAX_ACTIVE_LEAVES (ex: 256)"]
     end
 
@@ -292,7 +299,7 @@ flowchart TD
     
     subgraph RECYCLE["Reciclagem Imediata de Memória"]
         SPLIT_EXEC --> FREE_STATS["1. Devolve stats_pool[L->stats_idx] ao pool livre!\n(ht_leaf_stats_t reciclado imediatamente)"]
-        FREE_STATS --> MAKE_BRANCH["2. Folha L vira nó interno (ht_node_t, 28 B):\nleft_child = new_node, right_child = new_node\nL->stats_idx = HT_INVALID_IDX"]
+        FREE_STATS --> MAKE_BRANCH["2. Folha L vira nó interno (ht_node_t, 20 B):\nleft_child = new_node, right_child = new_node\nL->stats_idx = HT_INVALID_IDX"]
         MAKE_BRANCH --> ALLOC_CHILDREN["3. Aloca novo stats_pool para filhas se houver cota\n(Filhas ativas herdam o estado fresco)"]
     end
     

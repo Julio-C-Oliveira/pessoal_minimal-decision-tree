@@ -12,21 +12,21 @@ Em **C11 e bibliotecas de baixo nível / embarcadas** (padrão adotado por SQLit
 
 ```text
 ┌─────────────────────────────────────────────────────────────────────────┐
-│ 1. Metadata File (Raiz)        │ VERSION ("0.1.0")                      │
+│ 1. Metadata File (Raiz)        │ VERSION ("0.5.0")                      │
 │ (Equivalente ao pyproject.toml) │ Lido pelo Makefile, scripts e CI/CD   │
 ├─────────────────────────────────────────────────────────────────────────┤
 │ 2. Single Source of Truth em C │ HT_VERSION_MAJOR / MINOR / PATCH       │
-│ (code/include/ht_config.h)     │ HT_VERSION_STRING ("0.1.0")            │
+│ (code/include/core/ht_config.h)│ HT_VERSION_STRING ("0.5.0")            │
 │                                │ HT_VERSION_CHECK(maj, min, patch)      │
 │                                │ const char *ht_version(void);          │
 ├─────────────────────────────────────────────────────────────────────────┤
-│ 3. Git Tags e GitHub Releases  │ v0.1.0 (Tags anotadas no Git)          │
+│ 3. Git Tags e GitHub Releases  │ v0.5.0 (Tags anotadas no Git)          │
 │                                │ GitHub Releases / Tarballs             │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
-1. **Arquivo de Metadados ([`VERSION`](../VERSION)):** Localizado na raiz do repositório, armazena a versão canônica (ex: `0.1.0`). É a referência única para automações, empacotadores e regras de build.
-2. **Macros e Símbolos em C ([`ht_config.h`](../code/include/ht_config.h) e [`ht_tree.h`](../code/include/ht_tree.h)):** Fornece constantes numéricas para o pré-processador e uma função estática de runtime (`ht_version()`).
+1. **Arquivo de Metadados ([`VERSION`](../VERSION)):** Localizado na raiz do repositório, armazena a versão canônica (ex: `0.5.0`). É a referência única para automações, empacotadores e regras de build.
+2. **Macros e Símbolos em C ([`ht_config.h`](../code/include/core/ht_config.h) e [`ht_tree.h`](../code/include/core/ht_tree.h)):** Fornece constantes numéricas para o pré-processador e uma função estática de runtime (`ht_version()`).
 3. **Tags do Git (`vX.Y.Z`):** Conectam o histórico de commits do repositório com as versões públicas disponibilizadas no GitHub.
 
 ---
@@ -77,21 +77,21 @@ O projeto adota o padrão [Semantic Versioning 2.0.0](https://semver.org/lang/pt
 
 Para lançar uma nova versão oficial no GitHub:
 
-1. Atualize a versão no arquivo [`VERSION`](../VERSION) e nas macros `HT_VERSION_*` em [`code/include/ht_config.h`](../code/include/ht_config.h).
+1. Atualize a versão no arquivo [`VERSION`](../VERSION) e nas macros `HT_VERSION_*` em [`code/include/core/ht_config.h`](../code/include/core/ht_config.h).
 2. Execute a suíte de testes garantindo 100% de sucesso em precisão simples (`float`) e dupla (`double`):
    ```bash
    make clean && make test && make clean && make test CFLAGS_EXTRA="-DHT_USE_DOUBLE"
    ```
 3. Realize o commit das alterações de versão e crie uma **tag anotada**:
    ```bash
-   git tag -a v0.1.0 -m "Release v0.1.0: Embedded Hoeffding Tree in C11 (VFDT, HAT, VFDT-R, HAT-R, ADWIN2)"
+   git tag -a v0.5.0 -m "Release v0.5.0: Embedded Federated Learning (Fed-Forest & Fed-VFDT)"
    ```
 4. Envie o commit e a tag para o repositório remoto no GitHub:
    ```bash
    git push origin main
-   git push origin v0.1.0
+   git push origin v0.5.0
    ```
-5. No GitHub, acesse a aba **Releases** $\rightarrow$ **Draft a new release** e selecione a tag `v0.4.1` recém-enviada para gerar as notas de lançamento e os pacotes `.tar.gz` e `.zip` correspondentes.
+5. No GitHub, acesse a aba **Releases** $\rightarrow$ **Draft a new release** e selecione a tag `v0.5.0` recém-enviada para gerar as notas de lançamento e os pacotes `.tar.gz` e `.zip` correspondentes.
 
 ---
 
@@ -173,7 +173,7 @@ Para lançar uma nova versão oficial no GitHub:
   - `ht_scaler_t`: Normalização online Z-score (Welford incremental) e Min-Max em $O(1)$ de RAM e tempo.
   - `ht_filter_hampel_t`: Filtro mediano deslizante com Desvio Absoluto da Mediana (MAD, $3\sigma$) com buffer circular estático para rejeição determinística de espículas (*outliers*) de sensores industriais.
   - `ht_encoder_freq_t`: Codificador de frequência incremental para variáveis categóricas de alta cardinalidade baseado no algoritmo Space-Saving de Metwally.
-  - `ht_quantizer_bh_t`: Quantizador/discretizador online baseado no histograma dinâmico de Ben-Haim & Tom-Tov com estimativa contínua de CDF.
+  - `ht_quantizer_t`: Quantizador/discretizador online baseado no histograma dinâmico de Ben-Haim & Tom-Tov com estimativa contínua de CDF.
   - `ht_prep_pipeline_t`: Pipeline unificado integrável diretamente à árvore (`ht_tree_set_prep_pipeline`), aplicando transformações de forma transparente em treino e inferência.
 - **Normalização SGD Híbrida nas Folhas de Regressão (Item 8):**
   - Implementação de padronização online nos regressores lineares locais com fator de credibilidade $\alpha = \frac{N_{\text{slots}}}{N_{\text{slots}} + 10.0}$, eliminando explosões de gradiente em fluxos multiescala ($MAE \sim 10^{14} \rightarrow 1.12$, 200x mais rápido que River StandardScaler) com zero heap em runtime.
@@ -190,12 +190,12 @@ Para lançar uma nova versão oficial no GitHub:
 
 ## 5. Possíveis Trabalhos Futuros e Extensões (Roadmap)
 
-Embora todas as fases entregues até a `v0.4.1` (**Fases 0 a 7**, incluindo Classificação, Adaptação a *Concept Drift* com `ADWIN2`/`HAT`, Regressão Contínua `FIMT-DD`/`HAT-R`, `libht_prep` e otimização extrema de SRAM com *slab* por feature) estejam 100% concluídas com zero heap dinâmico em runtime e perfis enxutos (`4,7 KB` a `18,9 KB`), as análises teóricas e os resultados experimentais do **Main Benchmark com 8 Datasets** apontam duas prioridades estratégicas imediatas — além dos 6 eixos detalhados a seguir — para fechar as lacunas restantes do nicho embarcado:
+Embora todas as fases entregues até a `v0.5.0` (**Fases 0 a 7 e Fase 11 — Aprendizado Federado**, incluindo Classificação, Adaptação a *Concept Drift* com `ADWIN2`/`HAT`, Regressão Contínua `FIMT-DD`/`HAT-R`, `libht_prep`, otimização extrema de SRAM com *slab* por feature e Aprendizado Federado `Fed-Forest` & `Fed-VFDT`) estejam 100% concluídas com zero heap dinâmico em runtime e perfis enxutos (`4,7 KB` a `18,9 KB` no núcleo), as análises teóricas e os resultados experimentais apontam duas prioridades estratégicas imediatas — além dos eixos detalhados a seguir — para fechar as lacunas restantes do nicho embarcado:
 
 ### 5.0 Prioridades Estratégicas: Consolidando a Liderança no Nicho Embarcado
 
 > [!TIP]
-> **Foco de Evolução (`v0.5.0+`):** Cobrir 100% do espectro de microcontroladores (incluindo *ultra-low-power* sem FPU) e competir mais próximo aos modelos *batch* em fluxos tabulares complexos preservando o teto estrito de SRAM.
+> **Foco de Evolução (`v0.6.0+`):** Cobrir 100% do espectro de microcontroladores (incluindo *ultra-low-power* sem FPU) e competir mais próximo aos modelos *batch* em fluxos tabulares complexos preservando o teto estrito de SRAM.
 
 1. **Aritmética de Ponto Fixo (`Q16.16` / `int16`, `-DHT_USE_FIXED_POINT`) para MCUs sem FPU:**
    - Hoje, o uso padrão de `float32` impõe penalidade severa de latência e energia em microcontroladores de baixíssimo custo sem unidade de ponto flutuante em hardware (como **ARM Cortex-M0 / M0+** e núcleos **RISC-V sem extensão `F`**), onde operações `float` são emuladas em software (`soft-fp`).
@@ -293,8 +293,8 @@ Embora todas as fases entregues até a `v0.4.1` (**Fases 0 a 7**, incluindo Clas
 
 16. **Discretizadores Não-Paramétricos Estáticos (Histograma Ben-Haim & Tom-Tov) — Concluído (v0.2.0):**
     - Para variáveis com distribuições altamente multimodais ou caudas pesadas que violam a suposição de Gaussianidade unimodal de Welford, implementou-se o observador não-paramétrico de Ben-Haim & Tom-Tov (`HT_OBS_HISTOGRAM`, struct `ht_hist_obs_t`).
-    - Mantém até 8 centróides dinâmicos por classe que se fundem deterministicamente quando a capacidade é excedida, calculando probabilidades condicionais via interpolação trapezoidal e gerando candidatos a split no ponto médio dos centróides adjacentes.
-    - Ocupa exatamente os mesmos $80\text{ B}$ (em `float32`) da Gaussiana via `union ht_feature_obs_t`, preservando estritamente a invariância de `sizeof(ht_leaf_stats_t)`. Adicionalmente, disponibilizou-se `ht_quantizer_bh_t` em `libht_prep` para discretização/quantização em streaming.
+    - Mantém até 4 bins dinâmicos por padrão (`HT_HIST_MAX_BINS = 4`, configurável via macro) que se fundem deterministicamente quando a capacidade é excedida, calculando probabilidades condicionais via interpolação trapezoidal e gerando candidatos a split no ponto médio dos centróides adjacentes.
+    - Ocupa exatamente os mesmos $80\text{ B}$ (em `float32`) da Gaussiana via `union ht_feature_obs_t`, preservando estritamente a invariância de `sizeof(ht_leaf_stats_t)`. Adicionalmente, disponibilizou-se `ht_quantizer_t` em `libht_prep` para discretização/quantização em streaming.
 
 17. **Bindings em Python (CFFI / ctypes / Cython):**
     - Disponibilização de um wrapper Python de alto desempenho expondo a API clássica do Scikit-Learn e River (`fit_one`, `predict_one`, `predict_proba_one`), permitindo que cientistas de dados usem o núcleo ultrarrápido em C11 diretamente em pipelines de experimentação ($200\times$ a $1.000\times$ mais rápido que implementações em Python puro).
@@ -304,9 +304,9 @@ Embora todas as fases entregues até a `v0.4.1` (**Fases 0 a 7**, incluindo Clas
     - Como extensão para perfis de maior capacidade (até $1\text{ MB}$), suporte complementar a *Online Bagging* de Oza & Russell (Poisson) ou *Leveraging Bagging* distribuindo o pool estático de nós e detectores entre $M$ árvores leves.
 
 19. **Micro-Pipelines Embarcados de Pré-Processamento Zero-Malloc (`libht_prep`) — Concluído (v0.2.0):**
-    - Criação de uma biblioteca companheira modular em C11 estático (`code/include/ht_prep.h` e `code/src/ht_prep.c`) com **zero alocação dinâmica (`malloc`/`free`)** em runtime:
+    - Criação de uma biblioteca companheira modular em C11 estático (`code/include/core/ht_prep.h` e `code/src/core/ht_prep.c`) com **zero alocação dinâmica (`malloc`/`free`)** em runtime:
       - `ht_scaler_t`: Normalização online Z-score ($z = \frac{x - \mu}{\sigma}$) e Min-Max ($[0, 1]$) em $O(1)$ de RAM e tempo via algoritmo de Welford com proteção contra variância nula.
       - `ht_filter_hampel_t`: Filtro mediano deslizante com Desvio Absoluto da Mediana (MAD, $3\sigma$) com buffer circular estático para eliminação de espículas (*outliers*) e ruído elétrico de sensores industriais em tempo real.
       - `ht_encoder_freq_t`: Codificador de frequência incremental para variáveis categóricas de alta cardinalidade via algoritmo determinístico Space-Saving de Metwally.
-      - `ht_quantizer_bh_t`: Discretizador/quantizador contínuo online baseado em histogramas dinâmicos de Ben-Haim & Tom-Tov com estimativa trapezoidal de CDF e $k$ bins uniformes.
+      - `ht_quantizer_t`: Discretizador/quantizador contínuo online baseado em histogramas dinâmicos de Ben-Haim & Tom-Tov com estimativa trapezoidal de CDF e $k$ bins uniformes.
       - `ht_prep_pipeline_t`: Estrutura de micro-pipeline anexo encadeável à árvore via `ht_tree_set_prep_pipeline`, aplicando transformações antes do treino (`ht_tree_learn_one`) e da inferência (`ht_tree_predict`) sem alocar memória na heap.

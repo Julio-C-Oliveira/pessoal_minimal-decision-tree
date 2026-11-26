@@ -1,6 +1,6 @@
 # Exemplos e Receitas da API (C11)
 
-Esta página reúne exemplos práticos e completos de uso da API pública ([`code/include/ht_tree.h`](../code/include/ht_tree.h)) cobrindo todas as 4 variantes de modelo (`VFDT`, `HAT`, `VFDT-R`, `HAT-R`), atributos mistos com valores ausentes (`NaN`) e serialização binária para Flash/EEPROM.
+Esta página reúne exemplos práticos e completos de uso da API pública ([`code/include/core/ht_tree.h`](../code/include/core/ht_tree.h) e [`code/include/federated/`](../code/include/federated)) cobrindo todas as 4 variantes de modelo (`VFDT`, `HAT`, `VFDT-R`, `HAT-R`), atributos mistos com valores ausentes (`NaN`), serialização binária para Flash/EEPROM (`ht_tree_save` / `ht_tree_load`) e aprendizado federado (`Fed-Forest` e `Fed-VFDT`).
 
 ---
 
@@ -20,9 +20,14 @@ make bench
 make bench-drift
 make bench-regression
 make bench-triple
+
+# Executa a suíte principal (8 datasets), federada e transporte real TCP POSIX
+make bench-main
+make bench-main-federated
+make bench-fed-net
 ```
 
-Para integrar em seu próprio projeto C/C++ ou firmware embarcado, basta incluir `code/include/` no caminho de headers (`-Icode/include`) e linkar com `code/build/libht.a -lm` (ou compilar diretamente os 5 arquivos `.c` de `code/src/`).
+Para integrar em seu próprio projeto C/C++ ou firmware embarcado, inclua os diretórios modulares de headers (`-Icode/include -Icode/include/core` para o núcleo, mais `-Icode/include/ensemble -Icode/include/federated` para aprendizado federado e árvores compactas) e linke com `code/build/libht.a -lm` (ou compile diretamente os 6 arquivos `.c` de `code/src/core/`, ou todos os 11 `.c` de `code/src/{core,ensemble,federated}/`).
 
 ---
 
@@ -209,3 +214,59 @@ void save_and_restore_model(const ht_tree_t *trained_tree, ht_tree_t *loaded_tre
     }
 }
 ```
+
+---
+
+## 7. Exemplo 6: Aprendizado Federado Embarcado (`Fed-Forest` e `Fed-VFDT`, `v0.5.0`)
+
+A partir da **`v0.5.0`**, dois modos federados zero-`malloc` estão disponíveis sobre quadros binários `HFED` com CRC32:
+- **Modo 1 (`Fed-Forest`, [`ht_fed_forest.h`](../code/include/federated/ht_fed_forest.h)):** Cada nó embarcado treina uma árvore local e compartilha sua versão compactada via BFS (`ht_compact_tree_t`, $\approx 1{,}34\text{ KB}$ em 64 nós), recebendo até $M$ árvores pares para votação adaptativa.
+- **Modo 2 (`Fed-VFDT`, [`ht_fed_vfdt.h`](../code/include/federated/ht_fed_vfdt.h)):** Todos os nós sincronizam uma única topologia global (`HT_FED_VFDT_COORDINATED` com consenso `QUORUM`/`MAJORITY`/`MERIT`, ou `HT_FED_VFDT_STATS_MERGE` com fusão paralela exata em cenários Non-IID severos).
+
+```c
+#include <stddef.h>
+#include <stdint.h>
+#include "ht_config.h"
+#include "ht_tree.h"
+#include "ht_fed_vfdt.h"
+
+static ht_fed_vfdt_client_t fed_client;
+static ht_fed_vfdt_server_t fed_server;
+static uint8_t hfed_frame[32768];
+
+void federated_step_example(const ht_value_t x[HT_MAX_FEATURES], uint8_t y) {
+    ht_config_params_t params;
+    ht_default_params(&params, /*n_features=*/8, /*n_classes=*/2);
+
+    ht_fed_vfdt_client_cfg_t ccfg;
+    ht_fed_vfdt_default_client_config(&ccfg, /*client_id=*/1, HT_FED_VFDT_STATS_MERGE, &params);
+    ht_fed_vfdt_client_init(&fed_client, &ccfg);
+
+    ht_fed_vfdt_server_cfg_t scfg;
+    ht_fed_vfdt_default_server_config(&scfg, HT_FED_VFDT_STATS_MERGE, &params);
+    ht_fed_vfdt_server_init(&fed_server, &scfg);
+
+    /* 1. Test-Then-Train local no cliente (splits autonomos diferidos) */
+    uint8_t y_pred = ht_fed_vfdt_client_predict(&fed_client, x);
+    (void)y_pred;
+    ht_fed_vfdt_client_learn_one(&fed_client, x, y, 1.0f);
+
+    /* 2. Serializa estatisticas locais em frame HFED e envia ao servidor */
+    size_t up_len = 0, down_len = 0;
+    uint16_t cmds = 0;
+    ht_fed_vfdt_server_begin_round(&fed_server);
+    if (ht_fed_vfdt_client_export_update(&fed_client, hfed_frame, sizeof(hfed_frame), &up_len) == HT_OK) {
+        ht_fed_vfdt_server_ingest(&fed_server, hfed_frame, up_len);
+    }
+    ht_fed_vfdt_server_end_round(&fed_server, &cmds);
+
+    /* 3. Aplica broadcast incremental ou FULL_SNAPSHOT no cliente */
+    if (ht_fed_vfdt_server_export_update(&fed_server, fed_client.client_id,
+                                         fed_client.topology_version,
+                                         hfed_frame, sizeof(hfed_frame), &down_len) == HT_OK) {
+        ht_fed_vfdt_client_apply_update(&fed_client, hfed_frame, down_len);
+    }
+}
+```
+
+Para os fluxos completos de `Fed-Forest`, tratamento de `HT_ERR_STALE_VERSION`, reset coordenado de drift e transporte TCP POSIX, consulte **[Aprendizado Federado](Aprendizado-Federado.md)** e [`main_benchmark/federated_benchmark_report.md`](../main_benchmark/federated_benchmark_report.md).

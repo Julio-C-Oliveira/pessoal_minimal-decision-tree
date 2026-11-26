@@ -4,6 +4,7 @@
 
 #### Guias de Uso e Configuração
 * **[Exemplos e Receitas da API](Exemplos-e-Receitas-API)**
+* **[Aprendizado Federado (Fed-Forest & Fed-VFDT)](Aprendizado-Federado)**
 * **[Referência de Parâmetros e Macros](Referencia-de-Parametros-e-Macros)**
 * **[Orçamento de Memória e Cross-Compilation](Orcamento-de-Memoria-e-Cross-Compilation)**
 
