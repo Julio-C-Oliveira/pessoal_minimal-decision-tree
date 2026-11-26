@@ -13,13 +13,14 @@ static void test_fed_vfdt_coordinated_consensus_modes(void) {
     static ht_fed_vfdt_server_t server;
     static uint8_t wire[32768];
 
-    const ht_fed_vfdt_consensus_t modes[3] = {
+    const ht_fed_vfdt_consensus_t modes[4] = {
         HT_FED_CONSENSUS_QUORUM,
         HT_FED_CONSENSUS_MAJORITY,
-        HT_FED_CONSENSUS_MERIT
+        HT_FED_CONSENSUS_MERIT,
+        HT_FED_CONSENSUS_WEIGHTED_MERIT
     };
 
-    for (int m = 0; m < 3; ++m) {
+    for (int m = 0; m < 4; ++m) {
         ht_config_params_t tp;
         ht_default_params(&tp, 2, 2);
         tp.grace_period = 20U;
@@ -300,9 +301,137 @@ static void test_fed_vfdt_straggler_catchup_snapshot_and_drift_reset(void) {
     HT_ASSERT_EQ(c_straggler.tree.n_active_leaves, 1U);
 }
 
+static void helper_push_proposal(ht_fed_vfdt_server_t *srv,
+                                 uint16_t leaf_idx,
+                                 uint8_t feature_idx,
+                                 ht_float_t threshold,
+                                 ht_float_t merit,
+                                 ht_float_t total_weight,
+                                 uint8_t locally_ready) {
+    ht_fed_split_proposal_t p;
+    memset(&p, 0, sizeof(p));
+    ht_split_candidate_init(&p.best);
+    p.best.feature_idx = feature_idx;
+    p.best.is_categorical = 0U;
+    p.best.split_val.threshold = threshold;
+    p.best.merit = merit;
+    p.best.lhs_dist[0] = total_weight * (ht_float_t)0.5;
+    p.best.rhs_dist[1] = total_weight * (ht_float_t)0.5;
+    p.total_weight = total_weight;
+    p.leaf_idx = leaf_idx;
+    p.depth = (leaf_idx == 0U) ? 0U : 1U;
+    p.locally_ready = locally_ready;
+    srv->round_proposals[srv->n_round_proposals++] = p;
+}
+
+static void test_fed_vfdt_paper_exact_consensus_and_thresholds(void) {
+    static ht_fed_vfdt_server_t srv;
+    ht_config_params_t tp;
+    ht_default_params(&tp, 4, 2);
+
+    /* 1. QUORUM: per-feature quorum must REJECT split when 4 clients split 2 vs 2 (min_quorum=3) */
+    ht_fed_vfdt_server_cfg_t scfg;
+    ht_fed_vfdt_default_server_config(&scfg, HT_FED_VFDT_COORDINATED, &tp);
+    scfg.consensus = HT_FED_CONSENSUS_QUORUM;
+    scfg.min_quorum = 3U;
+    HT_ASSERT_EQ(ht_fed_vfdt_server_init(&srv, &scfg), HT_OK);
+    HT_ASSERT_EQ(ht_fed_vfdt_server_begin_round(&srv), HT_OK);
+    helper_push_proposal(&srv, 0U, 0U, (ht_float_t)5.0, (ht_float_t)0.8, (ht_float_t)100.0, 1U);
+    helper_push_proposal(&srv, 0U, 0U, (ht_float_t)5.2, (ht_float_t)0.7, (ht_float_t)100.0, 1U);
+    helper_push_proposal(&srv, 0U, 1U, (ht_float_t)3.0, (ht_float_t)0.9, (ht_float_t)100.0, 1U);
+    helper_push_proposal(&srv, 0U, 1U, (ht_float_t)3.1, (ht_float_t)0.85, (ht_float_t)100.0, 1U);
+    uint16_t cmds = 0U;
+    HT_ASSERT_EQ(ht_fed_vfdt_server_end_round(&srv, &cmds), HT_OK);
+    HT_ASSERT_EQ(cmds, 0U);
+
+    /* Add 3rd vote for f1 (higher merit sum) + 3rd vote for f0 -> f1 wins by higher sum(merit)
+     * and threshold must equal exact max-merit proposal (3.0, merit 0.90) */
+    HT_ASSERT_EQ(ht_fed_vfdt_server_begin_round(&srv), HT_OK);
+    helper_push_proposal(&srv, 0U, 0U, (ht_float_t)5.0, (ht_float_t)0.6, (ht_float_t)100.0, 1U);
+    helper_push_proposal(&srv, 0U, 0U, (ht_float_t)5.2, (ht_float_t)0.6, (ht_float_t)100.0, 1U);
+    helper_push_proposal(&srv, 0U, 0U, (ht_float_t)5.4, (ht_float_t)0.6, (ht_float_t)100.0, 1U);
+    helper_push_proposal(&srv, 0U, 1U, (ht_float_t)3.0, (ht_float_t)0.90, (ht_float_t)100.0, 1U);
+    helper_push_proposal(&srv, 0U, 1U, (ht_float_t)3.6, (ht_float_t)0.70, (ht_float_t)100.0, 1U);
+    helper_push_proposal(&srv, 0U, 1U, (ht_float_t)3.9, (ht_float_t)0.65, (ht_float_t)100.0, 1U);
+    HT_ASSERT_EQ(ht_fed_vfdt_server_end_round(&srv, &cmds), HT_OK);
+    HT_ASSERT_EQ(cmds, 1U);
+    HT_ASSERT_EQ(srv.global_tree.memory.node_pool[0].feature_idx, 1U);
+    HT_ASSERT_FLOAT_EQ(srv.global_tree.memory.node_pool[0].split_val.threshold, (ht_float_t)3.0);
+
+    /* 2. BEST-MERIT (max individual) vs WEIGHTED_MERIT (sum w_k * G_k) + WEIGHTED_MEAN threshold */
+    scfg.consensus = HT_FED_CONSENSUS_MERIT;
+    scfg.threshold_agg = HT_FED_THRESH_MAX_MERIT;
+    scfg.min_quorum = 2U;
+    HT_ASSERT_EQ(ht_fed_vfdt_server_init(&srv, &scfg), HT_OK);
+    HT_ASSERT_EQ(ht_fed_vfdt_server_begin_round(&srv), HT_OK);
+    helper_push_proposal(&srv, 0U, 0U, (ht_float_t)4.0, (ht_float_t)0.50, (ht_float_t)200.0, 1U);
+    helper_push_proposal(&srv, 0U, 0U, (ht_float_t)6.0, (ht_float_t)0.50, (ht_float_t)200.0, 1U);
+    helper_push_proposal(&srv, 0U, 2U, (ht_float_t)7.5, (ht_float_t)0.92, (ht_float_t)30.0, 1U);
+    HT_ASSERT_EQ(ht_fed_vfdt_server_end_round(&srv, &cmds), HT_OK);
+    HT_ASSERT_EQ(cmds, 1U);
+    HT_ASSERT_EQ(srv.global_tree.memory.node_pool[0].feature_idx, 2U);
+    HT_ASSERT_FLOAT_EQ(srv.global_tree.memory.node_pool[0].split_val.threshold, (ht_float_t)7.5);
+
+    /* Same proposals under WEIGHTED_MERIT + WEIGHTED_MEAN -> f0 wins with weighted mean 5.0 */
+    scfg.consensus = HT_FED_CONSENSUS_WEIGHTED_MERIT;
+    scfg.threshold_agg = HT_FED_THRESH_WEIGHTED_MEAN;
+    HT_ASSERT_EQ(ht_fed_vfdt_server_init(&srv, &scfg), HT_OK);
+    HT_ASSERT_EQ(ht_fed_vfdt_server_begin_round(&srv), HT_OK);
+    helper_push_proposal(&srv, 0U, 0U, (ht_float_t)4.0, (ht_float_t)0.50, (ht_float_t)200.0, 1U);
+    helper_push_proposal(&srv, 0U, 0U, (ht_float_t)6.0, (ht_float_t)0.50, (ht_float_t)200.0, 1U);
+    helper_push_proposal(&srv, 0U, 2U, (ht_float_t)7.5, (ht_float_t)0.92, (ht_float_t)30.0, 1U);
+    HT_ASSERT_EQ(ht_fed_vfdt_server_end_round(&srv, &cmds), HT_OK);
+    HT_ASSERT_EQ(cmds, 1U);
+    HT_ASSERT_EQ(srv.global_tree.memory.node_pool[0].feature_idx, 0U);
+    HT_ASSERT_FLOAT_EQ(srv.global_tree.memory.node_pool[0].split_val.threshold, (ht_float_t)5.0);
+
+    /* 3. MAJORITY-VOTE plurality (< 50% 3-way vote) + require_locally_ready filter */
+    scfg.consensus = HT_FED_CONSENSUS_MAJORITY;
+    scfg.threshold_agg = HT_FED_THRESH_MAX_MERIT;
+    scfg.min_quorum = 2U;
+    scfg.require_locally_ready = true;
+    HT_ASSERT_EQ(ht_fed_vfdt_server_init(&srv, &scfg), HT_OK);
+
+    /* Unready proposals (locally_ready = 0) must be ignored */
+    HT_ASSERT_EQ(ht_fed_vfdt_server_begin_round(&srv), HT_OK);
+    helper_push_proposal(&srv, 0U, 0U, (ht_float_t)2.0, (ht_float_t)0.80, (ht_float_t)50.0, 0U);
+    helper_push_proposal(&srv, 0U, 0U, (ht_float_t)2.0, (ht_float_t)0.80, (ht_float_t)50.0, 0U);
+    HT_ASSERT_EQ(ht_fed_vfdt_server_end_round(&srv, &cmds), HT_OK);
+    HT_ASSERT_EQ(cmds, 0U);
+
+    /* 3-way plurality: f0 (2 votes, max merit 0.60), f1 (2 votes, max merit 0.85), f2 (1 vote) -> f1 wins! */
+    HT_ASSERT_EQ(ht_fed_vfdt_server_begin_round(&srv), HT_OK);
+    helper_push_proposal(&srv, 0U, 0U, (ht_float_t)2.0, (ht_float_t)0.60, (ht_float_t)50.0, 1U);
+    helper_push_proposal(&srv, 0U, 0U, (ht_float_t)2.1, (ht_float_t)0.55, (ht_float_t)50.0, 1U);
+    helper_push_proposal(&srv, 0U, 1U, (ht_float_t)4.5, (ht_float_t)0.85, (ht_float_t)50.0, 1U);
+    helper_push_proposal(&srv, 0U, 1U, (ht_float_t)4.9, (ht_float_t)0.70, (ht_float_t)50.0, 1U);
+    helper_push_proposal(&srv, 0U, 2U, (ht_float_t)8.0, (ht_float_t)0.95, (ht_float_t)50.0, 1U);
+    HT_ASSERT_EQ(ht_fed_vfdt_server_end_round(&srv, &cmds), HT_OK);
+    HT_ASSERT_EQ(cmds, 1U);
+    HT_ASSERT_EQ(srv.global_tree.memory.node_pool[0].feature_idx, 1U);
+    HT_ASSERT_FLOAT_EQ(srv.global_tree.memory.node_pool[0].split_val.threshold, (ht_float_t)4.5);
+
+    /* 4. max_splits_per_round = 1 caps splitting to highest-voted leaf when 2 leaves are ready */
+    uint16_t left_leaf = srv.global_tree.memory.node_pool[0].left_child;
+    uint16_t right_leaf = srv.global_tree.memory.node_pool[0].right_child;
+    srv.cfg.max_splits_per_round = 1U;
+    HT_ASSERT_EQ(ht_fed_vfdt_server_begin_round(&srv), HT_OK);
+    /* left_leaf gets 2 votes, right_leaf gets 3 votes -> only right_leaf must split */
+    helper_push_proposal(&srv, left_leaf, 0U, (ht_float_t)1.0, (ht_float_t)0.8, (ht_float_t)50.0, 1U);
+    helper_push_proposal(&srv, left_leaf, 0U, (ht_float_t)1.1, (ht_float_t)0.7, (ht_float_t)50.0, 1U);
+    helper_push_proposal(&srv, right_leaf, 2U, (ht_float_t)6.0, (ht_float_t)0.75, (ht_float_t)50.0, 1U);
+    helper_push_proposal(&srv, right_leaf, 2U, (ht_float_t)6.2, (ht_float_t)0.70, (ht_float_t)50.0, 1U);
+    helper_push_proposal(&srv, right_leaf, 2U, (ht_float_t)6.4, (ht_float_t)0.65, (ht_float_t)50.0, 1U);
+    HT_ASSERT_EQ(ht_fed_vfdt_server_end_round(&srv, &cmds), HT_OK);
+    HT_ASSERT_EQ(cmds, 1U);
+    HT_ASSERT(srv.global_tree.memory.node_pool[left_leaf].flags & HT_NODE_IS_LEAF);
+    HT_ASSERT(!(srv.global_tree.memory.node_pool[right_leaf].flags & HT_NODE_IS_LEAF));
+}
+
 void test_fed_vfdt_run(void) {
     HT_TEST_SUITE_BEGIN("Nivel 1, 2 & 3: Modo 2 Fed-VFDT Global (ht_fed_vfdt)");
     HT_RUN_TEST(test_fed_vfdt_coordinated_consensus_modes);
+    HT_RUN_TEST(test_fed_vfdt_paper_exact_consensus_and_thresholds);
     HT_RUN_TEST(test_fed_vfdt_stats_merge_extreme_non_iid);
     HT_RUN_TEST(test_fed_vfdt_stats_merge_regression);
     HT_RUN_TEST(test_fed_vfdt_straggler_catchup_snapshot_and_drift_reset);

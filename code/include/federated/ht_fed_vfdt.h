@@ -38,10 +38,19 @@ typedef enum {
  * @brief Consensus rule used by the server in HT_FED_VFDT_COORDINATED mode.
  */
 typedef enum {
-    HT_FED_CONSENSUS_QUORUM   = 0, /**< Require >= min_quorum locally-ready proposals */
-    HT_FED_CONSENSUS_MAJORITY = 1, /**< Majority attribute vote among >= min_quorum proposals */
-    HT_FED_CONSENSUS_MERIT    = 2  /**< Highest sample-weighted merit sum among >= min_quorum proposals */
+    HT_FED_CONSENSUS_QUORUM         = 0, /**< Per-feature quorum (feat_votes[f] >= min_quorum), highest merit sum wins */
+    HT_FED_CONSENSUS_MAJORITY       = 1, /**< Plurality vote (most frequent feature), tie-break by highest merit */
+    HT_FED_CONSENSUS_MERIT          = 2, /**< Best individual merit max(G_k) across >= min_quorum proposals (paper faithful) */
+    HT_FED_CONSENSUS_WEIGHTED_MERIT = 3  /**< Highest sample-weighted merit sum sum(w_k * G_k) across >= min_quorum proposals */
 } ht_fed_vfdt_consensus_t;
+
+/**
+ * @brief Numeric/categorical split threshold aggregation rule in COORDINATED mode.
+ */
+typedef enum {
+    HT_FED_THRESH_MAX_MERIT     = 0, /**< Exact threshold/category from highest-merit winning proposal (Fed-VFDT default) */
+    HT_FED_THRESH_WEIGHTED_MEAN = 1  /**< Sample-weighted mean threshold / weighted mode category across winning proposals */
+} ht_fed_vfdt_thresh_agg_t;
 
 /**
  * @brief Downlink topology command types recorded in split_log.
@@ -101,11 +110,14 @@ typedef struct {
  * @brief Server configuration for Fed-VFDT.
  */
 typedef struct {
-    ht_config_params_t      tree_params;
-    ht_fed_vfdt_mode_t      mode;
-    ht_fed_vfdt_consensus_t consensus;
-    uint16_t                min_quorum;       /**< Minimum client proposals required (default: 2) */
-    uint16_t                min_drift_quorum; /**< Minimum client drift alerts to trigger reset (default: 2) */
+    ht_config_params_t       tree_params;
+    ht_fed_vfdt_mode_t       mode;
+    ht_fed_vfdt_consensus_t  consensus;
+    ht_fed_vfdt_thresh_agg_t threshold_agg;        /**< HT_FED_THRESH_MAX_MERIT (default) or HT_FED_THRESH_WEIGHTED_MEAN */
+    uint16_t                 min_quorum;           /**< Minimum agreeing (QUORUM) or participating proposals (default: 2) */
+    uint16_t                 min_drift_quorum;     /**< Minimum client drift alerts to trigger reset (default: 2) */
+    uint16_t                 max_splits_per_round; /**< 0 = unlimited independent leaves/round (default), 1 = paper 1-split/round */
+    bool                     require_locally_ready;/**< true (default, paper faithful): only count Hoeffding-bound-ready proposals */
 } ht_fed_vfdt_server_cfg_t;
 
 /**

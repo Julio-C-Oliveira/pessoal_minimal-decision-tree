@@ -501,8 +501,11 @@ void ht_fed_vfdt_default_server_config(ht_fed_vfdt_server_cfg_t *cfg,
     }
     cfg->mode = mode;
     cfg->consensus = HT_FED_CONSENSUS_QUORUM;
+    cfg->threshold_agg = HT_FED_THRESH_MAX_MERIT;
     cfg->min_quorum = 2U;
     cfg->min_drift_quorum = 2U;
+    cfg->max_splits_per_round = 0U;
+    cfg->require_locally_ready = true;
 }
 
 ht_status_t ht_fed_vfdt_server_init(ht_fed_vfdt_server_t *server,
@@ -687,6 +690,14 @@ ht_status_t ht_fed_vfdt_server_ingest(ht_fed_vfdt_server_t *server,
     }
 }
 
+typedef struct {
+    uint16_t             leaf_idx;
+    uint16_t             depth;
+    uint16_t             winning_votes;
+    ht_float_t           winning_max_merit;
+    ht_split_candidate_t cand;
+} ht_fed_pending_leaf_split_t;
+
 static ht_status_t ht_fed_vfdt_end_round_coordinated(ht_fed_vfdt_server_t *server,
                                                      uint16_t *cmds_applied) {
     /* Identify distinct proposed leaf_idx values in deterministic ascending order */
@@ -719,6 +730,8 @@ static ht_status_t ht_fed_vfdt_end_round_coordinated(ht_fed_vfdt_server_t *serve
     }
 
     bool is_reg = (server->cfg.tree_params.task_type == HT_TASK_REGRESSION);
+    ht_fed_pending_leaf_split_t ready_splits[HT_FED_SERVER_MAX_PROPOSALS];
+    uint16_t n_ready_splits = 0U;
 
     for (uint16_t u = 0; u < n_unique; ++u) {
         uint16_t leaf_idx = unique_leaves[u];
@@ -730,15 +743,21 @@ static ht_status_t ht_fed_vfdt_end_round_coordinated(ht_fed_vfdt_server_t *serve
             continue;
         }
 
-        uint16_t feat_votes[HT_MAX_FEATURES];
+        uint16_t   feat_votes[HT_MAX_FEATURES];
         ht_float_t feat_merit_sum[HT_MAX_FEATURES];
-        ht_float_t feat_weight_sum[HT_MAX_FEATURES];
-        memset(feat_votes, 0, sizeof(feat_votes));
-        memset(feat_merit_sum, 0, sizeof(feat_merit_sum));
-        memset(feat_weight_sum, 0, sizeof(feat_weight_sum));
+        ht_float_t feat_wmerit_sum[HT_MAX_FEATURES];
+        ht_float_t feat_max_merit[HT_MAX_FEATURES];
+        uint16_t   feat_best_prop[HT_MAX_FEATURES];
 
-        uint16_t total_props = 0U;
-        uint16_t ready_props = 0U;
+        for (uint8_t f = 0; f < HT_MAX_FEATURES; ++f) {
+            feat_votes[f] = 0U;
+            feat_merit_sum[f] = (ht_float_t)0.0;
+            feat_wmerit_sum[f] = (ht_float_t)0.0;
+            feat_max_merit[f] = -HT_INFINITY;
+            feat_best_prop[f] = HT_INVALID_IDX;
+        }
+
+        uint16_t eligible_props = 0U;
         uint16_t depth = 0U;
 
         for (uint16_t i = 0; i < server->n_round_proposals; ++i) {
@@ -749,65 +768,89 @@ static ht_status_t ht_fed_vfdt_end_round_coordinated(ht_fed_vfdt_server_t *serve
             if (p->best.feature_idx >= server->cfg.tree_params.n_features) {
                 continue;
             }
-            depth = p->depth;
-            total_props++;
-            if (p->locally_ready) {
-                ready_props++;
-            }
-
-            if (server->cfg.consensus == HT_FED_CONSENSUS_QUORUM && !p->locally_ready) {
+            if (server->cfg.require_locally_ready && !p->locally_ready) {
                 continue;
             }
+
+            depth = p->depth;
+            eligible_props++;
+
             uint8_t f = p->best.feature_idx;
-            feat_votes[f]++;
             ht_float_t w = (p->total_weight > (ht_float_t)0.0) ? p->total_weight : (ht_float_t)1.0;
-            ht_float_t m = (p->best.merit > (ht_float_t)0.0) ? p->best.merit : (ht_float_t)0.0;
-            feat_merit_sum[f] += w * m;
-            feat_weight_sum[f] += w;
+            ht_float_t m = p->best.merit;
+            ht_float_t m_pos = (m > (ht_float_t)0.0) ? m : (ht_float_t)0.0;
+
+            feat_votes[f]++;
+            feat_merit_sum[f] += m_pos;
+            feat_wmerit_sum[f] += w * m_pos;
+            if (feat_best_prop[f] == HT_INVALID_IDX || m > feat_max_merit[f]) {
+                feat_max_merit[f] = m;
+                feat_best_prop[f] = i;
+            }
         }
 
-        if (server->cfg.consensus == HT_FED_CONSENSUS_QUORUM) {
-            if (ready_props < server->cfg.min_quorum) {
-                continue;
-            }
-        } else {
-            if (total_props < server->cfg.min_quorum) {
-                continue;
-            }
+        if (eligible_props < server->cfg.min_quorum) {
+            continue;
         }
 
         uint8_t winner_f = HT_NO_FEATURE;
         uint16_t best_votes = 0U;
-        ht_float_t best_score = (ht_float_t)-1.0;
+        ht_float_t best_primary = -HT_INFINITY;
+        ht_float_t best_tie = -HT_INFINITY;
 
         for (uint8_t f = 0; f < server->cfg.tree_params.n_features; ++f) {
             if (feat_votes[f] == 0U) {
                 continue;
             }
-            if (server->cfg.consensus == HT_FED_CONSENSUS_MERIT) {
-                if (feat_merit_sum[f] > best_score) {
-                    best_score = feat_merit_sum[f];
+
+            if (server->cfg.consensus == HT_FED_CONSENSUS_QUORUM) {
+                /* Paper-faithful QUORUM: require per-feature support >= min_quorum;
+                 * among qualified features, pick highest merit sum (tie-break: max merit). */
+                if (feat_votes[f] < server->cfg.min_quorum) {
+                    continue;
+                }
+                if (feat_merit_sum[f] > best_primary ||
+                    (feat_merit_sum[f] == best_primary && feat_max_merit[f] > best_tie)) {
+                    best_primary = feat_merit_sum[f];
+                    best_tie = feat_max_merit[f];
+                    best_votes = feat_votes[f];
+                    winner_f = f;
+                }
+            } else if (server->cfg.consensus == HT_FED_CONSENSUS_MERIT) {
+                /* Paper-faithful BEST-MERIT: highest individual merit across eligible proposals */
+                if (feat_max_merit[f] > best_primary ||
+                    (feat_max_merit[f] == best_primary && feat_votes[f] > best_votes)) {
+                    best_primary = feat_max_merit[f];
+                    best_tie = feat_max_merit[f];
+                    best_votes = feat_votes[f];
+                    winner_f = f;
+                }
+            } else if (server->cfg.consensus == HT_FED_CONSENSUS_WEIGHTED_MERIT) {
+                /* Hybrid WEIGHTED-MERIT: highest sum(w_k * G_k(f)) */
+                if (feat_wmerit_sum[f] > best_primary ||
+                    (feat_wmerit_sum[f] == best_primary && feat_max_merit[f] > best_tie)) {
+                    best_primary = feat_wmerit_sum[f];
+                    best_tie = feat_max_merit[f];
+                    best_votes = feat_votes[f];
                     winner_f = f;
                 }
             } else {
+                /* Paper-faithful MAJORITY-VOTE (Plurality): most votes, tie-break by highest individual merit */
                 if (feat_votes[f] > best_votes ||
-                    (feat_votes[f] == best_votes && feat_merit_sum[f] > best_score)) {
+                    (feat_votes[f] == best_votes && feat_max_merit[f] > best_tie)) {
                     best_votes = feat_votes[f];
-                    best_score = feat_merit_sum[f];
+                    best_tie = feat_max_merit[f];
+                    best_primary = feat_max_merit[f];
                     winner_f = f;
                 }
             }
         }
 
-        if (winner_f == HT_NO_FEATURE) {
-            continue;
-        }
-        if (server->cfg.consensus == HT_FED_CONSENSUS_MAJORITY &&
-            (uint32_t)best_votes * 2U < (uint32_t)total_props) {
+        if (winner_f == HT_NO_FEATURE || feat_best_prop[winner_f] == HT_INVALID_IDX) {
             continue;
         }
 
-        /* Aggregate threshold/category and post-split child distributions for winner_f */
+        /* Aggregate children stats across all eligible proposals matching winner_f */
         ht_split_candidate_t global_cand;
         ht_split_candidate_init(&global_cand);
         global_cand.feature_idx = winner_f;
@@ -824,7 +867,7 @@ static ht_status_t ht_fed_vfdt_end_round_coordinated(ht_fed_vfdt_server_t *serve
             if (p->leaf_idx != leaf_idx || p->best.feature_idx != winner_f) {
                 continue;
             }
-            if (server->cfg.consensus == HT_FED_CONSENSUS_QUORUM && !p->locally_ready) {
+            if (server->cfg.require_locally_ready && !p->locally_ready) {
                 continue;
             }
 
@@ -850,30 +893,74 @@ static ht_status_t ht_fed_vfdt_end_round_coordinated(ht_fed_vfdt_server_t *serve
             }
         }
 
-        if (global_cand.is_categorical) {
-            int32_t best_cat = 0;
-            ht_float_t best_cw = (ht_float_t)-1.0;
-            for (int32_t cv = 0; cv < (int32_t)HT_MAX_CATEGORIES; ++cv) {
-                if (cat_votes[cv] > best_cw) {
-                    best_cw = cat_votes[cv];
-                    best_cat = cv;
-                }
-            }
-            global_cand.split_val.cat_val = best_cat;
+        const ht_fed_split_proposal_t *best_p = &server->round_proposals[feat_best_prop[winner_f]];
+        if (server->cfg.threshold_agg == HT_FED_THRESH_MAX_MERIT) {
+            /* Paper-faithful: exact threshold/category from highest-merit winning proposal */
+            global_cand.split_val = best_p->best.split_val;
+            global_cand.merit = best_p->best.merit;
         } else {
-            global_cand.split_val.threshold = (thresh_den > (ht_float_t)0.0)
-                ? (thresh_num / thresh_den) : (ht_float_t)0.0;
+            /* Sample-weighted mean threshold / weighted mode category */
+            if (global_cand.is_categorical) {
+                int32_t best_cat = best_p->best.split_val.cat_val;
+                ht_float_t best_cw = (ht_float_t)-1.0;
+                for (int32_t cv = 0; cv < (int32_t)HT_MAX_CATEGORIES; ++cv) {
+                    if (cat_votes[cv] > best_cw) {
+                        best_cw = cat_votes[cv];
+                        best_cat = cv;
+                    }
+                }
+                global_cand.split_val.cat_val = best_cat;
+            } else {
+                global_cand.split_val.threshold = (thresh_den > (ht_float_t)0.0)
+                    ? (thresh_num / thresh_den) : best_p->best.split_val.threshold;
+            }
+            global_cand.merit = (thresh_den > (ht_float_t)0.0)
+                ? (feat_wmerit_sum[winner_f] / thresh_den) : best_p->best.merit;
         }
-        global_cand.merit = (thresh_den > (ht_float_t)0.0) ? (feat_merit_sum[winner_f] / thresh_den) : (ht_float_t)0.0;
 
-        ht_status_t st = ht_tree_apply_split(&server->global_tree, leaf_idx, &global_cand, depth, NULL, NULL);
+        ready_splits[n_ready_splits].leaf_idx = leaf_idx;
+        ready_splits[n_ready_splits].depth = depth;
+        ready_splits[n_ready_splits].winning_votes = best_votes;
+        ready_splits[n_ready_splits].winning_max_merit = feat_max_merit[winner_f];
+        ready_splits[n_ready_splits].cand = global_cand;
+        n_ready_splits++;
+    }
+
+    /* When max_splits_per_round > 0 (e.g. 1 to match paper's 1-split/round),
+     * prioritize leaves by highest vote count, tie-breaking by highest merit. */
+    uint16_t to_apply = n_ready_splits;
+    if (server->cfg.max_splits_per_round > 0U && n_ready_splits > server->cfg.max_splits_per_round) {
+        for (uint16_t i = 1U; i < n_ready_splits; ++i) {
+            ht_fed_pending_leaf_split_t key = ready_splits[i];
+            int32_t j = (int32_t)i - 1;
+            while (j >= 0) {
+                bool key_better = (key.winning_votes > ready_splits[j].winning_votes) ||
+                                  (key.winning_votes == ready_splits[j].winning_votes &&
+                                   key.winning_max_merit > ready_splits[j].winning_max_merit);
+                if (!key_better) {
+                    break;
+                }
+                ready_splits[j + 1] = ready_splits[j];
+                j--;
+            }
+            ready_splits[j + 1] = key;
+        }
+        to_apply = server->cfg.max_splits_per_round;
+    }
+
+    for (uint16_t k = 0; k < to_apply; ++k) {
+        ht_status_t st = ht_tree_apply_split(&server->global_tree,
+                                             ready_splits[k].leaf_idx,
+                                             &ready_splits[k].cand,
+                                             ready_splits[k].depth,
+                                             NULL, NULL);
         if (st == HT_OK) {
             ht_fed_split_cmd_t cmd;
             memset(&cmd, 0, sizeof(cmd));
             cmd.cmd_type = (uint8_t)HT_FED_CMD_SPLIT;
-            cmd.node_idx = leaf_idx;
-            cmd.depth = depth;
-            cmd.cand = global_cand;
+            cmd.node_idx = ready_splits[k].leaf_idx;
+            cmd.depth = ready_splits[k].depth;
+            cmd.cand = ready_splits[k].cand;
             ht_fed_server_record_cmd(server, cmd);
             (*cmds_applied)++;
         }
