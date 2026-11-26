@@ -166,6 +166,7 @@ void test_drift_run(void);
 void test_prep_run(void);
 void test_compact_tree_run(void);
 void test_fed_forest_run(void);
+void test_fed_vfdt_run(void);
 void test_e2e_flow_run(void);
 
 #endif /* TEST_HARNESS_H */

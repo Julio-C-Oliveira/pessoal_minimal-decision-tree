@@ -188,6 +188,9 @@ int main(void) {
     /* Nível 1, 2 & 3: Aprendizado Federado Modo 1 (Fed-Forest) */
     test_fed_forest_run();
 
+    /* Nível 1, 2 & 3: Aprendizado Federado Modo 2 (Fed-VFDT) */
+    test_fed_vfdt_run();
+
     /* Nível 3: Fluxo Ponta a Ponta Acumulado */
     test_e2e_flow_run();
 
