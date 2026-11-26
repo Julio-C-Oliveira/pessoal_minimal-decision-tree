@@ -199,3 +199,41 @@ A validação experimental é conduzida pelo simulador multi-cliente em C11 puro
 | **5** | **Escala de `local_grace_period`** | Servidor calcula `local_grace = global_grace_period / n_clients` em `configure_fit` (`server_app.py` L495). | Definido via `tree_params.grace_period` na inicialização dos clientes. | **Intencional (Agnóstico de Transporte):** Em redes embarcadas dinâmicas, o integrador define `grace_period = G / K` na configuração inicial sem acoplamento ao transporte. |
 | **6** | **Extensões Exclusivas do `kansho`** | Apenas classificação, modo *Coordinated Splitting* via Flower/JSON/Pickle/Base64, sem regressão, sem `Stats-Merge`, sem `Fed-Forest`, sem drift reset. | Inclui Regressão (`VFDT-R`/`FHT-R`), Modo 2B `STATS_MERGE` (resolve *Non-IID* extremo com clientes 100% puros), Modo 1 `Fed-Forest`, protocolo binário `HFED` com CRC32 e reset coordenado por drift. | **Intencional (Escopo do Projeto):** Atende aos dois modos solicitados (`Fed-Forest` + `Fed-VFDT`), classificação + regressão e restrições de SRAM/banda em MCUs. |
 
+---
+
+## 8. Validação Experimental em 8 Datasets Reais (`main_benchmark/`)
+
+A suíte reproduzível `make bench-main-federated` (`main_benchmark/federated_benchmark.py` + `main_benchmark/fed_c_runner.c`) avaliou todos os **8 datasets reais** do repositório ($K=10$ clientes, $R=20$ rodadas, perfil MCU Tier 8 $\le 100\text{ KB}$, `float32`, zero-malloc) sob particionamento **Non-IID (`Dirichlet α=0.3`)** e **IID**. O relatório completo está em [`main_benchmark/federated_benchmark_report.md`](file:///home/julio/Documentos/pessoal_minimal-decision-tree/main_benchmark/federated_benchmark_report.md).
+
+### 8.1 Síntese sob Non-IID (`Dirichlet α=0.3`)
+
+| Dataset | Tarefa | Local-Only | Melhor Fed-Forest | Melhor Fed-VFDT (Coord.) | Fed-VFDT (`Stats-Merge`) | Central Oracle (T8) | Pico SRAM Cliente |
+| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
+| **SEA** | Classif. | 76.41% | 95.06% (`TOP_M`) | 93.68% (`MAJ`/`MERIT`) | **96.78%** | 99.02% | 13.12 KB |
+| **Electricity** | Classif. | 50.65% | 54.78% (`TOP_M`) | 57.61% (`QUORUM`) | **60.37%** | 64.37% | 16.38 KB |
+| **Forest Covertype** (54 feat, 7 cls) | Classif. | 30.91% | 25.83% (`RR`) | 35.00% (`MERIT`) | **65.52%** | 67.28% | **77.01 KB** |
+| **Airlines** | Classif. | 49.60% | **76.39%** (`TOP_M`) | 56.78% (`MAJ`/`MERIT`) | 61.43% | 76.09% | 15.89 KB |
+| **Friedman #1** | Regr. (MAE) | 2.8288 | 2.8813 (`TOP_M`) | **2.4963** (`QUORUM`) | 2.7318 | 2.1537 | 32.11 KB |
+| **Bikes** | Regr. (MAE) | 61.6123 | **41.7974** (`RR`) | 73.6779 (`MAJ`) | 46.6150 | 40.4648 | 60.29 KB |
+| **Appliances Energy** (28 feat) | Regr. (MAE) | 78.5876 | **35.4504** (`TOP_M`) | 59.1440 (`MAJ`) | 50.5366 | 29.7630 | 41.15 KB |
+| **NYC Taxi** | Regr. (MAE) | 397.0585 | **351.5022** (`RR`) | 381.5276 (`QUORUM`) | 372.1993 | 339.2442 | 18.81 KB |
+
+### 8.2 Complementaridade Comprovada entre os Dois Modos
+- **Orçamento Embarcado Comprovado ($\le 100\text{ KB}$):** Mesmo no cenário mais pesado (*Forest Covertype* com 54 features e 7 classes), a SRAM estática por cliente ficou em **77.01 KB** (`Fed-Forest`, $M=5$) e **65.56 KB** (`Fed-VFDT`).
+- **Classificação Multi-Classe Non-IID Severo → `Fed-VFDT (STATS-MERGE)`:** No *Forest Covertype* (7 classes fortemente enviesadas por cliente), o `Stats-Merge` saltou de **30.91% (F1 17.52%)** no `Local-Only` para **65.52% (F1 63.04%)** — a apenas 1.76 pp do Oráculo Centralizado (67.28%).
+- **Regressão Contínua Non-IID → `Fed-Forest`:** Dominou 3 dos 4 datasets de regressão (*Bikes* -32.2% MAE, *Appliances Energy* -54.9% MAE, *NYC Taxi* -11.5% MAE), beneficiando-se da redução de variância e cancelamento de viés ao combinar árvores especialistas compactas ($M=5$).
+- **Links de Banda Ultrabaixa (LPWAN/LoRa/BLE) → `Fed-VFDT Coordenado`:** Opera entre **114 e 564 bytes/cliente/rodada** (até $90\times$ menos tráfego que `Stats-Merge`), confirmando também empiricamente a necessidade da estratégia `MAJORITY` (pluralidade) e `BEST-MERIT` em alta dimensionalidade (*Covertype* 54 features, onde `QUORUM` estrito por atributo atingiu 0 splits sob `min_quorum=3`).
+
+---
+
+## 9. Requisitos Obrigatórios (Release Gates) para Upgrade de Versão (`0.4.1 -> 0.5.0`)
+
+Antes de propor ou executar qualquer bump de versão SemVer (`0.4.1 -> 0.5.0`) ou merge da branch `feat/3-federated-learning` na `main`, os dois requisitos abaixo são **obrigatórios**:
+
+1. **Gate A — Transporte de Rede Real (Entrega `11.10` `[ ]`):**
+   - Validar o protocolo binário `HFED` trafegando sobre um meio de transporte real (sockets TCP/UDP, MQTT, UART ou QEMU com múltiplos processos/nós ESP32 reais), saindo do cenário atual onde os buffers são passados em memória dentro do mesmo processo.
+2. **Gate B — Compilação Cruzada nos Firmwares de Emulação (Entrega `11.11` `[ ]`):**
+   - Executar e validar a compilação cruzada e a sanidade funcional em `emulation/esp32/` (ESP-IDF / Xtensa) e `emulation/cortex-m3/` (`arm-none-eabi-gcc` + QEMU) após a reestruturação modular de `code/` (`core/`, `ensemble/`, `federated/`).
+
+> **Item Dispensado:** A validação de paridade numérica direta em Python contra `paularaissa/project-vfdt` (Flower + River) no mesmo CSV **não é requerida** para o upgrade de versão.
+

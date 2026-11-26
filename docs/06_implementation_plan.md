@@ -1156,7 +1156,7 @@ flowchart TD
 - **Modo 1 (`Fed-Forest`):** Cliente mantém 1 árvore local treinável + $M$ pares compactos; servidor C11 estático agrega com políticas `ALL`, `TOP_M` ou `ROUND_ROBIN` (+ `exclude_self`).
 - **Modo 2 (`Fed-VFDT`):** Cliente com `HT_TREE_FLAG_DEFER_SPLITS` (0 bytes extras em `ht_tree_t`) e servidor C11 estático suportando `HT_FED_VFDT_COORDINATED` (`QUORUM`/`MAJORITY`/`MERIT`) e `HT_FED_VFDT_STATS_MERGE` (fusão exata de observadores via Chan/Welford/Ben-Haim + FedAvg SGD), recuperação de *stragglers* via `split_log` / `FULL_SNAPSHOT` e reset coordenado por drift.
 
-### 12.2 Resumo das Entregas Concluídas (11.1 a 11.7)
+### 12.2 Resumo das Entregas e Gates de Release (11.1 a 11.11)
 - **Entrega 11.1 (`[x]` — `2de8803`):** Estudo técnico e alinhamento da Fase 9 em `docs/13_federated_learning.md`, `docs/11_embedded_micro_ensembles.md` e `docs/06_implementation_plan.md`.
 - **Entrega 11.2 (`[x]` — `31c6c8a`):** Reestruturação modular de `code/` (`core/`, `ensemble/`, `federated/`) e atualização de `code/Makefile`, `emulation/` e `main_benchmark/tune_hyperparams.py`.
 - **Entrega 11.3 (`[x]` — `7514a1d`):** Extensões cirúrgicas no núcleo `core/` (merge de observadores em `ht_observer` + `HT_TREE_FLAG_DEFER_SPLITS`, `evaluate_leaf_split`, `apply_split`, `reset_subtree_to_leaf` em `ht_tree`).
@@ -1165,6 +1165,12 @@ flowchart TD
 - **Entrega 11.6 (`[x]` — `7612cf6`):** Modo 2 `ht_fed_vfdt` (`COORDINATED` + `STATS_MERGE` + *stragglers* + drift reset) com testes em 3 níveis (`test_fed_vfdt.c`).
 - **Entrega 11.7 (`[x]` — `c59cb2b`):** Simulador multi-cliente C11 (`benchmarks/fed_simulator.c`) e target `make bench-federated`.
 - **Entrega 11.8 (`[x]` — `a976b13`):** Auditoria formal contra o paper/código oficial Fed-VFDT (`paularaissa/project-vfdt`, IEEE ICTAI 2025) e alinhamento estrito das regras de consenso, threshold e filtro `require_locally_ready`.
+- **Entrega 11.9 (`[x]` — `3dbc0a3`):** Benchmark federado multi-cliente nos 8 datasets reais de `main_benchmark/` (Non-IID `Dirichlet α=0.3` & IID, $K=10$, $R=20$, perfil MCU Tier 8 $\le 100\text{ KB}$) comparando `Local-Only`, `Centralized Oracle`, Modo 1 (`Fed-Forest`) e Modo 2 (`Fed-VFDT` Coordenado & `Stats-Merge`) via `make bench-main-federated` ([`main_benchmark/federated_benchmark_report.md`](file:///home/julio/Documentos/pessoal_minimal-decision-tree/main_benchmark/federated_benchmark_report.md)).
+- **Entrega 11.10 (`[ ]` — Gate Obrigatório p/ Upgrade de Versão `0.4.1 -> 0.5.0`):** Validação de transporte de rede real (sockets TCP/UDP, MQTT, UART ou QEMU com múltiplos processos/nós ESP32 reais) trafegando frames binários `HFED` ponta a ponta fora da simulação in-process.
+- **Entrega 11.11 (`[ ]` — Gate Obrigatório p/ Upgrade de Versão `0.4.1 -> 0.5.0`):** Validação de compilação cruzada e sanidade nos firmwares embarcados de emulação (`emulation/esp32/` via ESP-IDF/Xtensa e `emulation/cortex-m3/` via `arm-none-eabi-gcc` + QEMU) após a reestruturação modular de `code/`.
+
+> [!NOTE]
+> **Escopo de Validação:** A paridade numérica direta em Python contra `paularaissa/project-vfdt` (Flower + River) foi explicitamente dispensada como requisito. O upgrade SemVer (`0.4.1 -> 0.5.0`) permanece bloqueado até a conclusão e validação das entregas **11.10** e **11.11** (além de aprovação explícita do usuário).
 
 
 
