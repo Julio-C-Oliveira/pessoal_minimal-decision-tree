@@ -25,7 +25,7 @@ TEST_RUNNER = $(BUILD_DIR)/test_runner
 
 VERSION ?= $(shell cat ../VERSION 2>/dev/null || cat VERSION 2>/dev/null || echo "0.1.0")
 
-.PHONY: all lib test clean bench bench-triple bench-drift bench-regression bench-memory bench-main bench-prep bench-esp32 bench-tune bench-federated directories version
+.PHONY: all lib test clean bench bench-triple bench-drift bench-regression bench-memory bench-main bench-main-federated bench-prep bench-esp32 bench-tune bench-federated directories version
 
 version:
 	@echo "kansho (libht) version $(VERSION)"
@@ -237,6 +237,16 @@ $(FED_SIM_BIN): directories $(SRCS) $(FED_SIM_SRC)
 bench-federated: $(FED_SIM_BIN)
 	@echo "Executing Multi-Client Federated Learning Simulator (MCU Tier 4 Profile)..."
 	./$(FED_SIM_BIN)
+
+bench-main-federated: directories
+	@echo "Executing Real-Dataset Multi-Client Federated Benchmark (8 Datasets x Non-IID & IID)..."
+	@if [ -x "$(PYTHON)" ]; then \
+		$(PYTHON) ../main_benchmark/federated_benchmark.py --data-dir ../main_benchmark/data --report ../main_benchmark/federated_benchmark_report.md --json ../main_benchmark/federated_benchmark_results.json $(FED_ARGS); \
+	elif command -v python3 >/dev/null 2>&1; then \
+		python3 ../main_benchmark/federated_benchmark.py --data-dir ../main_benchmark/data --report ../main_benchmark/federated_benchmark_report.md --json ../main_benchmark/federated_benchmark_results.json $(FED_ARGS); \
+	else \
+		echo "Error: Python 3 not found!"; exit 1; \
+	fi
 
 clean:
 	rm -rf $(BUILD_DIR)
