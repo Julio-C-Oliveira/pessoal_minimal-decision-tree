@@ -1,6 +1,7 @@
 CC ?= gcc
 DEPFLAGS = -MMD -MP
-CFLAGS = -std=c11 -O2 -Wall -Wextra -Werror -pedantic -Iinclude $(DEPFLAGS) $(CFLAGS_EXTRA)
+INC_FLAGS = -Iinclude -Iinclude/core -Iinclude/ensemble -Iinclude/federated
+CFLAGS = -std=c11 -O2 -Wall -Wextra -Werror -pedantic $(INC_FLAGS) $(DEPFLAGS) $(CFLAGS_EXTRA)
 LDFLAGS = -lm
 
 SRC_DIR = src
@@ -10,18 +11,21 @@ BUILD_DIR = build
 BUILD_SRC = $(BUILD_DIR)/src
 BUILD_TESTS = $(BUILD_DIR)/tests
 
-# Source files (empty in Milestone 1.1, populated in subsequent milestones)
-SRCS = $(wildcard $(SRC_DIR)/*.c)
+# Modular source files (core, ensemble, federated)
+CORE_SRCS = $(wildcard $(SRC_DIR)/core/*.c)
+ENSEMBLE_SRCS = $(wildcard $(SRC_DIR)/ensemble/*.c)
+FEDERATED_SRCS = $(wildcard $(SRC_DIR)/federated/*.c)
+SRCS = $(CORE_SRCS) $(ENSEMBLE_SRCS) $(FEDERATED_SRCS)
 OBJS = $(patsubst $(SRC_DIR)/%.c, $(BUILD_SRC)/%.o, $(SRCS))
 
-# Test source files
-TEST_SRCS = $(wildcard $(TEST_DIR)/*.c)
+# Test source files (root + modular subfolders)
+TEST_SRCS = $(wildcard $(TEST_DIR)/*.c) $(wildcard $(TEST_DIR)/core/*.c) $(wildcard $(TEST_DIR)/ensemble/*.c) $(wildcard $(TEST_DIR)/federated/*.c)
 TEST_OBJS = $(patsubst $(TEST_DIR)/%.c, $(BUILD_TESTS)/%.o, $(TEST_SRCS))
 TEST_RUNNER = $(BUILD_DIR)/test_runner
 
 VERSION ?= $(shell cat ../VERSION 2>/dev/null || cat VERSION 2>/dev/null || echo "0.1.0")
 
-.PHONY: all lib test clean bench bench-triple bench-drift bench-regression bench-memory bench-main bench-prep bench-esp32 bench-tune directories version
+.PHONY: all lib test clean bench bench-triple bench-drift bench-regression bench-memory bench-main bench-prep bench-esp32 bench-tune bench-federated directories version
 
 version:
 	@echo "kansho (libht) version $(VERSION)"
@@ -29,7 +33,7 @@ version:
 all: lib test
 
 directories:
-	@mkdir -p $(BUILD_DIR) $(BUILD_SRC) $(BUILD_TESTS)
+	@mkdir -p $(BUILD_DIR) $(BUILD_SRC)/core $(BUILD_SRC)/ensemble $(BUILD_SRC)/federated $(BUILD_TESTS)/core $(BUILD_TESTS)/ensemble $(BUILD_TESTS)/federated
 
 lib: directories $(OBJS)
 	@if [ -n "$(OBJS)" ]; then \
@@ -38,12 +42,12 @@ lib: directories $(OBJS)
 	fi
 
 $(BUILD_SRC)/%.o: $(SRC_DIR)/%.c
-	@mkdir -p $(BUILD_SRC)
+	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(BUILD_TESTS)/%.o: $(TEST_DIR)/%.c
-	@mkdir -p $(BUILD_TESTS)
-	$(CC) $(CFLAGS) -c $< -o $@
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -I$(TEST_DIR) -c $< -o $@
 
 $(TEST_RUNNER): directories $(OBJS) $(TEST_OBJS)
 	$(CC) $(CFLAGS) $(OBJS) $(TEST_OBJS) $(LDFLAGS) -o $@
@@ -66,52 +70,52 @@ BENCH_MNIST_RUNNER = $(BUILD_DIR)/bench_c_runner_mnist
 BENCH_MNIST_DOUBLE = $(BUILD_DIR)/bench_c_runner_mnist_double
 PYTHON ?= ../.venv/bin/python
 
-$(BENCH_RUNNER): directories $(SRCS) $(BENCH_SRC)
-	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -pedantic -Iinclude $(SRCS) $(BENCH_SRC) $(LDFLAGS) -o $@
+$(BENCH_RUNNER): directories $(CORE_SRCS) $(BENCH_SRC)
+	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -pedantic $(INC_FLAGS) $(CORE_SRCS) $(BENCH_SRC) $(LDFLAGS) -o $@
 
-$(BENCH_RUNNER_DOUBLE): directories $(SRCS) $(BENCH_SRC)
-	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -pedantic -Iinclude -DHT_USE_DOUBLE $(SRCS) $(BENCH_SRC) $(LDFLAGS) -o $@
+$(BENCH_RUNNER_DOUBLE): directories $(CORE_SRCS) $(BENCH_SRC)
+	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -pedantic $(INC_FLAGS) -DHT_USE_DOUBLE $(CORE_SRCS) $(BENCH_SRC) $(LDFLAGS) -o $@
 
-$(BENCH_RUNNER_128): directories $(SRCS) $(BENCH_SRC)
-	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -pedantic -Iinclude -DHT_MAX_ACTIVE_LEAVES=128 -DHT_MAX_NODES=2048 $(SRCS) $(BENCH_SRC) $(LDFLAGS) -o $@
+$(BENCH_RUNNER_128): directories $(CORE_SRCS) $(BENCH_SRC)
+	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -pedantic $(INC_FLAGS) -DHT_MAX_ACTIVE_LEAVES=128 -DHT_MAX_NODES=2048 $(CORE_SRCS) $(BENCH_SRC) $(LDFLAGS) -o $@
 
-$(BENCH_RUNNER_64): directories $(SRCS) $(BENCH_SRC)
-	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -pedantic -Iinclude -DHT_MAX_ACTIVE_LEAVES=64 -DHT_MAX_NODES=1024 $(SRCS) $(BENCH_SRC) $(LDFLAGS) -o $@
+$(BENCH_RUNNER_64): directories $(CORE_SRCS) $(BENCH_SRC)
+	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -pedantic $(INC_FLAGS) -DHT_MAX_ACTIVE_LEAVES=64 -DHT_MAX_NODES=1024 $(CORE_SRCS) $(BENCH_SRC) $(LDFLAGS) -o $@
 
-$(BENCH_RUNNER_32): directories $(SRCS) $(BENCH_SRC)
-	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -pedantic -Iinclude -DHT_MAX_ACTIVE_LEAVES=32 -DHT_MAX_NODES=512 $(SRCS) $(BENCH_SRC) $(LDFLAGS) -o $@
+$(BENCH_RUNNER_32): directories $(CORE_SRCS) $(BENCH_SRC)
+	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -pedantic $(INC_FLAGS) -DHT_MAX_ACTIVE_LEAVES=32 -DHT_MAX_NODES=512 $(CORE_SRCS) $(BENCH_SRC) $(LDFLAGS) -o $@
 
-$(BENCH_RUNNER_16): directories $(SRCS) $(BENCH_SRC)
-	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -pedantic -Iinclude -DHT_MAX_ACTIVE_LEAVES=16 -DHT_MAX_NODES=256 $(SRCS) $(BENCH_SRC) $(LDFLAGS) -o $@
+$(BENCH_RUNNER_16): directories $(CORE_SRCS) $(BENCH_SRC)
+	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -pedantic $(INC_FLAGS) -DHT_MAX_ACTIVE_LEAVES=16 -DHT_MAX_NODES=256 $(CORE_SRCS) $(BENCH_SRC) $(LDFLAGS) -o $@
 
-$(BENCH_RUNNER_8): directories $(SRCS) $(BENCH_SRC)
-	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -pedantic -Iinclude -DHT_MAX_ACTIVE_LEAVES=8 -DHT_MAX_NODES=128 $(SRCS) $(BENCH_SRC) $(LDFLAGS) -o $@
+$(BENCH_RUNNER_8): directories $(CORE_SRCS) $(BENCH_SRC)
+	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -pedantic $(INC_FLAGS) -DHT_MAX_ACTIVE_LEAVES=8 -DHT_MAX_NODES=128 $(CORE_SRCS) $(BENCH_SRC) $(LDFLAGS) -o $@
 
-$(BENCH_RUNNER_4): directories $(SRCS) $(BENCH_SRC)
-	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -pedantic -Iinclude -DHT_MAX_ACTIVE_LEAVES=4 -DHT_MAX_NODES=64 $(SRCS) $(BENCH_SRC) $(LDFLAGS) -o $@
+$(BENCH_RUNNER_4): directories $(CORE_SRCS) $(BENCH_SRC)
+	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -pedantic $(INC_FLAGS) -DHT_MAX_ACTIVE_LEAVES=4 -DHT_MAX_NODES=64 $(CORE_SRCS) $(BENCH_SRC) $(LDFLAGS) -o $@
 
-$(BENCH_MNIST_RUNNER): directories $(SRCS) $(BENCH_SRC)
-	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -pedantic -Iinclude -DHT_MAX_CLASSES=10 -DHT_MAX_ACTIVE_LEAVES=128 -DHT_MAX_NODES=2048 $(SRCS) $(BENCH_SRC) $(LDFLAGS) -o $@
+$(BENCH_MNIST_RUNNER): directories $(CORE_SRCS) $(BENCH_SRC)
+	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -pedantic $(INC_FLAGS) -DHT_MAX_CLASSES=10 -DHT_MAX_ACTIVE_LEAVES=128 -DHT_MAX_NODES=2048 $(CORE_SRCS) $(BENCH_SRC) $(LDFLAGS) -o $@
 
-$(BENCH_MNIST_DOUBLE): directories $(SRCS) $(BENCH_SRC)
-	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -pedantic -Iinclude -DHT_USE_DOUBLE -DHT_MAX_CLASSES=10 -DHT_MAX_ACTIVE_LEAVES=128 -DHT_MAX_NODES=2048 $(SRCS) $(BENCH_SRC) $(LDFLAGS) -o $@
+$(BENCH_MNIST_DOUBLE): directories $(CORE_SRCS) $(BENCH_SRC)
+	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -pedantic $(INC_FLAGS) -DHT_USE_DOUBLE -DHT_MAX_CLASSES=10 -DHT_MAX_ACTIVE_LEAVES=128 -DHT_MAX_NODES=2048 $(CORE_SRCS) $(BENCH_SRC) $(LDFLAGS) -o $@
 
 BENCH_MAIN_RUNNER = $(BUILD_DIR)/bench_c_runner_main
 BENCH_MAIN_DOUBLE = $(BUILD_DIR)/bench_c_runner_main_double
 BENCH_RUNNER_8_MAIN = $(BUILD_DIR)/bench_c_runner_8_main
 BENCH_RUNNER_4_MAIN = $(BUILD_DIR)/bench_c_runner_4_main
 
-$(BENCH_MAIN_RUNNER): directories $(SRCS) $(BENCH_SRC)
-	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -pedantic -Iinclude -DHT_MAX_FEATURES=64 -DHT_MAX_CLASSES=8 -DHT_MAX_ACTIVE_LEAVES=40 -DHT_MAX_NODES=1024 $(SRCS) $(BENCH_SRC) $(LDFLAGS) -o $@
+$(BENCH_MAIN_RUNNER): directories $(CORE_SRCS) $(BENCH_SRC)
+	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -pedantic $(INC_FLAGS) -DHT_MAX_FEATURES=64 -DHT_MAX_CLASSES=8 -DHT_MAX_ACTIVE_LEAVES=40 -DHT_MAX_NODES=1024 $(CORE_SRCS) $(BENCH_SRC) $(LDFLAGS) -o $@
 
-$(BENCH_MAIN_DOUBLE): directories $(SRCS) $(BENCH_SRC)
-	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -pedantic -Iinclude -DHT_USE_DOUBLE -DHT_MAX_FEATURES=64 -DHT_MAX_CLASSES=8 -DHT_MAX_ACTIVE_LEAVES=40 -DHT_MAX_NODES=1024 $(SRCS) $(BENCH_SRC) $(LDFLAGS) -o $@
+$(BENCH_MAIN_DOUBLE): directories $(CORE_SRCS) $(BENCH_SRC)
+	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -pedantic $(INC_FLAGS) -DHT_USE_DOUBLE -DHT_MAX_FEATURES=64 -DHT_MAX_CLASSES=8 -DHT_MAX_ACTIVE_LEAVES=40 -DHT_MAX_NODES=1024 $(CORE_SRCS) $(BENCH_SRC) $(LDFLAGS) -o $@
 
-$(BENCH_RUNNER_8_MAIN): directories $(SRCS) $(BENCH_SRC)
-	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -pedantic -Iinclude -DHT_MAX_FEATURES=64 -DHT_MAX_CLASSES=8 -DHT_MAX_ACTIVE_LEAVES=8 -DHT_MAX_NODES=128 $(SRCS) $(BENCH_SRC) $(LDFLAGS) -o $@
+$(BENCH_RUNNER_8_MAIN): directories $(CORE_SRCS) $(BENCH_SRC)
+	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -pedantic $(INC_FLAGS) -DHT_MAX_FEATURES=64 -DHT_MAX_CLASSES=8 -DHT_MAX_ACTIVE_LEAVES=8 -DHT_MAX_NODES=128 $(CORE_SRCS) $(BENCH_SRC) $(LDFLAGS) -o $@
 
-$(BENCH_RUNNER_4_MAIN): directories $(SRCS) $(BENCH_SRC)
-	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -pedantic -Iinclude -DHT_MAX_FEATURES=64 -DHT_MAX_CLASSES=8 -DHT_MAX_ACTIVE_LEAVES=4 -DHT_MAX_NODES=64 $(SRCS) $(BENCH_SRC) $(LDFLAGS) -o $@
+$(BENCH_RUNNER_4_MAIN): directories $(CORE_SRCS) $(BENCH_SRC)
+	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -pedantic $(INC_FLAGS) -DHT_MAX_FEATURES=64 -DHT_MAX_CLASSES=8 -DHT_MAX_ACTIVE_LEAVES=4 -DHT_MAX_NODES=64 $(CORE_SRCS) $(BENCH_SRC) $(LDFLAGS) -o $@
 
 bench: $(BENCH_RUNNER) $(BENCH_RUNNER_DOUBLE)
 	@echo "Executing Hoeffding Tree Parity & Memory Benchmark vs River..."
@@ -224,4 +228,4 @@ bench-esp32:
 clean:
 	rm -rf $(BUILD_DIR)
 
--include $(wildcard $(BUILD_SRC)/*.d) $(wildcard $(BUILD_TESTS)/*.d)
+-include $(wildcard $(BUILD_SRC)/*.d) $(wildcard $(BUILD_SRC)/*/*.d) $(wildcard $(BUILD_TESTS)/*.d) $(wildcard $(BUILD_TESTS)/*/*.d)

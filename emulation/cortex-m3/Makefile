@@ -28,7 +28,7 @@ CFLAGS = $(ARCH_FLAGS) \
          -std=c11 -Wall -Wextra -Werror -pedantic -Os -g3 \
          -ffunction-sections -fdata-sections \
          $(CONFIG_DEFS) \
-         -Isrc -I$(CODE_DIR)/include
+         -Isrc -I$(CODE_DIR)/include -I$(CODE_DIR)/include/core -I$(CODE_DIR)/include/ensemble -I$(CODE_DIR)/include/federated
 
 LDFLAGS = $(ARCH_FLAGS) \
           -Tlm3s6965.ld \
@@ -44,16 +44,16 @@ SRCS = src/startup_lm3s6965.c \
        src/uart.c \
        src/cycles.c \
        src/main.c \
-       $(CODE_DIR)/src/ht_memory.c \
-       $(CODE_DIR)/src/ht_tree.c \
-       $(CODE_DIR)/src/ht_criterion.c \
-       $(CODE_DIR)/src/ht_observer.c \
-       $(CODE_DIR)/src/ht_drift.c \
-       $(CODE_DIR)/src/ht_prep.c
+       $(CODE_DIR)/src/core/ht_memory.c \
+       $(CODE_DIR)/src/core/ht_tree.c \
+       $(CODE_DIR)/src/core/ht_criterion.c \
+       $(CODE_DIR)/src/core/ht_observer.c \
+       $(CODE_DIR)/src/core/ht_drift.c \
+       $(CODE_DIR)/src/core/ht_prep.c
 
 OBJS = $(patsubst %.c,$(BUILD_DIR)/%.o,$(notdir $(SRCS)))
 
-vpath %.c src $(CODE_DIR)/src
+vpath %.c src $(CODE_DIR)/src/core $(CODE_DIR)/src/ensemble $(CODE_DIR)/src/federated
 
 .PHONY: all clean size
 
