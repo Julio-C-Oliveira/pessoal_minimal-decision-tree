@@ -225,6 +225,19 @@ bench-esp32:
 	@echo "Executing ESP32 QEMU Emulation Benchmark..."
 	@bash ../emulation/esp32/run_qemu.sh bench
 
+FED_SIM_SRC = ../benchmarks/fed_simulator.c
+FED_SIM_BIN = $(BUILD_DIR)/fed_simulator
+
+$(FED_SIM_BIN): directories $(SRCS) $(FED_SIM_SRC)
+	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -pedantic $(INC_FLAGS) \
+		-DHT_MAX_NODES=128 -DHT_MAX_ACTIVE_LEAVES=4 -DHT_COMPACT_MAX_NODES=64 \
+		-DHT_FED_FOREST_MAX_TREES=8 -DHT_FED_SERVER_MAX_TREES=16 \
+		$(SRCS) $(FED_SIM_SRC) $(LDFLAGS) -o $@
+
+bench-federated: $(FED_SIM_BIN)
+	@echo "Executing Multi-Client Federated Learning Simulator (MCU Tier 4 Profile)..."
+	./$(FED_SIM_BIN)
+
 clean:
 	rm -rf $(BUILD_DIR)
 
