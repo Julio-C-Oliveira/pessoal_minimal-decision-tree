@@ -131,6 +131,31 @@ typedef float ht_float_t;
 #define HT_HIST_MAX_BINS         4U
 #endif
 
+/* Compact inference tree & Federated Learning static pool capacities */
+#ifndef HT_COMPACT_MAX_NODES
+#define HT_COMPACT_MAX_NODES     128U
+#endif
+
+#ifndef HT_FED_FOREST_MAX_TREES
+#define HT_FED_FOREST_MAX_TREES  8U
+#endif
+
+#ifndef HT_FED_SERVER_MAX_TREES
+#define HT_FED_SERVER_MAX_TREES  16U
+#endif
+
+#ifndef HT_FED_MAX_CLIENTS
+#define HT_FED_MAX_CLIENTS       16U
+#endif
+
+#ifndef HT_FED_MAX_PROPOSALS
+#define HT_FED_MAX_PROPOSALS     16U
+#endif
+
+#ifndef HT_FED_SPLIT_LOG_CAP
+#define HT_FED_SPLIT_LOG_CAP     64U
+#endif
+
 #define HT_INVALID_IDX       ((uint16_t)0xFFFFU)
 #define HT_NO_FEATURE        ((uint8_t)0xFFU)
 
@@ -174,12 +199,15 @@ typedef union {
  * @brief Return status codes for Hoeffding Tree operations.
  */
 typedef enum {
-    HT_OK                =  0,
-    HT_ERR_INVALID_ARG   = -1,
-    HT_ERR_OUT_OF_NODES  = -2,
-    HT_ERR_OUT_OF_STATS  = -3,
-    HT_ERR_IO            = -4,
-    HT_ERR_CORRUPT_IMAGE = -5
+    HT_OK                   =  0,
+    HT_ERR_INVALID_ARG      = -1,
+    HT_ERR_OUT_OF_NODES     = -2,
+    HT_ERR_OUT_OF_STATS     = -3,
+    HT_ERR_IO               = -4,
+    HT_ERR_CORRUPT_IMAGE    = -5,
+    HT_ERR_STALE_VERSION    = -6,
+    HT_ERR_BUFFER_TOO_SMALL = -7,
+    HT_ERR_QUORUM_NOT_MET   = -8
 } ht_status_t;
 
 /* Static assertions for fundamental data type sizes */

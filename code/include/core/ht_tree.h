@@ -82,6 +82,9 @@ typedef struct {
     uint16_t   alt_tree_idx; /**< Root of alternate subtree in node_pool, or HT_INVALID_IDX */
 } ht_node_drift_t;
 
+/* Runtime control flags stored in ht_tree_t::tree_flags (zero extra bytes) */
+#define HT_TREE_FLAG_DEFER_SPLITS (1U << 0) /**< Suppress autonomous local splits (for Fed-VFDT) */
+
 /**
  * @brief Complete Hoeffding Tree structure.
  *
@@ -108,7 +111,7 @@ typedef struct {
     uint16_t                     n_alternate_trees;
     uint16_t                     n_pruned_alternate_trees;
     uint16_t                     n_switch_alternate_trees;
-    uint16_t                     pad;
+    uint16_t                     tree_flags;
 } ht_tree_t;
 
 /* Compile-time verification of strict memory budget */
@@ -406,5 +409,68 @@ ht_status_t ht_tree_learn_one_reg(ht_tree_t *tree,
                                   const ht_value_t x[HT_MAX_FEATURES],
                                   ht_float_t y,
                                   ht_float_t weight);
+
+/* --- External Split Coordination & Subtree Reset API (Fed-VFDT) ---------- */
+
+/**
+ * @brief Enables or disables deferred local splitting.
+ *
+ * When enabled (defer == true), ht_tree_learn_one / ht_tree_learn_one_reg update
+ * all leaf statistics normally without triggering autonomous local splits.
+ */
+void ht_tree_set_defer_splits(ht_tree_t *tree, bool defer);
+
+/**
+ * @brief Evaluates split candidates and Hoeffding Bound for a leaf without mutating the tree.
+ *
+ * Supports both Classification and Regression tasks.
+ *
+ * @param tree Pointer to tree instance.
+ * @param leaf_idx Index of active leaf node to evaluate.
+ * @param out_best Output best candidate (optional, may be NULL).
+ * @param out_second Output second-best candidate (optional, may be NULL).
+ * @param out_should_split Output boolean indicating if Hoeffding bound / tie-break is met.
+ * @return HT_OK on success, or negative error code.
+ */
+ht_status_t ht_tree_evaluate_leaf_split(const ht_tree_t *tree,
+                                        uint16_t leaf_idx,
+                                        ht_split_candidate_t *out_best,
+                                        ht_split_candidate_t *out_second,
+                                        bool *out_should_split);
+
+/**
+ * @brief Deterministically applies a split candidate to a leaf node.
+ *
+ * Converts leaf_idx into an internal branch, recycles its stats block, allocates
+ * left and right child leaves in deterministic order, and initializes child distributions
+ * (and regression SGD inheritance).
+ *
+ * @param tree Pointer to tree instance.
+ * @param leaf_idx Index of leaf node to split.
+ * @param cand Split candidate descriptor (must have valid feature_idx != HT_NO_FEATURE).
+ * @param depth Depth of leaf_idx (for max_depth_seen tracking).
+ * @param out_left_idx Optional output pointer for allocated left child index.
+ * @param out_right_idx Optional output pointer for allocated right child index.
+ * @return HT_OK on success, or negative error code (e.g. HT_ERR_OUT_OF_NODES).
+ */
+ht_status_t ht_tree_apply_split(ht_tree_t *tree,
+                                uint16_t leaf_idx,
+                                const ht_split_candidate_t *cand,
+                                uint16_t depth,
+                                uint16_t *out_left_idx,
+                                uint16_t *out_right_idx);
+
+/**
+ * @brief Resets a node (leaf or internal branch) in-place into a clean active leaf.
+ *
+ * If node_idx is an internal branch, iteratively frees its left/right subtrees
+ * while preserving node_idx itself so topology indices stay synchronized across
+ * federated clients (e.g. root_idx remains unchanged).
+ *
+ * @param tree Pointer to tree instance.
+ * @param node_idx Target node index to reset.
+ * @return HT_OK on success, or negative error code.
+ */
+ht_status_t ht_tree_reset_subtree_to_leaf(ht_tree_t *tree, uint16_t node_idx);
 
 #endif /* HT_TREE_H */

@@ -421,4 +421,45 @@ void ht_reg_categorical_update(ht_reg_categorical_obs_t *obs,
                                ht_float_t y_val,
                                ht_float_t weight);
 
+/* ========================================================================= */
+/* --- Sufficient Statistics Merge API (Federated / Parallel Aggregation) -- */
+/* ========================================================================= */
+
+/**
+ * @brief Exact parallel merge of two Gaussian Welford observers (Chan et al., 1983).
+ *
+ * Merges src into dst in O(1), combining count, mean, M2, min_val, and max_val.
+ */
+void ht_gaussian_merge(ht_gaussian_obs_t *dst, const ht_gaussian_obs_t *src);
+
+/**
+ * @brief Exact element-wise summation of two categorical nominal observers.
+ */
+void ht_categorical_merge(ht_categorical_obs_t *dst,
+                          const ht_categorical_obs_t *src,
+                          uint8_t n_classes);
+
+/**
+ * @brief Merges two Ben-Haim & Tom-Tov dynamic histogram observers into dst.
+ *
+ * Preserves sorted bin centers and <= HT_HIST_MAX_BINS capacity via greedy closest-pair fusion.
+ */
+void ht_hist_merge(ht_hist_obs_t *dst,
+                   const ht_hist_obs_t *src,
+                   uint8_t n_classes);
+
+/**
+ * @brief Merges two regression numeric slot observers into dst using Chan's formulas.
+ *
+ * Preserves ascending x_mean ordering and <= HT_REG_NUM_SLOTS capacity.
+ */
+void ht_reg_numeric_merge(ht_reg_numeric_obs_t *dst,
+                          const ht_reg_numeric_obs_t *src);
+
+/**
+ * @brief Exact per-category parallel merge of two regression categorical observers.
+ */
+void ht_reg_categorical_merge(ht_reg_categorical_obs_t *dst,
+                              const ht_reg_categorical_obs_t *src);
+
 #endif /* HT_OBSERVER_H */

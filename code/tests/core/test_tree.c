@@ -1006,6 +1006,55 @@ static void test_tree_attached_prep_pipeline(void) {
     HT_ASSERT(tree.prep_pipeline == NULL);
 }
 
+static void test_tree_defer_splits_apply_and_reset_subtree(void) {
+    ht_config_params_t params;
+    ht_default_params(&params, 2, 2);
+    params.grace_period = 20U;
+    params.delta = (ht_float_t)1e-2;
+
+    ht_tree_t tree;
+    HT_ASSERT_EQ(ht_tree_init(&tree, &params), HT_OK);
+    ht_tree_set_defer_splits(&tree, true);
+
+    ht_value_t x[HT_MAX_FEATURES];
+    memset(x, 0, sizeof(x));
+
+    for (int i = 0; i < 120; ++i) {
+        uint8_t c = (i % 2 == 0) ? 0U : 1U;
+        x[0].num = (c == 0U) ? (ht_float_t)(1.0 + (i % 5) * 0.1) : (ht_float_t)(10.0 + (i % 5) * 0.1);
+        x[1].num = (ht_float_t)(i % 7);
+        HT_ASSERT_EQ(ht_tree_learn_one(&tree, x, c, (ht_float_t)1.0), HT_OK);
+    }
+
+    /* Because splits are deferred, root must still be a single active leaf */
+    HT_ASSERT_EQ(tree.n_decision_nodes, 0U);
+    HT_ASSERT_EQ(tree.n_active_leaves, 1U);
+
+    /* External evaluation must recommend splitting on feature 0 */
+    ht_split_candidate_t best, second;
+    bool should_split = false;
+    HT_ASSERT_EQ(ht_tree_evaluate_leaf_split(&tree, tree.root_idx, &best, &second, &should_split), HT_OK);
+    HT_ASSERT(should_split);
+    HT_ASSERT_EQ(best.feature_idx, 0U);
+
+    /* Deterministic forced split */
+    uint16_t l_idx = HT_INVALID_IDX, r_idx = HT_INVALID_IDX;
+    HT_ASSERT_EQ(ht_tree_apply_split(&tree, tree.root_idx, &best, 0U, &l_idx, &r_idx), HT_OK);
+    HT_ASSERT_NEQ(l_idx, HT_INVALID_IDX);
+    HT_ASSERT_NEQ(r_idx, HT_INVALID_IDX);
+    HT_ASSERT_EQ(tree.n_decision_nodes, 1U);
+    HT_ASSERT_EQ(tree.n_active_leaves, 2U);
+
+    /* Reset root subtree back to a clean active leaf preserving root_idx */
+    uint16_t old_root = tree.root_idx;
+    HT_ASSERT_EQ(ht_tree_reset_subtree_to_leaf(&tree, tree.root_idx), HT_OK);
+    HT_ASSERT_EQ(tree.root_idx, old_root);
+    HT_ASSERT_EQ(tree.n_decision_nodes, 0U);
+    HT_ASSERT_EQ(tree.n_active_leaves, 1U);
+    HT_ASSERT_EQ(ht_node_count(&tree.memory), 1U);
+    HT_ASSERT_EQ(ht_stats_count(&tree.memory), 1U);
+}
+
 /* ========================================================================= */
 /* --- Test Runner Entry Point --------------------------------------------- */
 /* ========================================================================= */
@@ -1042,4 +1091,7 @@ void test_tree_run(void) {
     /* Nível 2: Micro-Pipeline & Normalização SGD Híbrida */
     HT_RUN_TEST(test_tree_leaf_sgd_hybrid_normalization);
     HT_RUN_TEST(test_tree_attached_prep_pipeline);
+
+    /* Nível 1 & 2: Primitivas de Coordenação Externa (Fed-VFDT) */
+    HT_RUN_TEST(test_tree_defer_splits_apply_and_reset_subtree);
 }
