@@ -25,7 +25,7 @@ TEST_RUNNER = $(BUILD_DIR)/test_runner
 
 VERSION ?= $(shell cat ../VERSION 2>/dev/null || cat VERSION 2>/dev/null || echo "0.1.0")
 
-.PHONY: all lib test clean bench bench-triple bench-drift bench-regression bench-memory bench-main bench-main-federated bench-prep bench-esp32 bench-tune bench-federated directories version
+.PHONY: all lib test clean bench bench-triple bench-drift bench-regression bench-memory bench-main bench-main-federated bench-prep bench-esp32 bench-tune bench-federated bench-fed-net directories version
 
 version:
 	@echo "kansho (libht) version $(VERSION)"
@@ -237,6 +237,31 @@ $(FED_SIM_BIN): directories $(SRCS) $(FED_SIM_SRC)
 bench-federated: $(FED_SIM_BIN)
 	@echo "Executing Multi-Client Federated Learning Simulator (MCU Tier 4 Profile)..."
 	./$(FED_SIM_BIN)
+
+FED_NET_SRV_SRC = ../benchmarks/fed_net/fed_net_server.c
+FED_NET_CLI_SRC = ../benchmarks/fed_net/fed_net_client.c
+FED_NET_SRV_BIN = $(BUILD_DIR)/fed_net_server
+FED_NET_CLI_BIN = $(BUILD_DIR)/fed_net_client
+FED_NET_DEFS    = -DHT_MAX_NODES=128 -DHT_MAX_ACTIVE_LEAVES=8 -DHT_COMPACT_MAX_NODES=64 \
+                  -DHT_FED_FOREST_MAX_TREES=8 -DHT_FED_SERVER_MAX_TREES=16 -DHT_FED_SERVER_MAX_PROPOSALS=128
+
+$(FED_NET_SRV_BIN): directories $(SRCS) $(FED_NET_SRV_SRC) ../benchmarks/fed_net/fed_net_common.h
+	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -pedantic $(INC_FLAGS) -I../benchmarks/fed_net $(FED_NET_DEFS) \
+		$(SRCS) $(FED_NET_SRV_SRC) $(LDFLAGS) -o $@
+
+$(FED_NET_CLI_BIN): directories $(SRCS) $(FED_NET_CLI_SRC) ../benchmarks/fed_net/fed_net_common.h
+	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -pedantic $(INC_FLAGS) -I../benchmarks/fed_net $(FED_NET_DEFS) \
+		$(SRCS) $(FED_NET_CLI_SRC) $(LDFLAGS) -o $@
+
+bench-fed-net: $(FED_NET_SRV_BIN) $(FED_NET_CLI_BIN)
+	@echo "Executing Real POSIX TCP Multi-Process Federated Validation Suite (Gate A — 11.10)..."
+	@if command -v python3 >/dev/null 2>&1; then \
+		python3 ../benchmarks/fed_net/run_fed_net_tests.py --server-bin ./$(FED_NET_SRV_BIN) --client-bin ./$(FED_NET_CLI_BIN); \
+	elif [ -x "$(PYTHON)" ]; then \
+		$(PYTHON) ../benchmarks/fed_net/run_fed_net_tests.py --server-bin ./$(FED_NET_SRV_BIN) --client-bin ./$(FED_NET_CLI_BIN); \
+	else \
+		echo "Error: Python 3 not found!"; exit 1; \
+	fi
 
 bench-main-federated: directories
 	@echo "Executing Real-Dataset Multi-Client Federated Benchmark (8 Datasets x Non-IID & IID)..."
