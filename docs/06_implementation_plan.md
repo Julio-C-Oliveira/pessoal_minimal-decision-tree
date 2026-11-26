@@ -61,6 +61,13 @@
 | **10.1** | **Fase 10:** Estudo Técnico e Especificação do Welford-Adaptive SGD / AdaGrad Embarcado | [`docs/12_welford_adaptive_sgd.md`](file:///home/julio/Documentos/pessoal_minimal-decision-tree/docs/12_welford_adaptive_sgd.md), [`docs/06_implementation_plan.md`](file:///home/julio/Documentos/pessoal_minimal-decision-tree/docs/06_implementation_plan.md) | Formalização de `ht_sgd_type_t`, extração de $(n_f, \mu_f, \sigma_f^2)$ com **zero bytes extras**, modos Z-Score AdaGrad / Raw Welford-NLMS, Ridge $\ell_2$ desacoplado e clipping $3\hat{\sigma}_y$ | `[x]` | `HEAD` |
 | **10.2** | **Fase 10:** Otimizador `HT_SGD_WELFORD_ADAGRAD` nas Folhas de Regressão (`ht_tree`) | `code/include/ht_tree.h`, `code/src/ht_tree.c`, `code/tests/test_tree.c`, `code/tests/test_e2e_flow.c` | **⚠️ Plano Já Disponível:** [`docs/12_welford_adaptive_sgd.md`](file:///home/julio/Documentos/pessoal_minimal-decision-tree/docs/12_welford_adaptive_sgd.md)<br/>**N1:** `ht_tree_get_feature_moments`, $\eta_{t,f}$ por atributo, clipping $3\hat{\sigma}_y$ e `sizeof(ht_leaf_stats_t) == 1360 B`<br/>**N2:** herança de pesos pós-split e retrocompatibilidade `HT_SGD_STANDARD`<br/>**N3:** E2E multiescala (`float` e `double`) com `NaN` | `[ ]` | `—` |
 | **10.3** | **Fase 10:** Benchmark Experimental em Regressão Contínua e Atualização da Wiki | `benchmarks/`, `main_benchmark/`, `wiki/*.md`, `README.md` | Comparativo `HT_SGD_STANDARD` vs `HT_SGD_WELFORD_ADAGRAD` (*Bikes*, *NYC Taxi*, *Friedman #1*, *Appliances Energy*) + avaliação SemVer | `[ ]` | `—` |
+| **11.1** | **Fase 11:** Estudo Técnico e Arquitetura de Aprendizado Federado (`Fed-Forest` & `Fed-VFDT`) | [`docs/13_federated_learning.md`](file:///home/julio/Documentos/pessoal_minimal-decision-tree/docs/13_federated_learning.md), [`docs/11_embedded_micro_ensembles.md`](file:///home/julio/Documentos/pessoal_minimal-decision-tree/docs/11_embedded_micro_ensembles.md), [`docs/06_implementation_plan.md`](file:///home/julio/Documentos/pessoal_minimal-decision-tree/docs/06_implementation_plan.md) | Especificação completa dos Modos 1 (`Fed-Forest`), 2A (`Fed-VFDT Coordinated`) e 2B (`Fed-VFDT Stats-Merge`), reestruturação modular de `code/` e protocolo binário `HFED` | `[x]` | `HEAD` |
+| **11.2** | **Fase 11:** Reestruturação Modular de `code/` (`core/`, `ensemble/`, `federated/`) | `code/include/core/*`, `code/src/core/*`, `code/tests/core/*`, `code/Makefile`, `emulation/esp32/main/CMakeLists.txt`, `emulation/cortex-m3/Makefile`, `main_benchmark/tune_hyperparams.py` | Reorganização simétrica mantendo 100% dos testes existentes verdes em `float32` e `double64` e builds externos atualizados | `[ ]` | `—` |
+| **11.3** | **Fase 11:** Extensões Cirúrgicas no Núcleo `core/` (Merge de Observadores & Split Diferido) | `code/include/core/ht_config.h`, `code/include/core/ht_observer.h`, `code/src/core/ht_observer.c`, `code/include/core/ht_tree.h`, `code/src/core/ht_tree.c` | **N1:** `ht_gaussian_merge` (Chan), `ht_categorical_merge`, `ht_hist_merge`, `ht_reg_*_merge`, `HT_TREE_FLAG_DEFER_SPLITS` (0 bytes extras), `ht_tree_evaluate_leaf_split`, `ht_tree_apply_split`, `ht_tree_reset_subtree_to_leaf` | `[ ]` | `—` |
+| **11.4** | **Fase 11:** Fundação Compartilhada `ensemble/` (`ht_compact_tree` & `ht_voting`) | `code/include/ensemble/ht_compact_tree.h`, `code/src/ensemble/ht_compact_tree.c`, `code/include/ensemble/ht_voting.h`, `code/src/ensemble/ht_voting.c`, `code/tests/ensemble/test_compact_tree.c` | **N1/N2:** compactação BFS iterativa (`~1,32 KB` p/ 64 nós), predição bit-a-bit (Classif + Reg + NaN), `save`/`load` e votação ponderada/uniforme compartilhada com a Fase 9 | `[ ]` | `—` |
+| **11.5** | **Fase 11:** Modo 1 — Floresta Federada (`ht_fed_proto` & `ht_fed_forest`) | `code/include/federated/ht_fed_proto.h`, `code/src/federated/ht_fed_proto.c`, `code/include/federated/ht_fed_forest.h`, `code/src/federated/ht_fed_forest.c`, `code/tests/federated/test_fed_forest.c` | **N1:** framing `HFED` + CRC32 + políticas `ALL`/`TOP_M`/`ROUND_ROBIN` + `exclude_self`<br/>**N2/N3:** ganho Non-IID, regressão e adaptação a drift (HAT local + votação ponderada) com SRAM $< 100\text{ KB}$ | `[ ]` | `—` |
+| **11.6** | **Fase 11:** Modo 2 — `Fed-VFDT` Global (`Coordinated Splitting` & `Stats-Merge`) | `code/include/federated/ht_fed_vfdt.h`, `code/src/federated/ht_fed_vfdt.c`, `code/tests/federated/test_fed_vfdt.c`, `code/tests/test_main.c` | **N1/N2:** consenso `QUORUM`/`MAJORITY`/`MERIT` e fusão exata `STATS_MERGE` (Classif + Reg) mantendo topologia 100% idêntica<br/>**N3:** recuperação de *stragglers* via `split_log` e `FULL_SNAPSHOT` + reset coordenado por drift | `[ ]` | `—` |
+| **11.7** | **Fase 11:** Simulador Multi-Cliente e Benchmark Federado (`fed_simulator.c`) | `benchmarks/fed_simulator.c`, `code/Makefile`, `Makefile` | Comparativo C11 puro (**Local-Only vs Centralized vs Fed-Forest vs Fed-VFDT Coordinated vs Fed-VFDT Stats-Merge**) em IID, Non-IID, Regressão e Drift medindo Acurácia/RMSE, Bytes Transmitidos e SRAM | `[ ]` | `—` |
 
 ---
 
@@ -1133,6 +1140,30 @@ flowchart TD
 - **Entrega 10.1 (`[x]`):** Estudo técnico completo e formalização matemática em [`docs/12_welford_adaptive_sgd.md`](file:///home/julio/Documentos/pessoal_minimal-decision-tree/docs/12_welford_adaptive_sgd.md).
 - **Entrega 10.2 (`[ ]`):** Adição de `ht_sgd_type_t` em `code/include/ht_tree.h`, implementação de `ht_tree_get_feature_moments` e do otimizador em `code/src/ht_tree.c` e validação em 3 níveis (`code/tests/test_tree.c` e `code/tests/test_e2e_flow.c`).
 - **Entrega 10.3 (`[ ]`):** Benchmark comparativo em regressão contínua (*Bikes*, *NYC Taxi*, *Friedman #1*, *Appliances Energy*), avaliação SemVer e sincronização da Wiki e `README.md`.
+
+---
+
+## 12. Fase 11: Aprendizado Federado Embarcado (`Fed-Forest` & `Fed-VFDT`) e Reestruturação Modular de `code/`
+
+> [!IMPORTANT]
+> **Plano Dedicado Já Existente (Leitura Prévia Obrigatória):**
+> A especificação completa da reestruturação de `code/` (`core/`, `ensemble/`, `federated/`), das primitivas compartilhadas com a Fase 9 (`ht_compact_tree.h` e `ht_voting.h`), do protocolo binário `HFED` com CRC32 e `topology_version`, do **Modo 1 (`Fed-Forest`)** e do **Modo 2 (`Fed-VFDT` Coordinated Splitting & Exact Sufficient Statistics Merge)** está consolidada em [`docs/13_federated_learning.md`](file:///home/julio/Documentos/pessoal_minimal-decision-tree/docs/13_federated_learning.md).
+
+### 12.1 Visão Arquitetural
+- **Reestruturação Modular:** Subpastas simétricas `core/`, `ensemble/` e `federated/` dentro de `code/include/`, `code/src/` e `code/tests/`.
+- **Fundação Compartilhada (`ensemble/`):** `ht_compact_tree_t` (árvore densa somente-inferência via compactação BFS iterativa, $\approx 1{,}32\text{ KB}$ para 64 nós) e `ht_voting` (votação ponderada $1/(\hat{e}_m^2 + \varepsilon)$ / uniforme compartilhada com a Fase 9).
+- **Modo 1 (`Fed-Forest`):** Cliente mantém 1 árvore local treinável + $M$ pares compactos; servidor C11 estático agrega com políticas `ALL`, `TOP_M` ou `ROUND_ROBIN` (+ `exclude_self`).
+- **Modo 2 (`Fed-VFDT`):** Cliente com `HT_TREE_FLAG_DEFER_SPLITS` (0 bytes extras em `ht_tree_t`) e servidor C11 estático suportando `HT_FED_VFDT_COORDINATED` (`QUORUM`/`MAJORITY`/`MERIT`) e `HT_FED_VFDT_STATS_MERGE` (fusão exata de observadores via Chan/Welford/Ben-Haim + FedAvg SGD), recuperação de *stragglers* via `split_log` / `FULL_SNAPSHOT` e reset coordenado por drift.
+
+### 12.2 Resumo das Entregas Planejadas (11.1 a 11.7)
+- **Entrega 11.1 (`[x]`):** Estudo técnico e alinhamento da Fase 9 em `docs/13_federated_learning.md`, `docs/11_embedded_micro_ensembles.md` e `docs/06_implementation_plan.md`.
+- **Entrega 11.2 (`[ ]`):** Reestruturação modular de `code/` (`core/`, `ensemble/`, `federated/`) e atualização de `code/Makefile`, `emulation/` e `main_benchmark/tune_hyperparams.py`.
+- **Entrega 11.3 (`[ ]`):** Extensões cirúrgicas no núcleo `core/` (merge de observadores em `ht_observer` + `HT_TREE_FLAG_DEFER_SPLITS`, `evaluate_leaf_split`, `apply_split`, `reset_subtree_to_leaf` em `ht_tree`).
+- **Entrega 11.4 (`[ ]`):** Primitivas compartilhadas em `ensemble/` (`ht_compact_tree`, `ht_voting`) e suíte `test_compact_tree.c`.
+- **Entrega 11.5 (`[ ]`):** Protocolo `ht_fed_proto` (framing + CRC32) e Modo 1 `ht_fed_forest` (cliente + servidor) com testes em 3 níveis (`test_fed_forest.c`).
+- **Entrega 11.6 (`[ ]`):** Modo 2 `ht_fed_vfdt` (`COORDINATED` + `STATS_MERGE` + *stragglers* + drift reset) com testes em 3 níveis (`test_fed_vfdt.c`).
+- **Entrega 11.7 (`[ ]`):** Simulador multi-cliente C11 (`benchmarks/fed_simulator.c`) e target `make bench-federated`.
+
 
 
 
