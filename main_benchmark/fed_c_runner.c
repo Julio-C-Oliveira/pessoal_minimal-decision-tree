@@ -324,6 +324,8 @@ int main(int argc, char **argv) {
     double t0 = now_ms();
     size_t total_uplink_bytes = 0U;
     size_t total_downlink_bytes = 0U;
+    size_t max_uplink_frame_bytes = 0U;
+    size_t max_downlink_frame_bytes = 0U;
     uint64_t preq_total = 0U;
     uint64_t preq_correct = 0U;
     double preq_abs_err_sum = 0.0;
@@ -506,6 +508,7 @@ int main(int argc, char **argv) {
                     size_t w = 0U;
                     if (ht_fed_forest_client_export_update(&g_ff_clients[k], g_wire, sizeof(g_wire), &w) == HT_OK) {
                         total_uplink_bytes += w;
+                        if (w > max_uplink_frame_bytes) max_uplink_frame_bytes = w;
                         ht_fed_forest_server_ingest(&g_ff_server, g_wire, w);
                     }
                 }
@@ -514,6 +517,7 @@ int main(int argc, char **argv) {
                     if (ht_fed_forest_server_build_forest(&g_ff_server, g_ff_clients[k].client_id, true,
                                                           g_wire, sizeof(g_wire), &w) == HT_OK) {
                         total_downlink_bytes += w;
+                        if (w > max_downlink_frame_bytes) max_downlink_frame_bytes = w;
                         ht_fed_forest_client_import_forest(&g_ff_clients[k], g_wire, w);
                     }
                 }
@@ -524,6 +528,7 @@ int main(int argc, char **argv) {
                     size_t w = 0U;
                     if (ht_fed_vfdt_client_export_update(&g_fv_clients[k], g_wire, sizeof(g_wire), &w) == HT_OK) {
                         total_uplink_bytes += w;
+                        if (w > max_uplink_frame_bytes) max_uplink_frame_bytes = w;
                         (void)ht_fed_vfdt_server_ingest(&g_fv_server, g_wire, w);
                     }
                 }
@@ -534,6 +539,7 @@ int main(int argc, char **argv) {
                                                          g_fv_clients[k].topology_version,
                                                          g_wire, sizeof(g_wire), &w) == HT_OK) {
                         total_downlink_bytes += w;
+                        if (w > max_downlink_frame_bytes) max_downlink_frame_bytes = w;
                         (void)ht_fed_vfdt_client_apply_update(&g_fv_clients[k], g_wire, w);
                     }
                 }
@@ -645,16 +651,40 @@ int main(int argc, char **argv) {
         }
     }
 
+    typedef struct {
+        uint16_t origin_client_id;
+        uint16_t reserved;
+        uint32_t tree_bytes;
+        ht_float_t reported_error;
+    } fed_forest_wire_item_t;
+
+    typedef struct {
+        uint16_t leaf_idx;
+        uint16_t reserved;
+        union {
+            ht_float_t    class_counts[HT_MAX_CLASSES];
+            ht_var_stat_t reg_stats;
+        } stats_u;
+    } fed_leaf_stats_wire_item_t;
+
     size_t client_sram = 0U, server_sram = 0U;
+    size_t client_scaler_bytes = use_scaler ? sizeof(ht_scaler_t) : 0U;
+    size_t client_model_bytes = 0U, client_coord_bytes = 0U, client_comm_bytes = 0U, client_stack_peak_bytes = 0U;
+    size_t server_model_bytes = 0U, server_coord_bytes = 0U, server_comm_bytes = 0U, server_stack_peak_bytes = 0U;
+    size_t comm_buf_peak_bytes = (max_uplink_frame_bytes > max_downlink_frame_bytes)
+        ? max_uplink_frame_bytes : max_downlink_frame_bytes;
+    size_t comm_buf_worst_bytes = 0U;
     double avg_nodes = 0.0;
     uint32_t global_splits = 0U;
 
     if (strat == STRAT_CENTRAL) {
-        client_sram = sizeof(ht_tree_t) + (use_scaler ? sizeof(ht_scaler_t) : 0U);
+        client_model_bytes = sizeof(ht_tree_t) + client_scaler_bytes;
+        client_sram = client_model_bytes;
         avg_nodes = (double)ht_node_count(&g_central_tree.memory);
         global_splits = g_central_tree.n_decision_nodes;
     } else if (strat == STRAT_LOCAL) {
-        client_sram = sizeof(ht_tree_t) + (use_scaler ? sizeof(ht_scaler_t) : 0U);
+        client_model_bytes = sizeof(ht_tree_t) + client_scaler_bytes;
+        client_sram = client_model_bytes;
         for (int k = 0; k < n_clients; ++k) {
             avg_nodes += (double)ht_node_count(&g_local_trees[k].memory);
             global_splits += g_local_trees[k].n_decision_nodes;
@@ -662,8 +692,27 @@ int main(int argc, char **argv) {
         avg_nodes /= (double)n_clients;
         global_splits /= (uint32_t)n_clients;
     } else if (strat == STRAT_FED_FOREST_TOPM || strat == STRAT_FED_FOREST_RR) {
-        client_sram = sizeof(ht_fed_forest_client_t) + (use_scaler ? sizeof(ht_scaler_t) : 0U);
+        size_t peer_trees_bytes = (size_t)HT_FED_FOREST_MAX_TREES * sizeof(ht_compact_tree_t);
+        size_t srv_trees_bytes = (size_t)HT_FED_SERVER_MAX_TREES * sizeof(ht_compact_tree_t);
+        client_model_bytes = sizeof(ht_tree_t) + peer_trees_bytes + client_scaler_bytes;
+        client_coord_bytes = sizeof(ht_fed_forest_client_t) - sizeof(ht_tree_t) - peer_trees_bytes;
+        client_comm_bytes = comm_buf_peak_bytes;
+        client_stack_peak_bytes = sizeof(ht_compact_tree_t);
+        client_sram = sizeof(ht_fed_forest_client_t) + client_scaler_bytes;
+
+        server_model_bytes = srv_trees_bytes;
+        server_coord_bytes = sizeof(ht_fed_forest_server_t) - srv_trees_bytes;
+        server_comm_bytes = comm_buf_peak_bytes;
+        server_stack_peak_bytes = sizeof(ht_compact_tree_t);
         server_sram = sizeof(ht_fed_forest_server_t);
+
+        size_t ct_max_wire = sizeof(ht_compact_serial_header_t) +
+                             (size_t)HT_COMPACT_MAX_NODES * sizeof(ht_node_t);
+        size_t ff_up_worst = sizeof(ht_fed_header_t) + 2U * sizeof(ht_float_t) + ct_max_wire;
+        size_t ff_down_worst = sizeof(ht_fed_header_t) + 4U +
+                               (size_t)HT_FED_FOREST_MAX_TREES * (sizeof(fed_forest_wire_item_t) + ct_max_wire);
+        comm_buf_worst_bytes = (ff_down_worst > ff_up_worst) ? ff_down_worst : ff_up_worst;
+
         for (int k = 0; k < n_clients; ++k) {
             avg_nodes += (double)ht_node_count(&g_ff_clients[k].local_tree.memory);
             global_splits += g_ff_clients[k].local_tree.n_decision_nodes;
@@ -671,11 +720,44 @@ int main(int argc, char **argv) {
         avg_nodes /= (double)n_clients;
         global_splits /= (uint32_t)n_clients;
     } else {
-        client_sram = sizeof(ht_fed_vfdt_client_t) + (use_scaler ? sizeof(ht_scaler_t) : 0U);
+        client_model_bytes = sizeof(ht_tree_t) + client_scaler_bytes;
+        client_coord_bytes = sizeof(ht_fed_vfdt_client_t) - sizeof(ht_tree_t);
+        client_comm_bytes = comm_buf_peak_bytes;
+        client_sram = sizeof(ht_fed_vfdt_client_t) + client_scaler_bytes;
+
+        server_model_bytes = sizeof(ht_tree_t);
+        server_coord_bytes = sizeof(ht_fed_vfdt_server_t) - sizeof(ht_tree_t);
+        server_comm_bytes = comm_buf_peak_bytes;
         server_sram = sizeof(ht_fed_vfdt_server_t);
+
+        size_t vf_bcast_worst = sizeof(ht_fed_header_t) + 12U +
+                                (size_t)HT_FED_SPLIT_LOG_CAP * sizeof(ht_fed_split_cmd_t);
+        size_t vf_snap_worst = sizeof(ht_fed_header_t) + sizeof(ht_serial_header_t) +
+                               (size_t)HT_MAX_NODES * (sizeof(uint16_t) + sizeof(ht_node_t));
+        size_t vf_down_worst = (vf_bcast_worst > vf_snap_worst) ? vf_bcast_worst : vf_snap_worst;
+
+        if (strat == STRAT_FED_VFDT_MERGE) {
+            size_t leaf_stride = (size_t)g_fv_server.global_tree.memory.leaf_stride;
+            size_t vf_merge_up_worst = sizeof(ht_fed_header_t) + 8U +
+                                       (size_t)HT_MAX_ACTIVE_LEAVES *
+                                       (sizeof(fed_leaf_stats_wire_item_t) + leaf_stride);
+            comm_buf_worst_bytes = (vf_merge_up_worst > vf_down_worst) ? vf_merge_up_worst : vf_down_worst;
+            client_stack_peak_bytes = sizeof(fed_leaf_stats_wire_item_t) + sizeof(ht_fed_header_t);
+            server_stack_peak_bytes = sizeof(ht_leaf_stats_t);
+        } else {
+            size_t vf_prop_worst = sizeof(ht_fed_header_t) + 4U +
+                                   (size_t)HT_FED_MAX_PROPOSALS * sizeof(ht_fed_split_proposal_t);
+            comm_buf_worst_bytes = (vf_down_worst > vf_prop_worst) ? vf_down_worst : vf_prop_worst;
+            client_stack_peak_bytes = (size_t)HT_FED_MAX_PROPOSALS * sizeof(ht_fed_split_proposal_t);
+            server_stack_peak_bytes = (size_t)HT_MAX_ACTIVE_LEAVES * sizeof(ht_fed_split_cmd_t);
+        }
+
         avg_nodes = (double)ht_node_count(&g_fv_server.global_tree.memory);
         global_splits = g_fv_server.global_tree.n_decision_nodes;
     }
+
+    size_t client_total_bytes = client_model_bytes + client_coord_bytes + client_comm_bytes;
+    size_t server_total_bytes = server_model_bytes + server_coord_bytes + server_comm_bytes;
 
     size_t total_wire = total_uplink_bytes + total_downlink_bytes;
     double bytes_per_client_round = (double)total_wire / (double)(n_clients * n_rounds);
@@ -696,10 +778,25 @@ int main(int argc, char **argv) {
            "\"splits\":%u,"
            "\"uplink_bytes\":%zu,"
            "\"downlink_bytes\":%zu,"
+           "\"max_uplink_frame_bytes\":%zu,"
+           "\"max_downlink_frame_bytes\":%zu,"
            "\"total_wire_kb\":%.2f,"
            "\"bytes_per_client_round\":%.1f,"
+           "\"comm_buf_peak_kb\":%.3f,"
+           "\"comm_buf_worst_kb\":%.3f,"
            "\"client_sram_kb\":%.2f,"
            "\"server_sram_kb\":%.2f,"
+           "\"client_model_kb\":%.3f,"
+           "\"client_scaler_kb\":%.3f,"
+           "\"client_coord_kb\":%.3f,"
+           "\"client_comm_kb\":%.3f,"
+           "\"client_total_kb\":%.3f,"
+           "\"client_stack_peak_kb\":%.3f,"
+           "\"server_model_kb\":%.3f,"
+           "\"server_coord_kb\":%.3f,"
+           "\"server_comm_kb\":%.3f,"
+           "\"server_total_kb\":%.3f,"
+           "\"server_stack_peak_kb\":%.3f,"
            "\"train_ms\":%.2f"
            "}\n",
            strategy_str,
@@ -717,10 +814,25 @@ int main(int argc, char **argv) {
            global_splits,
            total_uplink_bytes,
            total_downlink_bytes,
+           max_uplink_frame_bytes,
+           max_downlink_frame_bytes,
            (double)total_wire / 1024.0,
            bytes_per_client_round,
+           (double)comm_buf_peak_bytes / 1024.0,
+           (double)comm_buf_worst_bytes / 1024.0,
            (double)client_sram / 1024.0,
            (double)server_sram / 1024.0,
+           (double)client_model_bytes / 1024.0,
+           (double)client_scaler_bytes / 1024.0,
+           (double)client_coord_bytes / 1024.0,
+           (double)client_comm_bytes / 1024.0,
+           (double)client_total_bytes / 1024.0,
+           (double)client_stack_peak_bytes / 1024.0,
+           (double)server_model_bytes / 1024.0,
+           (double)server_coord_bytes / 1024.0,
+           (double)server_comm_bytes / 1024.0,
+           (double)server_total_bytes / 1024.0,
+           (double)server_stack_peak_bytes / 1024.0,
            train_ms);
 
     return 0;

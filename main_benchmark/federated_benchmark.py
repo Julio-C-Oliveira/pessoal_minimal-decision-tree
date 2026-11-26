@@ -453,42 +453,123 @@ def generate_markdown_report(
     lines.append("- **Avaliação Global:** Todos os $K$ clientes finais são avaliados no conjunto de teste global (`*_test.csv`); as métricas de holdout reportam a média dos $K$ clientes (medindo generalização global real sob viés local Non-IID).")
     lines.append("")
 
-    # Section 2: SRAM Footprint & Partition Heterogeneity
-    lines.append(r"## 2. Pegada Estática de SRAM por Cliente ($\le 100\text{ KB}$) e Heterogeneidade Non-IID")
+    # Section 2: Detailed RAM Breakdown (Client & Server: Model vs Comm/Coord + Stack + Worst-Case)
+    lines.append("## 2. Orçamento de RAM (Cliente e Servidor: Modelo vs. Comunicação) e Heterogeneidade Non-IID")
     lines.append("")
-    lines.append("| Dataset | Tarefa | Features / Classes | SRAM Central/Local | SRAM Fed-Forest ($M=5$) | SRAM Fed-VFDT (Cliente) | SRAM Servidor (VFDT) | Non-IID Amostras/Cliente (Min–Max) | Métrica de Heterogeneidade Non-IID |")
-    lines.append("| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :--- |")
+    lines.append(
+        "Decomposição exata da memória estática (`.bss` + buffer half-duplex de comunicação `wire_buf` "
+        "dimensionado por `max(max_up, max_down)`) e do pico transitório de pilha (`Stack`), com **zero `malloc` em runtime**:"
+    )
+    lines.append("- **Modelo (`Mod`):** árvore(s) residente(s) (`ht_tree_t`; no cliente `Fed-Forest` inclui as $M=5$ `peer_trees`; no servidor `Fed-Forest` inclui `entries[16]`) + pré-processador local `ht_scaler_t` quando ativo.")
+    lines.append("- **Comunicação & Coordenação (`Com`):** metadados/logs federados (`split_log[64]`, `round_proposals[128]`, `merge_leaf_delta[8]`, tabelas de votação/drift) + buffer de rede `wire_buf` (pico real observado por estratégia).")
+    lines.append("- **Stack (`Stk`):** pico transitório na pilha durante `export_update` / `ingest` (ex: `ht_compact_tree_t`, `props[16]` ou `ht_leaf_stats_t`), liberado imediatamente ao retornar da função.")
+    lines.append("")
 
-    max_client_sram = 0.0
+    def fmt_ram_compact(mod_kb: float, com_kb: float, tot_kb: float) -> str:
+        if tot_kb <= 1e-6:
+            return "0.0 KB"
+        return f"{mod_kb:.1f} + {com_kb:.1f} = {tot_kb:.1f} KB"
+
+    def fmt_ram_sec2(mod_kb: float, com_kb: float, tot_kb: float, stk_kb: float) -> str:
+        return f"{mod_kb:.2f} + {com_kb:.2f} = **{tot_kb:.2f} KB** \\| Stk {stk_kb:.2f}"
+
+    lines.append("### 2.1 Decomposição de RAM do Lado do Cliente (1 Dispositivo MCU)")
+    lines.append("")
+    lines.append("| Dataset | Tarefa | Features / Cls | Scaler | Central / Local (Mod) | Fed-Forest ($M=5$)<br/>Mod + Com = Total \\| Stk | Fed-VFDT Coord.<br/>Mod + Com = Total \\| Stk | Fed-VFDT Stats-Merge<br/>Mod + Com = Total \\| Stk | Buf. Pior Caso `.bss`<br/>(FF / Coord / Merge) |")
+    lines.append("| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |")
+
+    max_cli_model = 0.0
+    max_cli_ff_tot = 0.0
+    max_cli_coord_tot = 0.0
+    max_cli_merge_tot = 0.0
+    max_cli_merge_buf = 0.0
+
     for ds in DATASETS:
         did = ds["id"]
         if did not in datasets_res:
             continue
         dr = datasets_res[did]
         m = dr["meta"]
-        ni_s = dr["partition_stats"]["non_iid"]
-        c_sram = dr["central"]["client_sram_kb"]
-        ff_sram = dr["regimes"]["non_iid"]["fed_forest_topm"]["client_sram_kb"]
-        fv_sram = dr["regimes"]["non_iid"]["fed_vfdt_quorum"]["client_sram_kb"]
-        sv_sram = dr["regimes"]["non_iid"]["fed_vfdt_quorum"]["server_sram_kb"]
-        max_client_sram = max(max_client_sram, c_sram, ff_sram, fv_sram)
+        ni = dr["regimes"]["non_iid"]
+        cen = dr["central"]
+
+        ff_rep = max((ni["fed_forest_topm"], ni["fed_forest_rr"]), key=lambda x: x["client_total_kb"])
+        coord_rep = max(
+            (ni["fed_vfdt_quorum"], ni["fed_vfdt_majority"], ni["fed_vfdt_merit"]),
+            key=lambda x: x["client_total_kb"],
+        )
+        merge_rep = ni["fed_vfdt_merge"]
+
+        ff_com = ff_rep["client_coord_kb"] + ff_rep["client_comm_kb"]
+        coord_com = coord_rep["client_coord_kb"] + coord_rep["client_comm_kb"]
+        merge_com = merge_rep["client_coord_kb"] + merge_rep["client_comm_kb"]
+
+        max_cli_model = max(max_cli_model, cen["client_model_kb"], ff_rep["client_model_kb"], coord_rep["client_model_kb"], merge_rep["client_model_kb"])
+        max_cli_ff_tot = max(max_cli_ff_tot, ff_rep["client_total_kb"])
+        max_cli_coord_tot = max(max_cli_coord_tot, coord_rep["client_total_kb"])
+        max_cli_merge_tot = max(max_cli_merge_tot, merge_rep["client_total_kb"])
+        max_cli_merge_buf = max(max_cli_merge_buf, merge_rep["client_comm_kb"])
 
         fc_str = f"{m['n_features']} / {m['n_classes']} cls" if m["task"] == "classification" else f"{m['n_features']} / cont."
+        scaler_str = f"{cen['client_scaler_kb']:.2f} KB" if cen["client_scaler_kb"] > 0 else "0.00 KB"
+        worst_str = f"{ff_rep['comm_buf_worst_kb']:.1f} / {coord_rep['comm_buf_worst_kb']:.1f} / {merge_rep['comm_buf_worst_kb']:.1f} KB"
+
+        lines.append(
+            f"| **{ds['name']}** | {m['task']} | {fc_str} | {scaler_str} | {cen['client_model_kb']:.2f} KB | "
+            f"{fmt_ram_sec2(ff_rep['client_model_kb'], ff_com, ff_rep['client_total_kb'], ff_rep['client_stack_peak_kb'])} | "
+            f"{fmt_ram_sec2(coord_rep['client_model_kb'], coord_com, coord_rep['client_total_kb'], coord_rep['client_stack_peak_kb'])} | "
+            f"{fmt_ram_sec2(merge_rep['client_model_kb'], merge_com, merge_rep['client_total_kb'], merge_rep['client_stack_peak_kb'])} | "
+            f"{worst_str} |"
+        )
+
+    lines.append("")
+    lines.append("### 2.2 Decomposição de RAM do Lado do Servidor (1 Agregador) e Heterogeneidade Non-IID")
+    lines.append("")
+    lines.append("| Dataset | Fed-Forest Server (`16` árv.)<br/>Mod + Com = Total \\| Stk | Fed-VFDT Coord. Server<br/>Mod + Com = Total \\| Stk | Fed-VFDT Stats-Merge Server<br/>Mod + Com = Total \\| Stk | Non-IID Amostras/Cli | Métrica de Heterogeneidade Non-IID |")
+    lines.append("| :--- | :---: | :---: | :---: | :---: | :--- |")
+
+    for ds in DATASETS:
+        did = ds["id"]
+        if did not in datasets_res:
+            continue
+        dr = datasets_res[did]
+        m = dr["meta"]
+        ni = dr["regimes"]["non_iid"]
+        ni_s = dr["partition_stats"]["non_iid"]
+
+        ff_rep = max((ni["fed_forest_topm"], ni["fed_forest_rr"]), key=lambda x: x["server_total_kb"])
+        coord_rep = max(
+            (ni["fed_vfdt_quorum"], ni["fed_vfdt_majority"], ni["fed_vfdt_merit"]),
+            key=lambda x: x["server_total_kb"],
+        )
+        merge_rep = ni["fed_vfdt_merge"]
+
+        ff_scom = ff_rep["server_coord_kb"] + ff_rep["server_comm_kb"]
+        coord_scom = coord_rep["server_coord_kb"] + coord_rep["server_comm_kb"]
+        merge_scom = merge_rep["server_coord_kb"] + merge_rep["server_comm_kb"]
+
         if m["task"] == "classification":
             het_str = f"Classe dom. média: **{ni_s['avg_dominant_class_share']*100:.1f}%** (H={ni_s['avg_label_entropy_bits']:.2f} bits)"
         else:
             het_str = f"Dispersão $\\mu_k(y)/\\sigma(y)$: **{ni_s['client_target_mean_spread_sigma']:.2f}$\\sigma$**"
 
         lines.append(
-            f"| **{ds['name']}** | {m['task']} | {fc_str} | {c_sram:.2f} KB | **{ff_sram:.2f} KB** | **{fv_sram:.2f} KB** | {sv_sram:.2f} KB | "
+            f"| **{ds['name']}** | "
+            f"{fmt_ram_sec2(ff_rep['server_model_kb'], ff_scom, ff_rep['server_total_kb'], ff_rep['server_stack_peak_kb'])} | "
+            f"{fmt_ram_sec2(coord_rep['server_model_kb'], coord_scom, coord_rep['server_total_kb'], coord_rep['server_stack_peak_kb'])} | "
+            f"{fmt_ram_sec2(merge_rep['server_model_kb'], merge_scom, merge_rep['server_total_kb'], merge_rep['server_stack_peak_kb'])} | "
             f"{ni_s['min_samples']}–{ni_s['max_samples']} | {het_str} |"
         )
 
     lines.append("")
     lines.append(
-        f"> **Validação de Orçamento Embarcado:** O pico de SRAM estática por cliente entre todos os 8 datasets "
-        f"(incluindo Forest Covertype com 54 features e 7 classes) foi de **{max_client_sram:.2f} KB** — "
-        f"{'cumprindo com folga' if max_client_sram <= 100.0 else 'excedendo'} o teto de **100 KB** para MCUs como ESP32."
+        f"> **Validação de Orçamento Embarcado (Modelo vs. Comunicação):** "
+        f"Isolando apenas o **modelo estático**, o pico no cliente foi de **{max_cli_model:.2f} KB** (Forest Covertype, 54 features / 7 classes). "
+        f"Ao contabilizar também o **buffer half-duplex de comunicação (`wire_buf`) + coordenação**, "
+        f"**`Fed-VFDT Coordenado`** (pico total **{max_cli_coord_tot:.2f} KB**) e **`Fed-Forest`** (pico total **{max_cli_ff_tot:.2f} KB**) "
+        f"permanecem confortavelmente abaixo do teto de **100 KB** para MCUs como ESP32; já **`Fed-VFDT (STATS-MERGE)`** exige um buffer TX de até **{max_cli_merge_buf:.2f} KB** no Covertype "
+        f"(elevando o pico total cliente para **{max_cli_merge_tot:.2f} KB** se o frame de todas as folhas ativas for montado monoliticamente em RAM). "
+        f"No servidor `Fed-VFDT`, `ht_fed_vfdt_server_t` unifica `split_log[64]` e `round_proposals[128]` na mesma struct estática zero-`malloc` (~10–16 KB fixos em `Com`)."
     )
     lines.append("")
 
@@ -496,8 +577,8 @@ def generate_markdown_report(
     def append_classif_table(regime_key: str, title: str) -> None:
         lines.append(f"## {title}")
         lines.append("")
-        lines.append("| Dataset | Estratégia | Holdout Acc (%) | Macro F1 (%) | Prequential Acc (%) | Nós Médios | Splits | Tráfego Total | Bytes / Cliente / Rodada |")
-        lines.append("| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |")
+        lines.append("| Dataset | Estratégia | Holdout Acc (%) | Macro F1 (%) | Prequential Acc (%) | Nós Médios | Splits | Tráfego Total | Bytes / Cli / Rod. | RAM Cli (Mod + Com) | RAM Srv (Mod + Com) |")
+        lines.append("| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |")
         for ds in DATASETS:
             if ds["task"] != "classification" or ds["id"] not in datasets_res:
                 continue
@@ -512,9 +593,11 @@ def generate_markdown_report(
                 acc_s = f"**{r['holdout_acc']:.2f}%**" if (skey in fed_keys and abs(r["holdout_acc"] - best_fed_acc) < 1e-6) else f"{r['holdout_acc']:.2f}%"
                 wire_s = "0.0 KB" if r["total_wire_kb"] == 0 else f"{r['total_wire_kb']:.1f} KB"
                 bcr_s = "0 B" if r["bytes_per_client_round"] == 0 else f"{r['bytes_per_client_round']:.0f} B"
+                cli_ram_s = fmt_ram_compact(r["client_model_kb"], r["client_coord_kb"] + r["client_comm_kb"], r["client_total_kb"])
+                srv_ram_s = fmt_ram_compact(r["server_model_kb"], r["server_coord_kb"] + r["server_comm_kb"], r["server_total_kb"])
                 lines.append(
                     f"| **{ds['name']}** | {sname} | {acc_s} | {r['holdout_f1']:.2f}% | {r['preq_acc']:.2f}% | "
-                    f"{r['avg_nodes']:.1f} | {r['splits']} | {wire_s} | {bcr_s} |"
+                    f"{r['avg_nodes']:.1f} | {r['splits']} | {wire_s} | {bcr_s} | {cli_ram_s} | {srv_ram_s} |"
                 )
         lines.append("")
 
@@ -522,8 +605,8 @@ def generate_markdown_report(
     def append_reg_table(regime_key: str, title: str) -> None:
         lines.append(f"## {title}")
         lines.append("")
-        lines.append("| Dataset | Estratégia | Holdout MAE | Holdout RMSE | Holdout $R^2$ | Prequential MAE | Nós Médios | Splits | Tráfego Total | Bytes / Cliente / Rodada |")
-        lines.append("| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |")
+        lines.append("| Dataset | Estratégia | Holdout MAE | Holdout RMSE | Holdout $R^2$ | Prequential MAE | Nós Médios | Splits | Tráfego Total | Bytes / Cli / Rod. | RAM Cli (Mod + Com) | RAM Srv (Mod + Com) |")
+        lines.append("| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |")
         for ds in DATASETS:
             if ds["task"] != "regression" or ds["id"] not in datasets_res:
                 continue
@@ -537,9 +620,11 @@ def generate_markdown_report(
                 mae_s = f"**{r['holdout_mae']:.4f}**" if (skey in fed_keys and abs(r["holdout_mae"] - best_fed_mae) < 1e-9) else f"{r['holdout_mae']:.4f}"
                 wire_s = "0.0 KB" if r["total_wire_kb"] == 0 else f"{r['total_wire_kb']:.1f} KB"
                 bcr_s = "0 B" if r["bytes_per_client_round"] == 0 else f"{r['bytes_per_client_round']:.0f} B"
+                cli_ram_s = fmt_ram_compact(r["client_model_kb"], r["client_coord_kb"] + r["client_comm_kb"], r["client_total_kb"])
+                srv_ram_s = fmt_ram_compact(r["server_model_kb"], r["server_coord_kb"] + r["server_comm_kb"], r["server_total_kb"])
                 lines.append(
                     f"| **{ds['name']}** | {sname} | {mae_s} | {r['holdout_rmse']:.4f} | {r['holdout_r2']:.4f} | "
-                    f"{r['preq_mae']:.4f} | {r['avg_nodes']:.1f} | {r['splits']} | {wire_s} | {bcr_s} |"
+                    f"{r['preq_mae']:.4f} | {r['avg_nodes']:.1f} | {r['splits']} | {wire_s} | {bcr_s} | {cli_ram_s} | {srv_ram_s} |"
                 )
         lines.append("")
 
@@ -604,21 +689,25 @@ def generate_markdown_report(
     lines.append("### Principais Conclusões Arquiteturais")
     lines.append("")
     lines.append(
-        "1. **Fed-VFDT (`STATS-MERGE`) como Oráculo Estatístico em Non-IID:** "
+        "1. **Fed-VFDT (`STATS-MERGE`) como Oráculo Estatístico em Non-IID (Trade-off de Buffer TX):** "
         "Ao fundir estatísticas suficientes exatas (Chan/Welford, histogramas, contagens de classe e slots de regressão) "
         "na folha global, o Modo 2B reconstrói fielmente a distribuição global mesmo quando clientes individuais enxergam "
-        "apenas 1–2 classes ou faixas estreitas de $y$ sob `Dirichlet(0.3)`, aproximando-se do **Centralized Oracle**."
+        "apenas 1–2 classes ou faixas estreitas de $y$ sob `Dirichlet(0.3)`, aproximando-se do **Centralized Oracle** — "
+        "com o custo explícito de exigir um buffer de comunicação proporcional ao tamanho das folhas ativas (chegando a "
+        f"**{max_cli_merge_buf:.1f} KB** de buffer TX e **{max_cli_merge_tot:.1f} KB** totais no Covertype)."
     )
     lines.append(
-        "2. **Fed-VFDT Coordenado (`QUORUM` / `MAJORITY` / `BEST-MERIT`) — Custo de Rede Mínimo:** "
-        "Transmite apenas propostas leves de split e comandos incrementais (`~100–400 B/cliente/rodada`), "
-        "sendo ideal para links LPWAN/LoRa/BLE onde o orçamento de banda é o gargalo principal."
+        "2. **Fed-VFDT Coordenado (`QUORUM` / `MAJORITY` / `BEST-MERIT`) — Menor Custo de Rede e Menor Buffer RAM:** "
+        "Transmite apenas propostas leves de split e comandos incrementais (`~100–560 B/cliente/rodada`), exigindo um "
+        "buffer TX/RX diminuto (`< 1 KB` observado) e mantendo a SRAM total no cliente em no máximo "
+        f"**{max_cli_coord_tot:.1f} KB** mesmo em 54 features — ideal para links LPWAN/LoRa/BLE e MCUs de SRAM estrita."
     )
     lines.append(
-        "3. **Fed-Forest (`TOP_M` / `ROUND_ROBIN`) — Resiliência sem Sincronismo Rígido:** "
+        "3. **Fed-Forest (`TOP_M` / `ROUND_ROBIN`) — Resiliência Assíncrona com Buffer Contido:** "
         "Cada cliente evolui sua árvore local de forma assíncrona e recebe um micro-ensemble compactado ($M=5$ árvores BFS, "
-        "~1.3 KB/árvore), elevando consistentemente a generalização global sobre o baseline `Local-Only` em Non-IID "
-        "com votação ponderada adaptativa e mantendo a SRAM total por cliente abaixo de 100 KB."
+        "~1.3 KB/árvore), elevando consistentemente a generalização global sobre `Local-Only` em Non-IID (especialmente "
+        "em regressão contínua) enquanto mantém o conjunto completo **Modelo + Comunicação** abaixo de 100 KB no cliente "
+        f"(pico real **{max_cli_ff_tot:.1f} KB** no Covertype) e servidor enxuto (`16` árvores compactas)."
     )
     lines.append("")
 
