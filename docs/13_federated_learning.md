@@ -226,14 +226,32 @@ A suíte reproduzível `make bench-main-federated` (`main_benchmark/federated_be
 
 ---
 
-## 9. Requisitos Obrigatórios (Release Gates) para Upgrade de Versão (`0.4.1 -> 0.5.0`)
+## 9. Validação de Compilação Cruzada 32-Bit e Emulação QEMU (`11.11`)
 
-Antes de propor ou executar qualquer bump de versão SemVer (`0.4.1 -> 0.5.0`) ou merge da branch `feat/3-federated-learning` na `main`, os dois requisitos abaixo são **obrigatórios**:
+Validado integralmente em **32-bit** (zero warnings sob `-std=c11 -Wall -Wextra -Werror -pedantic -Os`) nos dois alvos embarcados do repositório:
 
-1. **Gate A — Transporte de Rede Real (Entrega `11.10` `[ ]`):**
+| Alvo / Toolchain | Firmware Existente (`emulation/`) | Sanidade QEMU (`SEA`, 200 treino + 6.000 teste) | Flash `ensemble/` + `federated/` (`.text`) | Flash Total 11 Módulos (`.text`) | `.data` / `.bss` da Lib |
+| :--- | :--- | :---: | :---: | :---: | :---: |
+| **ARM Cortex-M3** (`arm-none-eabi-gcc 14.2.1`, Thumb-2 `soft-fp`) | `65.832 B` Flash / `57.468 B` RAM (`56,12 KB` $\le 64\text{ KB}$) | **PASSED** (`~345 samp/s`, `lm3s6965evb`) | **11.342 B (11,08 KB)** | **40.614 B (39,66 KB)** | `0 B` / `0 B` |
+| **ESP32 Xtensa LX6** (ESP-IDF `v5.1.2`, `xtensa-esp32-elf-gcc 12.2.0`) | `186.263 B` Flash / `148.904 B` DRAM (`77%` partição livre) | **PASSED** (`~167 samp/s`, `qemu-system-xtensa`) | **12.119 B (11,83 KB)** | **41.582 B (40,61 KB)** | `0 B` / `0 B` |
+
+Detalhamento de tamanho de código (`.text`) dos novos módulos em `-Os`:
+- `ht_compact_tree.o`: `1.852 B` (Cortex-M3) / `1.991 B` (ESP32)
+- `ht_voting.o`: `560 B` (Cortex-M3) / `558 B` (ESP32)
+- `ht_fed_proto.o`: `496 B` (Cortex-M3) / `460 B` (ESP32)
+- `ht_fed_forest.o`: `2.476 B` (Cortex-M3) / `2.481 B` (ESP32)
+- `ht_fed_vfdt.o`: `5.958 B` (Cortex-M3) / `6.629 B` (ESP32)
+
+---
+
+## 10. Requisitos Obrigatórios (Release Gates) para Upgrade de Versão (`0.4.1 -> 0.5.0`)
+
+Antes de propor ou executar qualquer bump de versão SemVer (`0.4.1 -> 0.5.0`) ou merge da branch `feat/3-federated-learning` na `main`, os dois requisitos abaixo foram definidos como **obrigatórios**:
+
+1. **Gate A — Transporte de Rede Real (Entrega `11.10` `[ ]` — Pendente):**
    - Validar o protocolo binário `HFED` trafegando sobre um meio de transporte real (sockets TCP/UDP, MQTT, UART ou QEMU com múltiplos processos/nós ESP32 reais), saindo do cenário atual onde os buffers são passados em memória dentro do mesmo processo.
-2. **Gate B — Compilação Cruzada nos Firmwares de Emulação (Entrega `11.11` `[ ]`):**
-   - Executar e validar a compilação cruzada e a sanidade funcional em `emulation/esp32/` (ESP-IDF / Xtensa) e `emulation/cortex-m3/` (`arm-none-eabi-gcc` + QEMU) após a reestruturação modular de `code/` (`core/`, `ensemble/`, `federated/`).
+2. **Gate B — Compilação Cruzada nos Firmwares de Emulação (Entrega `11.11` `[x]` — Concluído):**
+   - Compilação cruzada e sanidade funcional em `emulation/esp32/` (ESP-IDF / Xtensa) e `emulation/cortex-m3/` (`arm-none-eabi-gcc` + QEMU) validadas com zero warnings e zero regressão (Seção 9).
 
 > **Item Dispensado:** A validação de paridade numérica direta em Python contra `paularaissa/project-vfdt` (Flower + River) no mesmo CSV **não é requerida** para o upgrade de versão.
 
