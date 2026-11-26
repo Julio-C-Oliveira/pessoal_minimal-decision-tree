@@ -244,14 +244,28 @@ Detalhamento de tamanho de código (`.text`) dos novos módulos em `-Os`:
 
 ---
 
-## 10. Requisitos Obrigatórios (Release Gates) para Upgrade de Versão (`0.4.1 -> 0.5.0`)
+## 10. Validação de Transporte de Rede Real via Sockets TCP POSIX (`11.10`)
 
-Antes de propor ou executar qualquer bump de versão SemVer (`0.4.1 -> 0.5.0`) ou merge da branch `feat/3-federated-learning` na `main`, os dois requisitos abaixo foram definidos como **obrigatórios**:
+Implementada em [`benchmarks/fed_net/`](file:///home/julio/Documentos/pessoal_minimal-decision-tree/benchmarks/fed_net/) (`fed_net_server.c`, `fed_net_client.c`, `fed_net_common.h`, `run_fed_net_tests.py`, executável via `make bench-fed-net`) com **1 processo servidor C11** e **$K=4$ processos clientes OS independentes** (sem memória compartilhada) trocando frames binários `HFED` puros sobre TCP loopback:
 
-1. **Gate A — Transporte de Rede Real (Entrega `11.10` `[ ]` — Pendente):**
-   - Validar o protocolo binário `HFED` trafegando sobre um meio de transporte real (sockets TCP/UDP, MQTT, UART ou QEMU com múltiplos processos/nós ESP32 reais), saindo do cenário atual onde os buffers são passados em memória dentro do mesmo processo.
-2. **Gate B — Compilação Cruzada nos Firmwares de Emulação (Entrega `11.11` `[x]` — Concluído):**
+| # | Cenário Real Multi-Processo TCP | Fragmentação TCP | Injeção / Falha Real | Resultado | Métrica Global | Tráfego Wire |
+| :-: | :--- | :---: | :--- | :---: | :---: | :---: |
+| **1** | `Fed-Forest` (4-Class Non-IID) | `17 B/write` | Bit-flip em payload → `CRC32` rejeitado (`HT_ERR_CORRUPT_IMAGE`) + retransmissão | **PASS** | **98,50% Acc** | `16,8 KB` |
+| **2** | `Fed-VFDT Coordenado` (4-Class Non-IID) | `13 B/write` | Bit-flip em payload → `CRC32` rejeitado + retransmissão | **PASS** | **94,25% Acc** (`Splits=3`, `TopoV=3`) | `5,4 KB` |
+| **3** | `Fed-VFDT Stats-Merge` (Non-IID 100% puro, 1 classe/processo) | `19 B/write` | Zero splits locais possíveis | **PASS** | **97,50% Acc** (`Splits=5`, `TopoV=5`) | `36,1 KB` |
+| **4** | *Straggler* Desconectado (`client 4` offline R2..R6, reconecta R7) | `11 B/write` | `HT_ERR_STALE_VERSION` + catch-up automático via `split_log` | **PASS** | **96,75% Acc** (`TopoV=3/3`, `Catchups=7`) | `28,4 KB` |
+| **5** | `Fed-VFDT Stats-Merge` Regressão Contínua (Non-IID) | `23 B/write` | Alvo contínuo segmentado (`HT_FED_FLAG_REG`) | **PASS** | **RMSE 3,493** (`Splits=21`, `TopoV=21`) | `59,0 KB` |
+
+Todos os **5/5 cenários** concluíram em **0,33 s** com zero warnings sob `-std=c11 -O2 -Wall -Wextra -Werror -pedantic`.
+
+---
+
+## 11. Status dos Requisitos Obrigatórios (Release Gates) para Upgrade de Versão (`0.4.1 -> 0.5.0`)
+
+1. **Gate A — Transporte de Rede Real (Entrega `11.10` `[x]` — Concluído em `d069f75`):**
+   - Protocolo binário `HFED` validado ponta a ponta sobre sockets TCP POSIX em múltiplos processos independentes (`make bench-fed-net`, Seção 10).
+2. **Gate B — Compilação Cruzada nos Firmwares de Emulação (Entrega `11.11` `[x]` — Concluído em `fa9452f`):**
    - Compilação cruzada e sanidade funcional em `emulation/esp32/` (ESP-IDF / Xtensa) e `emulation/cortex-m3/` (`arm-none-eabi-gcc` + QEMU) validadas com zero warnings e zero regressão (Seção 9).
 
-> **Item Dispensado:** A validação de paridade numérica direta em Python contra `paularaissa/project-vfdt` (Flower + River) no mesmo CSV **não é requerida** para o upgrade de versão.
+> **Item Dispensado:** A validação de paridade numérica direta em Python contra `paularaissa/project-vfdt` (Flower + River) no mesmo CSV **não é requerida** para o upgrade de versão. Ambos os gates estão concluídos, liberando a proposta de bump SemVer (`0.4.1 -> 0.5.0`) sujeita à aprovação explícita do usuário.
 
