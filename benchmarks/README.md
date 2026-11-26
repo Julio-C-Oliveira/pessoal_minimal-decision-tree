@@ -18,6 +18,8 @@ Cada experimento possui um script executor em Python que orquestra a geração d
 | **Escalonamento em Extrema Baixa RAM** | [`memory_benchmark_report.md`](memory_benchmark_report.md) | `compare_river.py --mode memory` | SEA, Agrawal (Tier 256, Tier 8, Tier 4) | `make bench-memory` |
 | **Micro-Pipelines de Pré-Processamento** | [`prep_benchmark_report.md`](prep_benchmark_report.md) | `compare_prep.py` | Fluxos ruidosos com Hampel MAD, Ben-Haim & Z-Score | `make bench-prep` |
 | **Visão Computacional / Limites Teóricos** | [`triple_benchmark_report.md`](triple_benchmark_report.md) | `compare_triple.py` | MNIST ($4 \times 4$ pooling, 16 features: 10C, 4C, Binário) | `make bench-triple` |
+| **Simulador Federado Multi-Cliente (In-Process)** | [`docs/13_federated_learning.md`](../docs/13_federated_learning.md) | `fed_simulator.c` | SEA, 4-Class Quadrant (Non-IID), Drift e Regressão ($K=6$ MCU Tier 4) | `make bench-federated` |
+| **Transporte Real TCP POSIX (Multi-Processo)** | [`fed_net/run_fed_net_tests.py`](fed_net/run_fed_net_tests.py) | `fed_net/fed_net_{server,client}.c` | 5 cenários TCP com fragmentação (`11–23 B`), CRC32 e *stragglers* | `make bench-fed-net` |
 
 ---
 
@@ -38,7 +40,13 @@ benchmarks/
 ├── regression_benchmark_report.md# Relatório: Regressão Contínua (VFDT-R e HAT-R)
 ├── memory_benchmark_report.md    # Relatório: Escalonamento de RAM (Tier 256 a Tier 4)
 ├── prep_benchmark_report.md      # Relatório: Micro-Pipelines de Pré-Processamento (libht_prep)
-└── triple_benchmark_report.md    # Relatório: Limites teóricos em Visão Computacional (MNIST)
+├── triple_benchmark_report.md    # Relatório: Limites teóricos em Visão Computacional (MNIST)
+├── fed_simulator.c               # Simulador federado multi-cliente in-process (Tier 4 <= 25 KB SRAM)
+└── fed_net/                      # Suíte de transporte TCP POSIX real em processos OS separados
+    ├── fed_net_common.h
+    ├── fed_net_server.c
+    ├── fed_net_client.c
+    └── run_fed_net_tests.py
 ```
 
 ### Detalhes dos Componentes:
@@ -82,6 +90,10 @@ make bench-prep
 
 # Avaliação no MNIST (10 classes, 4 classes e binário)
 make bench-triple
+
+# Simulador federado in-process (Tier 4) e validação TCP POSIX multi-processo
+make bench-federated
+make bench-fed-net
 ```
 
 ### Execução Direta via Python
@@ -110,5 +122,5 @@ Utilizando o ambiente virtual configurado no repositório:
 
 ## 4. Relação com Outras Suítes de Benchmark do Repositório
 
-- **[`main_benchmark/`](../main_benchmark/README.md):** Suíte principal de desempenho executada sobre 8 datasets completos (4 de classificação e 4 de regressão), com profiling aprofundado de **Peak RSS real do processo no SO**, comparação direta batch vs streaming e busca de hiperparâmetros (`make bench-main`).
-- **[`emulation/esp32/`](../emulation/esp32/esp32_emulation_report.md):** Suíte de emulação Hardware-in-the-Loop em QEMU Xtensa @ 240 MHz com firmware ESP-IDF FreeRTOS, injeção de 187k amostras e cronometria em ciclos de clock de registrador (`make bench-esp32`).
+- **[`main_benchmark/`](../main_benchmark/README.md):** Suíte principal nos 8 datasets reais e sintéticos (centralizado com profiling de Peak RSS em [`main_benchmark_report.md`](../main_benchmark/main_benchmark_report.md) e federado multi-cliente Non-IID/IID em [`federated_benchmark_report.md`](../main_benchmark/federated_benchmark_report.md)).
+- **[`emulation/esp32/`](../emulation/esp32/esp32_emulation_report.md) e [`emulation/cortex-m3/`](../emulation/cortex-m3/cortex_m3_emulation_report.md):** Suítes Hardware-in-the-Loop no QEMU (`qemu-system-xtensa` @ 240 MHz ESP-IDF FreeRTOS e `qemu-system-arm` @ 50 MHz bare-metal $\le 64\text{ KB}$ SRAM) com cronometria em ciclos de clock de registrador.

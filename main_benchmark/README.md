@@ -36,14 +36,18 @@ A suíte é dividida balanceadamente entre **Classificação** (4 fluxos) e **Re
 
 ```
 main_benchmark/
-├── main_benchmark.py           # Orquestrador principal da avaliação tripla (C11 vs River vs Scikit-Learn)
-├── tune_hyperparams.py         # Orquestrador de busca e sensibilidade de hiperparâmetros (C11 vs River vs Sklearn)
-├── prepare_datasets.py         # Gerador e formatador padronizado dos 8 datasets
-├── README.md                   # Este documento explicativo
-├── main_benchmark_report.md    # Relatório detalhado gerado com tabelas de acurácia, nós, RAM e speedup
-├── hyperparam_report.md        # Relatório de sensibilidade e curvas de Pareto de hiperparâmetros
-├── runners/                    # Scripts isolados de execução para Scikit-Learn e River
-└── data/                       # Arquivos CSV formatados com metadados para ingestão direta
+├── main_benchmark.py              # Orquestrador principal da avaliação tripla (C11 vs River vs Scikit-Learn)
+├── federated_benchmark.py         # Orquestrador federado multi-cliente nos 8 datasets (Non-IID Dirichlet α=0.3 & IID)
+├── fed_c_runner.c                 # Executor C11 zero-malloc para os modos Fed-Forest, Fed-VFDT (Coord & Merge), Local e Central
+├── tune_hyperparams.py            # Orquestrador de busca e sensibilidade de hiperparâmetros (C11 vs River vs Sklearn)
+├── prepare_datasets.py            # Gerador e formatador padronizado dos 8 datasets
+├── README.md                      # Este documento explicativo
+├── main_benchmark_report.md       # Relatório detalhado gerado com tabelas de acurácia, nós, RAM e speedup
+├── federated_benchmark_report.md  # Relatório comparativo federado (SRAM <= 100 KB, holdout/preq, wire bytes)
+├── federated_benchmark_results.json # Resultados estruturados em JSON da suíte federada
+├── hyperparam_report.md           # Relatório de sensibilidade e curvas de Pareto de hiperparâmetros
+├── runners/                       # Scripts isolados de execução para Scikit-Learn e River
+└── data/                          # Arquivos CSV formatados com metadados para ingestão direta
     ├── sea_train.csv / sea_test.csv
     ├── electricity_train.csv / electricity_test.csv
     ├── covertype_train.csv / covertype_test.csv
@@ -86,6 +90,13 @@ Para re-gerar ou atualizar os arquivos CSV de dados:
 ```
 *(Para tentar baixar versões remotas completas do River/OpenML caso haja conexão de rede, utilize `--download`)*.
 
+Para executar a suíte federada multi-cliente nos 8 datasets (`K=10` clientes, `R=20` rodadas, Non-IID `Dirichlet α=0.3` & IID, perfil MCU Tier 8 $\le 100\text{ KB}$):
+```bash
+make bench-main-federated
+# Ou filtrando datasets/rodadas:
+./.venv/bin/python main_benchmark/federated_benchmark.py --datasets sea,covertype --rounds 20
+```
+
 ### Busca e Sensibilidade de Hiperparâmetros (`tune_hyperparams.py`)
 Via Makefile (execução padrão rápida nos datasets de referência):
 ```bash
@@ -118,7 +129,7 @@ Ou execução direta via Python:
    - Contagem total de nós (`n_nodes`) e folhas ativas (`n_active_leaves`).
 3. **Memória RAM:**
    - Verificação de **Zero Dynamic Malloc (0.0 KB)** em runtime no C11.
-   - Footprint estrutural estático estritamente $\le 1\text{ MB}$ ($473\text{ KB}$ a $524\text{ KB}$ em `float32`).
+   - Footprint estrutural estático estritamente $\le 1\text{ MB}$ ($6,7\text{ KB}$ a $484,4\text{ KB}$ em `float32`; pico de $77,01\text{ KB}$/cliente na suíte federada Tier 8).
 4. **Throughput e Latência:**
    - Tempo médio de processamento por amostra ($\mu\text{s}$/sample).
    - Speedup computacional do motor C11 em relação ao River em Python.
