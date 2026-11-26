@@ -1,7 +1,7 @@
 # 11 — Micro-Ensembles Embarcados com Observadores Compartilhados e Subespaços (`< 100 KB` SRAM)
 
 > **Módulo / Fase:** Fase 9 do Plano Persistente ([`docs/06_implementation_plan.md`](file:///home/julio/Documentos/pessoal_minimal-decision-tree/docs/06_implementation_plan.md))  
-> **Escopo Alvo:** Novo módulo de comitê estático em C11 (`code/include/ht_ensemble.h`, `code/src/ht_ensemble.c`, `code/tests/test_ensemble.c`)  
+> **Escopo Alvo:** Módulo de comitê estático em C11 na subpasta `ensemble/` (`code/include/ensemble/ht_ensemble.h`, `code/src/ensemble/ht_ensemble.c`, `code/tests/ensemble/test_ensemble.c`), reutilizando as primitivas compartilhadas `ht_voting.h` e `ht_compact_tree.h` (introduzidas com a Fase 11 — [`docs/13_federated_learning.md`](file:///home/julio/Documentos/pessoal_minimal-decision-tree/docs/13_federated_learning.md))  
 > **Meta:** Elevar expressivamente a acurácia / Macro F1 em alta dimensionalidade multiclasse (ex: *Forest Covertype*) e o $R^2$ em regressões não-lineares mantendo **100% de alocação estática zero-heap** e orçamento total estritamente **$\le 100\text{ KB}$ de SRAM**.
 
 ---
@@ -116,12 +116,16 @@ Cada árvore $m$ mantém um estimador exponencial móvel (*faded error*) $\hat{e
 - **Em Classificação:** $e_{t, m} = \mathbb{I}(\hat{y}_{t, m} \ne y_t) \in \{0, 1\}$, atualizado via $\hat{e}_m \leftarrow \alpha_{\text{err}} \hat{e}_m + (1 - \alpha_{\text{err}}) e_{t, m}$ (com $\alpha_{\text{err}} = 0{,}99$ padrão).
 - **Em Regressão Contínua:** $e_{t, m} = \frac{|y_t - \hat{y}_{t, m}|}{\max(\sigma_y, \, \epsilon)}$ ou erro quadrático exponencial $\text{fMSE}_m \leftarrow \alpha_{\text{err}} \text{fMSE}_m + (1 - \alpha_{\text{err}}) (y_t - \hat{y}_{t, m})^2$.
 
-Modos suportados em `ht_ensemble_voting_t`:
-1. **`HT_ENSEMBLE_VOTE_UNIFORM` (Soft-Voting / Média Simples):**
+Modos suportados via motor de votação compartilhado (`code/include/ensemble/ht_voting.h`, aliased em `ht_ensemble_voting_t` para compatibilidade):
+1. **`HT_VOTE_UNIFORM` / `HT_ENSEMBLE_VOTE_UNIFORM` (Soft-Voting / Média Simples):**
    $$\bar{P}(c \mid \mathbf{x}) = \frac{1}{M}\sum_{m=0}^{M-1} P_m(c \mid \mathbf{x}_{\text{sub}, m}), \qquad \hat{y}(\mathbf{x}) = \frac{1}{M}\sum_{m=0}^{M-1} \hat{y}_m(\mathbf{x}_{\text{sub}, m})$$
-2. **`HT_ENSEMBLE_VOTE_WEIGHTED` (Ponderado pelo Inverso do Erro Quadrático — Padrão):**
+2. **`HT_VOTE_WEIGHTED` / `HT_ENSEMBLE_VOTE_WEIGHTED` (Ponderado pelo Inverso do Erro Quadrático — Padrão):**
    $$w_m = \frac{1}{\hat{e}_m^2 + \varepsilon_{\text{vote}}} \quad (\text{Classif}) \quad \text{ou} \quad w_m = \frac{1}{\text{fMSE}_m + \varepsilon_{\text{vote}}} \quad (\text{Reg})$$
    $$\bar{P}(c \mid \mathbf{x}) = \frac{\sum_{m=0}^{M-1} w_m \, P_m(c \mid \mathbf{x}_{\text{sub}, m})}{\sum_{m=0}^{M-1} w_m}, \qquad \hat{y}(\mathbf{x}) = \frac{\sum_{m=0}^{M-1} w_m \, \hat{y}_m(\mathbf{x}_{\text{sub}, m})}{\sum_{m=0}^{M-1} w_m}$$
+
+> [!NOTE]
+> **Alinhamento com Aprendizado Federado (`Fed-Forest`, Fase 11):**
+> O motor de votação (`ht_voting.h`) e a árvore compacta somente-inferência (`ht_compact_tree.h`, gerada via compactação BFS densa sem `stats_pool`) residem em `code/include/ensemble/` e são compartilhados entre o ensemble local (`ht_ensemble_t`) e a floresta federada (`ht_fed_forest_client_t`), evitando duplicação de código e garantindo interoperabilidade direta.
 
 ---
 

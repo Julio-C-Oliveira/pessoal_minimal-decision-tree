@@ -58,7 +58,7 @@ void print_system_info(void) {
 ### Via Linha de Comando / Build
 ```bash
 make version
-# Saida: kansho (libht) version 0.4.1
+# Saida: kansho (libht) version 0.5.0
 ```
 
 ---
@@ -96,6 +96,27 @@ Para lançar uma nova versão oficial no GitHub:
 ---
 
 ## 4.1 Histórico de Releases (Changelog)
+
+### v0.5.0 (2026-11-26) — Aprendizado Federado Embarcado (`Fed-Forest` & `Fed-VFDT`) e Arquitetura Modular (Fase 11)
+- **Reestruturação Modular de `code/` (Entrega 11.2):**
+  - Organização simétrica de `code/include/`, `code/src/` e `code/tests/` em `core/`, `ensemble/` e `federated/`, preservando 100% de retrocompatibilidade de API e headers via `code/Makefile` e firmwares de emulação (`emulation/esp32/`, `emulation/cortex-m3/`).
+- **Extensões Cirúrgicas no Núcleo `core/` (Entrega 11.3):**
+  - Fusão paralela exata de observadores em [`ht_observer`](../code/include/core/ht_observer.h) (`ht_gaussian_merge` via fórmula de Chan, `ht_categorical_merge`, `ht_hist_merge`, `ht_reg_numeric_merge`, `ht_reg_categorical_merge`).
+  - Primitivas de coordenação em [`ht_tree`](../code/include/core/ht_tree.h): flag `HT_TREE_FLAG_DEFER_SPLITS` com **0 bytes extras** em `ht_tree_t`, `ht_tree_evaluate_leaf_split`, `ht_tree_apply_split` e `ht_tree_reset_subtree_to_leaf`.
+- **Fundação Compartilhada `ensemble/` (Entrega 11.4):**
+  - [`ht_compact_tree`](../code/include/ensemble/ht_compact_tree.h): compactação iterativa BFS de `ht_tree_t` em árvore densa somente-inferência ($\approx 1{,}34\text{ KB}$ para 64 nós) com serialização binária portátil.
+  - [`ht_voting`](../code/include/ensemble/ht_voting.h): motor de votação uniforme e ponderado pelo inverso do erro prequential ($1/(\hat{e}_m^2 + \varepsilon)$), compartilhado entre Aprendizado Federado (Fase 11) e Micro-Ensembles (Fase 9).
+- **Protocolo Binário `HFED` & Modo 1 `Fed-Forest` (Entrega 11.5):**
+  - [`ht_fed_proto`](../code/include/federated/ht_fed_proto.h): framing binário agnóstico de transporte (cabeçalho fixo de 32 B, versionamento e CRC32 IEEE 802.3 via tabela nibble de 64 B).
+  - [`ht_fed_forest`](../code/include/federated/ht_fed_forest.h): cliente embarcado com 1 árvore treinável + $M$ árvores remotas compactas e servidor C11 estático com políticas `ALL`, `TOP_M` e `ROUND_ROBIN` (+ `exclude_self`), suportando Classificação e Regressão.
+- **Modo 2 `Fed-VFDT` Global & Auditoria ICTAI 2025 (Entregas 11.6 e 11.8):**
+  - [`ht_fed_vfdt`](../code/include/federated/ht_fed_vfdt.h): suporta `HT_FED_VFDT_COORDINATED` — alinhado estritamente ao paper *Fed-VFDT* (Silva, Vinagre & Gama, IEEE ICTAI 2025, DOI `10.1109/ICTAI66417.2025.00094`: `QUORUM` por atributo, `MAJORITY` por pluralidade, `BEST-MERIT` `max(G_k)`, `WEIGHTED_MERIT`, `HT_FED_THRESH_MAX_MERIT` e filtro `require_locally_ready`) — e `HT_FED_VFDT_STATS_MERGE` (fusão exata *stateless* de observadores + FedAvg ponderado para SGD, sem contagem dupla).
+  - Recuperação de *stragglers* via `topology_version`, log circular `split_log[64]`, fallback automático por `FULL_SNAPSHOT` e reset coordenado por *concept drift* (`HT_FED_CMD_RESET_SUBTREE`).
+- **Validação Experimental Completa (Entregas 11.7, 11.9, 11.10 e 11.11):**
+  - **Benchmark Real em 8 Datasets (`make bench-main-federated`):** $K=10$ clientes, $R=20$ rodadas, **Non-IID (`Dirichlet α=0.3`)** e **IID** no perfil MCU Tier 8 (pico de SRAM estática por cliente de **77,01 KB** no *Forest Covertype* 54 feat / 7 cls — abaixo de 100 KB). `Fed-VFDT (STATS-MERGE)` saltou de `30,91%` para `65,52%` no *Covertype* Non-IID (+34,61 pp vs local) e `Fed-Forest` reduziu o MAE em `-54,9%` no *Appliances Energy* e `-32,2%` no *Bikes* ([`main_benchmark/federated_benchmark_report.md`](../main_benchmark/federated_benchmark_report.md)).
+  - **Transporte Real via Sockets TCP POSIX (`make bench-fed-net` — Gate A):** 5/5 cenários multi-processo aprovados em `0,33 s` com fragmentação de stream (`11–23 B/write`), rejeição de bit-flip via CRC32, Non-IID extremo (100% puro), recuperação real de *straggler* offline (`HT_ERR_STALE_VERSION` → catch-up `TopoV=3/3`) e regressão contínua.
+  - **Compilação Cruzada 32-Bit & Emulação QEMU (Gate B):** Zero warnings sob `-std=c11 -Wall -Wextra -Werror -pedantic -Os` em **ARM Cortex-M3** (`arm-none-eabi-gcc 14.2.1` + QEMU `lm3s6965evb`: `11,08 KB` Flash p/ `ensemble/`+`federated/`, `39,66 KB` total) e **ESP32 Xtensa LX6** (ESP-IDF `v5.1.2` + QEMU `esp32`: `11,83 KB` Flash p/ `ensemble/`+`federated/`, `40,61 KB` total), com `data=0` e `bss=0`.
+- **Suíte de Testes:** **134/134 testes unitários e de integração aprovados** (`231.385` asserções em `float32` e `double64`) com zero warnings e zero `malloc` em runtime.
 
 ### v0.4.1 (2026-11-14) — Otimização de Footprint com Perfil ADWIN Compacto e Omissão de Feat Stats (Entrega 7.7)
 - **Perfil de Compilação ADWIN Compacto (`ht_drift`):**

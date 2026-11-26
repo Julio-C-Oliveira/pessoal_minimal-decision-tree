@@ -52,13 +52,13 @@ static void test_config_constants(void) {
 
     /* Versioning assertions (SemVer) */
     HT_ASSERT_EQ(HT_VERSION_MAJOR, 0U);
-    HT_ASSERT_EQ(HT_VERSION_MINOR, 4U);
-    HT_ASSERT_EQ(HT_VERSION_PATCH, 1U);
-    HT_ASSERT(HT_VERSION_CHECK(0, 4, 1));
-    HT_ASSERT(!HT_VERSION_CHECK(0, 4, 2));
+    HT_ASSERT_EQ(HT_VERSION_MINOR, 5U);
+    HT_ASSERT_EQ(HT_VERSION_PATCH, 0U);
+    HT_ASSERT(HT_VERSION_CHECK(0, 5, 0));
+    HT_ASSERT(!HT_VERSION_CHECK(0, 5, 1));
     HT_ASSERT(!HT_VERSION_CHECK(1, 0, 0));
-    HT_ASSERT_EQ(strcmp(HT_VERSION_STRING, "0.4.1"), 0);
-    HT_ASSERT_EQ(strcmp(ht_version(), "0.4.1"), 0);
+    HT_ASSERT_EQ(strcmp(HT_VERSION_STRING, "0.5.0"), 0);
+    HT_ASSERT_EQ(strcmp(ht_version(), "0.5.0"), 0);
 }
 
 static void test_config_types_and_sizes(void) {
@@ -181,6 +181,15 @@ int main(void) {
 
     /* Nível 1 & 2: Micro-Pipelines de Pré-Processamento (libht_prep) */
     test_prep_run();
+
+    /* Nível 1 & 2: Fundação Compartilhada de Ensembles (ht_compact_tree & ht_voting) */
+    test_compact_tree_run();
+
+    /* Nível 1, 2 & 3: Aprendizado Federado Modo 1 (Fed-Forest) */
+    test_fed_forest_run();
+
+    /* Nível 1, 2 & 3: Aprendizado Federado Modo 2 (Fed-VFDT) */
+    test_fed_vfdt_run();
 
     /* Nível 3: Fluxo Ponta a Ponta Acumulado */
     test_e2e_flow_run();

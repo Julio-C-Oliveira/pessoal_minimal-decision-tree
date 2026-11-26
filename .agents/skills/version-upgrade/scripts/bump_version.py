@@ -8,7 +8,7 @@ Funcionalidades:
    técnico (NONE, PATCH, MINOR, MAJOR) formatado para apresentação e aprovação do usuário.
 2. --apply <patch|minor|major|X.Y.Z>: Atualiza atomicamente a tríade de arquivos:
    - VERSION
-   - code/include/ht_config.h
+   - code/include/core/ht_config.h
    - code/tests/test_main.c
 3. Gate de testes obrigatório (make test em float e double com CFLAGS_EXTRA="-DHT_USE_DOUBLE").
 4. Commit atômico padronizado (chore(version): bump version to X.Y.Z).
@@ -50,7 +50,7 @@ def format_semver(maj, min_, patch):
 
 def read_version_files(repo_root):
     version_file = os.path.join(repo_root, "VERSION")
-    config_file = os.path.join(repo_root, "code/include/ht_config.h")
+    config_file = os.path.join(repo_root, "code/include/core/ht_config.h")
     test_file = os.path.join(repo_root, "code/tests/test_main.c")
 
     if not os.path.isfile(version_file):
@@ -239,7 +239,7 @@ def generate_updated_contents(data, target_version):
     # 1. VERSION
     new_version_content = f"{new_str}\n"
 
-    # 2. code/include/ht_config.h
+    # 2. code/include/core/ht_config.h
     cfg = data["config_content"]
     cfg = re.sub(r"(#define\s+HT_VERSION_MAJOR\s+)\d+U", rf"\g<1>{new_maj}U", cfg)
     cfg = re.sub(r"(#define\s+HT_VERSION_MINOR\s+)\d+U", rf"\g<1>{new_min}U", cfg)
@@ -392,13 +392,13 @@ def cmd_apply(repo_root, target, dry_run=False, no_test=False, commit=False, tag
 
     # Exibe diffs
     diff_v = show_diff(data["version_content"], updated["new_version_content"], "VERSION")
-    diff_c = show_diff(data["config_content"], updated["new_config_content"], "code/include/ht_config.h")
+    diff_c = show_diff(data["config_content"], updated["new_config_content"], "code/include/core/ht_config.h")
     diff_t = show_diff(data["test_content"], updated["new_test_content"], "code/tests/test_main.c")
 
     if dry_run:
         print("[*] Modo --dry-run: Nenhuma alteração gravada em disco. Diff planejado:\n")
         print(diff_v or "Sem alterações em VERSION")
-        print(diff_c or "Sem alterações em code/include/ht_config.h")
+        print(diff_c or "Sem alterações em code/include/core/ht_config.h")
         print(diff_t or "Sem alterações em code/tests/test_main.c")
         return
 
@@ -407,7 +407,7 @@ def cmd_apply(repo_root, target, dry_run=False, no_test=False, commit=False, tag
     with open(data["version_file"], "w", encoding="utf-8") as f:
         f.write(updated["new_version_content"])
 
-    print("[*] Atualizando code/include/ht_config.h...")
+    print("[*] Atualizando code/include/core/ht_config.h...")
     with open(data["config_file"], "w", encoding="utf-8") as f:
         f.write(updated["new_config_content"])
 
@@ -421,14 +421,14 @@ def cmd_apply(repo_root, target, dry_run=False, no_test=False, commit=False, tag
         res1 = run_cmd("make clean && make test", cwd=repo_root, check=False)
         if res1.returncode != 0:
             print("FALHA no teste em float! Revertendo arquivos...", file=sys.stderr)
-            run_cmd("git checkout -- VERSION code/include/ht_config.h code/tests/test_main.c", cwd=repo_root)
+            run_cmd("git checkout -- VERSION code/include/core/ht_config.h code/tests/test_main.c", cwd=repo_root)
             sys.exit(res1.returncode)
 
         print("[*] Executando Gate de Testes (2/2: precisão dupla double)...")
         res2 = run_cmd("make clean && make test CFLAGS_EXTRA=\"-DHT_USE_DOUBLE\"", cwd=repo_root, check=False)
         if res2.returncode != 0:
             print("FALHA no teste em double! Revertendo arquivos...", file=sys.stderr)
-            run_cmd("git checkout -- VERSION code/include/ht_config.h code/tests/test_main.c", cwd=repo_root)
+            run_cmd("git checkout -- VERSION code/include/core/ht_config.h code/tests/test_main.c", cwd=repo_root)
             sys.exit(res2.returncode)
 
         print("[+] 100% dos testes unitários e de integração aprovados em float e double!")
@@ -437,7 +437,7 @@ def cmd_apply(repo_root, target, dry_run=False, no_test=False, commit=False, tag
     if commit:
         commit_msg = f"chore(version): bump version to {target_str}"
         print(f"[*] Criando commit atômico: '{commit_msg}'...")
-        run_cmd(f"git add VERSION code/include/ht_config.h code/tests/test_main.c", cwd=repo_root)
+        run_cmd(f"git add VERSION code/include/core/ht_config.h code/tests/test_main.c", cwd=repo_root)
         run_cmd(f'git commit -m "{commit_msg}"', cwd=repo_root)
         print("[+] Commit realizado com sucesso!")
 

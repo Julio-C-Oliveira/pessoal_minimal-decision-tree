@@ -945,6 +945,118 @@ static void test_hist_obs_split_dists_and_proba(void) {
 /* --- Test Suite Runner --------------------------------------------------- */
 /* ========================================================================= */
 
+/* ========================================================================= */
+/* --- Sufficient Statistics Merge Tests (Federated / Parallel) ------------ */
+/* ========================================================================= */
+
+static void test_observer_gaussian_and_categorical_merge_exact(void) {
+    ht_gaussian_obs_t single[HT_MAX_CLASSES];
+    ht_gaussian_obs_t part_a[HT_MAX_CLASSES];
+    ht_gaussian_obs_t part_b[HT_MAX_CLASSES];
+    memset(single, 0, sizeof(single));
+    memset(part_a, 0, sizeof(part_a));
+    memset(part_b, 0, sizeof(part_b));
+
+    ht_categorical_obs_t cat_single, cat_a, cat_b;
+    ht_categorical_init(&cat_single);
+    ht_categorical_init(&cat_a);
+    ht_categorical_init(&cat_b);
+
+    for (int i = 0; i < 60; ++i) {
+        uint8_t c = (uint8_t)(i % 3);
+        ht_float_t v = (ht_float_t)(i * 0.75 - 10.0) + (ht_float_t)(c * 5.0);
+        int32_t cat = i % HT_MAX_CATEGORIES;
+        ht_float_t w = (ht_float_t)(1.0 + (i % 2) * 0.5);
+
+        ht_gaussian_update(single, c, v, w);
+        ht_categorical_update(&cat_single, c, cat, w);
+
+        if (i < 25) {
+            ht_gaussian_update(part_a, c, v, w);
+            ht_categorical_update(&cat_a, c, cat, w);
+        } else {
+            ht_gaussian_update(part_b, c, v, w);
+            ht_categorical_update(&cat_b, c, cat, w);
+        }
+    }
+
+    for (uint8_t c = 0; c < 3; ++c) {
+        ht_gaussian_merge(&part_a[c], &part_b[c]);
+        HT_ASSERT_FLOAT_NEAR(part_a[c].count, single[c].count, (ht_float_t)1e-4);
+        HT_ASSERT_FLOAT_NEAR(part_a[c].mean, single[c].mean, (ht_float_t)1e-4);
+        HT_ASSERT_FLOAT_NEAR(part_a[c].m2, single[c].m2, (ht_float_t)1e-2);
+        HT_ASSERT_FLOAT_EQ(part_a[c].min_val, single[c].min_val);
+        HT_ASSERT_FLOAT_EQ(part_a[c].max_val, single[c].max_val);
+    }
+
+    ht_categorical_merge(&cat_a, &cat_b, 3);
+    for (uint8_t c = 0; c < 3; ++c) {
+        for (uint8_t v = 0; v < HT_MAX_CATEGORIES; ++v) {
+            HT_ASSERT_FLOAT_EQ(cat_a.counts[c][v], cat_single.counts[c][v]);
+        }
+    }
+}
+
+static void test_observer_hist_and_reg_merge(void) {
+    ht_hist_obs_t h_a, h_b;
+    ht_hist_init(&h_a);
+    ht_hist_init(&h_b);
+
+    for (int i = 0; i < 20; ++i) {
+        ht_hist_update(&h_a, (uint8_t)(i % 2), (ht_float_t)(i * 0.5), (ht_float_t)1.0);
+        ht_hist_update(&h_b, (uint8_t)(i % 2), (ht_float_t)(10.0 + i * 0.5), (ht_float_t)1.0);
+    }
+    ht_hist_merge(&h_a, &h_b, 2);
+
+    ht_float_t total_w = (ht_float_t)0.0;
+    for (uint8_t b = 0; b < HT_HIST_MAX_BINS; ++b) {
+        if (b > 0) {
+            HT_ASSERT(h_a.bins[b].center >= h_a.bins[b - 1].center);
+        }
+        total_w += h_a.bins[b].counts[0] + h_a.bins[b].counts[1];
+    }
+    HT_ASSERT_FLOAT_NEAR(total_w, (ht_float_t)40.0, (ht_float_t)1e-4);
+
+    ht_reg_numeric_obs_t rn_a, rn_b;
+    ht_reg_numeric_init(&rn_a);
+    ht_reg_numeric_init(&rn_b);
+    ht_reg_categorical_obs_t rc_a, rc_b, rc_single;
+    ht_reg_categorical_init(&rc_a);
+    ht_reg_categorical_init(&rc_b);
+    ht_reg_categorical_init(&rc_single);
+
+    for (int i = 0; i < 30; ++i) {
+        ht_float_t xv = (ht_float_t)i;
+        ht_float_t yv = (ht_float_t)(2.0 * xv + 1.0);
+        int32_t cat = i % HT_MAX_CATEGORIES;
+        ht_reg_categorical_update(&rc_single, cat, yv, (ht_float_t)1.0);
+        if (i < 15) {
+            ht_reg_numeric_update(&rn_a, xv, yv, (ht_float_t)1.0);
+            ht_reg_categorical_update(&rc_a, cat, yv, (ht_float_t)1.0);
+        } else {
+            ht_reg_numeric_update(&rn_b, xv, yv, (ht_float_t)1.0);
+            ht_reg_categorical_update(&rc_b, cat, yv, (ht_float_t)1.0);
+        }
+    }
+
+    ht_reg_numeric_merge(&rn_a, &rn_b);
+    ht_float_t reg_n = (ht_float_t)0.0;
+    for (uint8_t s = 0; s < HT_REG_NUM_SLOTS; ++s) {
+        if (s > 0) {
+            HT_ASSERT(rn_a.slots[s].x_mean >= rn_a.slots[s - 1].x_mean);
+        }
+        reg_n += rn_a.slots[s].y_stats.count;
+    }
+    HT_ASSERT_FLOAT_NEAR(reg_n, (ht_float_t)30.0, (ht_float_t)1e-4);
+
+    ht_reg_categorical_merge(&rc_a, &rc_b);
+    for (uint8_t v = 0; v < HT_MAX_CATEGORIES; ++v) {
+        HT_ASSERT_FLOAT_NEAR(rc_a.cat_stats[v].count, rc_single.cat_stats[v].count, (ht_float_t)1e-4);
+        HT_ASSERT_FLOAT_NEAR(rc_a.cat_stats[v].mean, rc_single.cat_stats[v].mean, (ht_float_t)1e-4);
+        HT_ASSERT_FLOAT_NEAR(rc_a.cat_stats[v].m2, rc_single.cat_stats[v].m2, (ht_float_t)1e-2);
+    }
+}
+
 void test_observer_run(void) {
     HT_TEST_SUITE_BEGIN("Nivel 1 & 2: Observadores de Atributos (ht_observer)");
 
@@ -974,6 +1086,10 @@ void test_observer_run(void) {
     HT_RUN_TEST(test_var_stat_chan_subtract_analytical);
     HT_RUN_TEST(test_reg_numeric_obs_ordered_slots_and_merging);
     HT_RUN_TEST(test_reg_categorical_obs_basic_and_edge_cases);
+
+    /* Nível 1: Fusão de Estatísticas Suficientes (Federado / Paralelo) */
+    HT_RUN_TEST(test_observer_gaussian_and_categorical_merge_exact);
+    HT_RUN_TEST(test_observer_hist_and_reg_merge);
 
     /* Nível 2: Integração com ht_memory slab pool */
     HT_RUN_TEST(test_observers_in_leaf_stats_pool);

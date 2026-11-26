@@ -146,17 +146,17 @@ def ensure_c11_binary(tier: int, slots: int, is_high_dim: bool, task: str = "cla
         # Check if binary already exists and is newer than source files
         c_srcs = [
             BENCH_SRC,
-            os.path.join(CODE_DIR, "src", "ht_tree.c"),
-            os.path.join(CODE_DIR, "src", "ht_memory.c"),
-            os.path.join(CODE_DIR, "src", "ht_observer.c"),
-            os.path.join(CODE_DIR, "src", "ht_criterion.c"),
-            os.path.join(CODE_DIR, "src", "ht_drift.c"),
-            os.path.join(CODE_DIR, "src", "ht_prep.c"),
-            os.path.join(CODE_DIR, "include", "ht_config.h"),
-            os.path.join(CODE_DIR, "include", "ht_memory.h"),
-            os.path.join(CODE_DIR, "include", "ht_prep.h"),
-            os.path.join(CODE_DIR, "include", "ht_drift.h"),
-            os.path.join(CODE_DIR, "include", "ht_tree.h"),
+            os.path.join(CODE_DIR, "src", "core", "ht_tree.c"),
+            os.path.join(CODE_DIR, "src", "core", "ht_memory.c"),
+            os.path.join(CODE_DIR, "src", "core", "ht_observer.c"),
+            os.path.join(CODE_DIR, "src", "core", "ht_criterion.c"),
+            os.path.join(CODE_DIR, "src", "core", "ht_drift.c"),
+            os.path.join(CODE_DIR, "src", "core", "ht_prep.c"),
+            os.path.join(CODE_DIR, "include", "core", "ht_config.h"),
+            os.path.join(CODE_DIR, "include", "core", "ht_memory.h"),
+            os.path.join(CODE_DIR, "include", "core", "ht_prep.h"),
+            os.path.join(CODE_DIR, "include", "core", "ht_drift.h"),
+            os.path.join(CODE_DIR, "include", "core", "ht_tree.h"),
         ]
 
         needs_compile = not os.path.exists(bin_path)
@@ -200,12 +200,12 @@ def ensure_c11_binary(tier: int, slots: int, is_high_dim: bool, task: str = "cla
                 macros.append(f"-DHT_STATS_STORAGE_BYTES={stats_storage_bytes}")
 
             src_files = [
-                os.path.join(CODE_DIR, "src", "ht_memory.c"),
-                os.path.join(CODE_DIR, "src", "ht_observer.c"),
-                os.path.join(CODE_DIR, "src", "ht_criterion.c"),
-                os.path.join(CODE_DIR, "src", "ht_tree.c"),
-                os.path.join(CODE_DIR, "src", "ht_drift.c"),
-                os.path.join(CODE_DIR, "src", "ht_prep.c"),
+                os.path.join(CODE_DIR, "src", "core", "ht_memory.c"),
+                os.path.join(CODE_DIR, "src", "core", "ht_observer.c"),
+                os.path.join(CODE_DIR, "src", "core", "ht_criterion.c"),
+                os.path.join(CODE_DIR, "src", "core", "ht_tree.c"),
+                os.path.join(CODE_DIR, "src", "core", "ht_drift.c"),
+                os.path.join(CODE_DIR, "src", "core", "ht_prep.c"),
                 BENCH_SRC,
             ]
 
@@ -218,6 +218,7 @@ def ensure_c11_binary(tier: int, slots: int, is_high_dim: bool, task: str = "cla
                 "-Werror",
                 "-pedantic",
                 f"-I{os.path.join(CODE_DIR, 'include')}",
+                f"-I{os.path.join(CODE_DIR, 'include', 'core')}",
             ] + macros + src_files + ["-lm", "-o", bin_path]
 
             subprocess.run(cmd, check=True)

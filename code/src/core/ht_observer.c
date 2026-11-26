@@ -757,3 +757,240 @@ void ht_reg_categorical_update(ht_reg_categorical_obs_t *obs,
 
     ht_var_update(&obs->cat_stats[cat_val], y_val, weight);
 }
+
+/* ========================================================================= */
+/* --- Sufficient Statistics Merge Implementation -------------------------- */
+/* ========================================================================= */
+
+void ht_gaussian_merge(ht_gaussian_obs_t *dst, const ht_gaussian_obs_t *src) {
+    if (!dst || !src || src->count <= (ht_float_t)0.0) {
+        return;
+    }
+    if (dst->count <= (ht_float_t)0.0) {
+        *dst = *src;
+        return;
+    }
+
+    ht_float_t n_a = dst->count;
+    ht_float_t n_b = src->count;
+    ht_float_t n_c = n_a + n_b;
+    ht_float_t delta = src->mean - dst->mean;
+
+    dst->mean = dst->mean + (n_b / n_c) * delta;
+    dst->m2 = dst->m2 + src->m2 + (delta * delta) * ((n_a * n_b) / n_c);
+    if (dst->m2 < (ht_float_t)0.0) {
+        dst->m2 = (ht_float_t)0.0;
+    }
+    dst->count = n_c;
+    if (src->min_val < dst->min_val) {
+        dst->min_val = src->min_val;
+    }
+    if (src->max_val > dst->max_val) {
+        dst->max_val = src->max_val;
+    }
+}
+
+void ht_categorical_merge(ht_categorical_obs_t *dst,
+                          const ht_categorical_obs_t *src,
+                          uint8_t n_classes) {
+    if (!dst || !src || n_classes == 0U) {
+        return;
+    }
+    uint8_t max_c = (n_classes < HT_MAX_CLASSES) ? n_classes : (uint8_t)HT_MAX_CLASSES;
+    for (uint8_t c = 0; c < max_c; ++c) {
+        for (uint8_t v = 0; v < HT_MAX_CATEGORIES; ++v) {
+            dst->counts[c][v] += src->counts[c][v];
+        }
+    }
+}
+
+static void ht_hist_insert_bin(ht_hist_obs_t *dst,
+                               const ht_hist_bin_t *in_bin,
+                               uint8_t max_c) {
+    ht_float_t in_total = (ht_float_t)0.0;
+    for (uint8_t c = 0; c < max_c; ++c) {
+        in_total += in_bin->counts[c];
+    }
+    if (in_total <= (ht_float_t)0.0 || HT_ISNAN(in_bin->center)) {
+        return;
+    }
+
+    uint8_t n_bins = ht_hist_active_bins(dst);
+
+    for (uint8_t i = 0; i < n_bins; ++i) {
+        if (HT_FABS(dst->bins[i].center - in_bin->center) <= (ht_float_t)1e-9) {
+            for (uint8_t c = 0; c < max_c; ++c) {
+                dst->bins[i].counts[c] += in_bin->counts[c];
+            }
+            return;
+        }
+    }
+
+    if (n_bins < HT_HIST_MAX_BINS) {
+        uint8_t ins_idx = n_bins;
+        for (uint8_t i = 0; i < n_bins; ++i) {
+            if (in_bin->center < dst->bins[i].center) {
+                ins_idx = i;
+                break;
+            }
+        }
+        for (int32_t j = (int32_t)n_bins - 1; j >= (int32_t)ins_idx; --j) {
+            dst->bins[j + 1] = dst->bins[j];
+        }
+        dst->bins[ins_idx].center = in_bin->center;
+        memset(dst->bins[ins_idx].counts, 0, sizeof(dst->bins[ins_idx].counts));
+        for (uint8_t c = 0; c < max_c; ++c) {
+            dst->bins[ins_idx].counts[c] = in_bin->counts[c];
+        }
+    } else {
+        ht_hist_bin_t temp[HT_HIST_MAX_BINS + 1U];
+        uint8_t ins_idx = HT_HIST_MAX_BINS;
+        for (uint8_t i = 0; i < HT_HIST_MAX_BINS; ++i) {
+            if (in_bin->center < dst->bins[i].center) {
+                ins_idx = i;
+                break;
+            }
+        }
+        for (uint8_t i = 0; i < ins_idx; ++i) {
+            temp[i] = dst->bins[i];
+        }
+        temp[ins_idx].center = in_bin->center;
+        memset(temp[ins_idx].counts, 0, sizeof(temp[ins_idx].counts));
+        for (uint8_t c = 0; c < max_c; ++c) {
+            temp[ins_idx].counts[c] = in_bin->counts[c];
+        }
+        for (uint8_t i = ins_idx; i < HT_HIST_MAX_BINS; ++i) {
+            temp[i + 1U] = dst->bins[i];
+        }
+
+        uint8_t min_idx = 0;
+        ht_float_t min_dist = temp[1].center - temp[0].center;
+        for (uint8_t i = 1; i < HT_HIST_MAX_BINS; ++i) {
+            ht_float_t d = temp[i + 1U].center - temp[i].center;
+            if (d < min_dist) {
+                min_dist = d;
+                min_idx = i;
+            }
+        }
+
+        ht_float_t w0 = (ht_float_t)0.0;
+        ht_float_t w1 = (ht_float_t)0.0;
+        for (uint8_t c = 0; c < HT_MAX_CLASSES; ++c) {
+            w0 += temp[min_idx].counts[c];
+            w1 += temp[min_idx + 1U].counts[c];
+        }
+        ht_float_t w_comb = w0 + w1;
+        ht_float_t p_comb = (temp[min_idx].center * w0 + temp[min_idx + 1U].center * w1) /
+                            ((w_comb > (ht_float_t)1e-12) ? w_comb : (ht_float_t)1.0);
+
+        for (uint8_t i = 0; i < min_idx; ++i) {
+            dst->bins[i] = temp[i];
+        }
+        dst->bins[min_idx].center = p_comb;
+        for (uint8_t c = 0; c < HT_MAX_CLASSES; ++c) {
+            dst->bins[min_idx].counts[c] = temp[min_idx].counts[c] + temp[min_idx + 1U].counts[c];
+        }
+        for (uint8_t i = min_idx + 1U; i < HT_HIST_MAX_BINS; ++i) {
+            dst->bins[i] = temp[i + 1U];
+        }
+    }
+}
+
+void ht_hist_merge(ht_hist_obs_t *dst,
+                   const ht_hist_obs_t *src,
+                   uint8_t n_classes) {
+    if (!dst || !src || n_classes == 0U) {
+        return;
+    }
+    uint8_t max_c = (n_classes < HT_MAX_CLASSES) ? n_classes : (uint8_t)HT_MAX_CLASSES;
+    uint8_t src_bins = ht_hist_active_bins(src);
+    for (uint8_t b = 0; b < src_bins; ++b) {
+        ht_hist_insert_bin(dst, &src->bins[b], max_c);
+    }
+}
+
+static void ht_reg_numeric_insert_slot(ht_reg_numeric_obs_t *dst,
+                                       const ht_reg_num_slot_t *in_slot) {
+    if (in_slot->y_stats.count <= (ht_float_t)0.0 || HT_ISNAN(in_slot->x_mean)) {
+        return;
+    }
+
+    uint8_t m = 0;
+    while (m < HT_REG_NUM_SLOTS && dst->slots[m].y_stats.count > (ht_float_t)0.0) {
+        m++;
+    }
+
+    if (m < HT_REG_NUM_SLOTS) {
+        uint8_t pos = 0;
+        while (pos < m && dst->slots[pos].x_mean <= in_slot->x_mean) {
+            pos++;
+        }
+        for (uint8_t i = m; i > pos; --i) {
+            dst->slots[i] = dst->slots[i - 1U];
+        }
+        dst->slots[pos] = *in_slot;
+        return;
+    }
+
+    ht_reg_num_slot_t temp[HT_REG_NUM_SLOTS + 1U];
+    uint8_t pos = 0;
+    while (pos < HT_REG_NUM_SLOTS && dst->slots[pos].x_mean <= in_slot->x_mean) {
+        pos++;
+    }
+    for (uint8_t i = 0; i < pos; ++i) {
+        temp[i] = dst->slots[i];
+    }
+    temp[pos] = *in_slot;
+    for (uint8_t i = pos; i < HT_REG_NUM_SLOTS; ++i) {
+        temp[i + 1U] = dst->slots[i];
+    }
+
+    uint8_t min_idx = 0;
+    ht_float_t min_dist = temp[1].x_mean - temp[0].x_mean;
+    for (uint8_t i = 1; i < HT_REG_NUM_SLOTS; ++i) {
+        ht_float_t d = temp[i + 1U].x_mean - temp[i].x_mean;
+        if (d < min_dist) {
+            min_dist = d;
+            min_idx = i;
+        }
+    }
+
+    ht_float_t w0 = temp[min_idx].y_stats.count;
+    ht_float_t w1 = temp[min_idx + 1U].y_stats.count;
+    ht_float_t w_sum = w0 + w1;
+    ht_float_t fused_x = (w_sum > (ht_float_t)0.0)
+        ? ((w0 * temp[min_idx].x_mean + w1 * temp[min_idx + 1U].x_mean) / w_sum)
+        : temp[min_idx].x_mean;
+    ht_var_stat_t fused_y = ht_var_combine(&temp[min_idx].y_stats, &temp[min_idx + 1U].y_stats);
+
+    for (uint8_t i = 0; i < min_idx; ++i) {
+        dst->slots[i] = temp[i];
+    }
+    dst->slots[min_idx].x_mean = fused_x;
+    dst->slots[min_idx].y_stats = fused_y;
+    for (uint8_t i = min_idx + 1U; i < HT_REG_NUM_SLOTS; ++i) {
+        dst->slots[i] = temp[i + 1U];
+    }
+}
+
+void ht_reg_numeric_merge(ht_reg_numeric_obs_t *dst,
+                          const ht_reg_numeric_obs_t *src) {
+    if (!dst || !src) {
+        return;
+    }
+    for (uint8_t s = 0; s < HT_REG_NUM_SLOTS; ++s) {
+        if (src->slots[s].y_stats.count > (ht_float_t)0.0) {
+            ht_reg_numeric_insert_slot(dst, &src->slots[s]);
+        }
+    }
+}
+
+void ht_reg_categorical_merge(ht_reg_categorical_obs_t *dst,
+                              const ht_reg_categorical_obs_t *src) {
+    if (!dst || !src) {
+        return;
+    }
+    for (uint8_t v = 0; v < HT_MAX_CATEGORIES; ++v) {
+        dst->cat_stats[v] = ht_var_combine(&dst->cat_stats[v], &src->cat_stats[v]);
+    }
+}
