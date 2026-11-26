@@ -129,7 +129,7 @@ Modos suportados via motor de votação compartilhado (`code/include/ensemble/ht
 
 ---
 
-## 5. Contratos de API C11 (`code/include/ht_ensemble.h`) e Mapa de Entregas
+## 5. Contratos de API C11 (`code/include/ensemble/ht_ensemble.h`) e Mapa de Entregas
 
 ### 5.1 Macros de Compilação e Assinaturas Públicas
 
@@ -199,6 +199,6 @@ size_t      ht_ensemble_bytes_used(const ht_ensemble_t *ens);
 | ID | Entrega | Arquivos Alvo | Critérios de Verificação (Níveis 1, 2 e 3) |
 | :---: | :--- | :--- | :--- |
 | **9.1** | Estudo Técnico e Arquitetura de Micro-Ensembles (`< 100 KB`) | `docs/11_embedded_micro_ensembles.md`, `docs/06_implementation_plan.md` | Definição da Arquitetura Híbrida Dual, orçamento $< 100\text{ KB}$ e contratos `ht_ensemble.h` |
-| **9.2** | Estruturas `ht_ensemble_t`, Subespaços e Observador Compartilhado | `code/include/ht_config.h`, `code/include/ht_ensemble.h`, `code/src/ht_ensemble.c`, `code/tests/test_ensemble.c` | **N1:** sorteio determinístico de subespaços `feature_map[M][k]` com garantia de cobertura, `leaf_stride` reduzido e atualização de `shared_root_obs`<br/>**N2:** `_Static_assert(sizeof(ht_ensemble_t) <= 100 * 1024)` e *Warm-Start* na raiz |
-| **9.3** | Treino *Leveraging Bagging* ($\text{Poisson}(\lambda)$), Votação e Persistência | `code/src/ht_ensemble.c`, `code/Makefile`, `code/tests/test_ensemble.c`, `code/tests/test_e2e_flow.c` | **N1:** gerador $\text{Poisson}(\lambda)$, atualização de $\hat{e}_m$ e votação $1/(\hat{e}_m^2 + \epsilon)$ / Uniforme (Classif + Reg)<br/>**N2:** adaptação com `shared_adwin_pool` e renovação guiada por `feat_importance`<br/>**N3:** fluxo E2E completo (incluindo modo `-DHT_USE_FIXED_POINT`) e `ht_ensemble_save`/`load` |
-| **9.4** | Benchmark de Micro-Ensembles nos 8 Datasets e Emulação QEMU | `benchmarks/`, `main_benchmark/`, `emulation/`, `wiki/*.md`, `README.md` | Ganho experimental de Macro F1 no *Forest Covertype* e $R^2$ nas regressões com SRAM $< 100\text{ KB}$ e zero heap + SemVer `0.6.0` |
+| **9.2** | Estruturas `ht_ensemble_t`, Subespaços e Observador Compartilhado | `code/include/core/ht_config.h`, `code/include/ensemble/ht_ensemble.h`, `code/src/ensemble/ht_ensemble.c`, `code/tests/ensemble/test_ensemble.c` | **N1:** sorteio determinístico de subespaços `feature_map[M][k]` com garantia de cobertura, `leaf_stride` reduzido e atualização de `shared_root_obs`<br/>**N2:** `_Static_assert(sizeof(ht_ensemble_t) <= 100 * 1024)` e *Warm-Start* na raiz |
+| **9.3** | Treino *Leveraging Bagging* ($\text{Poisson}(\lambda)$), Votação e Persistência | `code/src/ensemble/ht_ensemble.c`, `code/Makefile`, `code/tests/ensemble/test_ensemble.c`, `code/tests/core/test_e2e_flow.c` | **N1:** gerador $\text{Poisson}(\lambda)$, atualização de $\hat{e}_m$ e votação $1/(\hat{e}_m^2 + \epsilon)$ / Uniforme (Classif + Reg)<br/>**N2:** adaptação com `shared_adwin_pool` e renovação guiada por `feat_importance`<br/>**N3:** fluxo E2E completo (incluindo modo `-DHT_USE_FIXED_POINT`) e `ht_ensemble_save`/`load` |
+| **9.4** | Benchmark de Micro-Ensembles nos 8 Datasets e Emulação QEMU | `benchmarks/`, `main_benchmark/`, `emulation/`, `wiki/*.md`, `README.md` | Ganho experimental de Macro F1 no *Forest Covertype* e $R^2$ nas regressões com SRAM $< 100\text{ KB}$ e zero heap + SemVer `0.7.0+` |

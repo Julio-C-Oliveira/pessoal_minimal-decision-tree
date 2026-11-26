@@ -2,7 +2,7 @@
 
 **Projeto:** `kansho` (簡樹, Embedded Hoeffding Tree in pure C11)  
 **Versão Atual da Biblioteca:** `0.2.0`  
-**Escopo da Análise:** Todo o código-fonte em [`code/include/`](../code/include/) e [`code/src/`](../code/src/)  
+**Escopo da Análise:** Código-fonte do núcleo em [`code/include/core/`](../code/include/core/) e [`code/src/core/`](../code/src/core/)  
 **Meta:** Redução máxima do consumo de memória RAM (SRAM estática) preservando 100% das funcionalidades (Classificação, Regressão, ADWIN, HAT, NBA, Pré-processamento, Save/Load) e mantendo integridade matemática e acurácia idênticas.
 
 ---
@@ -79,7 +79,7 @@ flowchart TD
 ### Hipótese 1: Free-Lists Intrusivas (Eliminação das Pilhas Externas `free_nodes` e `free_stats`)
 
 #### 1. Fundamentação Teórica e Diagnóstico
-Em [`code/include/ht_memory.h`](../code/include/ht_memory.h), a struct `ht_memory_pool_t` mantém dois vetores separados para rastrear índices disponíveis:
+Em [`code/include/core/ht_memory.h`](../code/include/core/ht_memory.h), a struct `ht_memory_pool_t` mantém dois vetores separados para rastrear índices disponíveis:
 ```c
 uint16_t free_nodes[HT_MAX_NODES];         /* 4096 * 2 = 8.192 bytes */
 uint16_t free_stats[HT_MAX_ACTIVE_LEAVES]; /*  256 * 2 =   512 bytes */
@@ -133,14 +133,14 @@ void ht_node_free(ht_memory_pool_t *pool, uint16_t idx) {
 - **Economia em `float32`:** **$8.704\text{ bytes}$ ($8,50\text{ KB}$)** eliminados diretamente da struct.
 - **Economia em `double64`:** **$8.704\text{ bytes}$ ($8,50\text{ KB}$)**.
 - **Impacto em Acurácia/Funcionalidades:** **$0,0\%$**. A sequência de nós alocados permanece $O(1)$ determinística.
-- **Complexidade de Implementação:** Baixa. Afeta apenas [`code/src/ht_memory.c`](../code/src/ht_memory.c).
+- **Complexidade de Implementação:** Baixa. Afeta apenas [`code/src/core/ht_memory.c`](../code/src/core/ht_memory.c).
 
 ---
 
 ### Hipótese 2: Union Assimétrica de Topologia em `ht_node_t` (Nó Folha vs Nó de Decisão)
 
 #### 1. Fundamentação Teórica e Diagnóstico
-Em [`code/include/ht_memory.h`](../code/include/ht_memory.h), a struct `ht_node_t` tem $28\text{ B}$ em `float32` e $48\text{ B}$ em `double64`.
+Em [`code/include/core/ht_memory.h`](../code/include/core/ht_memory.h), a struct `ht_node_t` tem $28\text{ B}$ em `float32` e $48\text{ B}$ em `double64`.
 
 No ciclo de vida de uma Hoeffding Tree, **um nó é estritamente uma Folha OU um Nó Interno de Decisão, nunca ambos simultaneamente**:
 
@@ -195,14 +195,14 @@ typedef struct {
   - O `node_pool` encolhe de **$196.608\text{ B}$ ($192\text{ KB}$) para $163.840\text{ B}$ ($160\text{ KB}$)**.
   - **Economia direta: $32.768\text{ bytes}$ ($32,0\text{ KB}$)!**
 - **Impacto em Acurácia/Funcionalidades:** **$0,0\%$**. A semântica de decisão, split e predição é idêntica.
-- **Complexidade de Implementação:** Média. Exige atualizar os acessos em [`code/src/ht_tree.c`](../code/src/ht_tree.c) para usar `node->leaf.*` ou `node->branch.*`.
+- **Complexidade de Implementação:** Média. Exige atualizar os acessos em [`code/src/core/ht_tree.c`](../code/src/core/ht_tree.c) para usar `node->leaf.*` ou `node->branch.*`.
 
 ---
 
 ### Hipótese 3: Desacoplamento e Pool Dinâmico de Drift (`node_drift` em HAT)
 
 #### 1. Fundamentação Teórica e Diagnóstico
-Em [`code/include/ht_tree.h`](../code/include/ht_tree.h), a struct `ht_tree_t` embute:
+Em [`code/include/core/ht_tree.h`](../code/include/core/ht_tree.h), a struct `ht_tree_t` embute:
 ```c
 ht_node_drift_t node_drift[HT_MAX_NODES]; /* 4096 * 16B = 65.536 bytes (64 KB)! */
 ```
@@ -245,7 +245,7 @@ Existem duas abordagens altamente vantajosas:
 ### Hipótese 4: Union de Cabeçalho em `ht_leaf_stats_t` (Eliminação do Overhead de SGD na Classificação)
 
 #### 1. Fundamentação Teórica e Diagnóstico
-Em [`code/include/ht_memory.h`](../code/include/ht_memory.h), cada `ht_leaf_stats_t` possui:
+Em [`code/include/core/ht_memory.h`](../code/include/core/ht_memory.h), cada `ht_leaf_stats_t` possui:
 ```c
 ht_float_t reg_weights[HT_MAX_FEATURES]; /* 16 * 4B = 64 bytes */
 ht_float_t reg_intercept;                /*  1 * 4B =  4 bytes */
@@ -345,7 +345,7 @@ typedef struct {
 #### 1. Fundamentação Teórica e Diagnóstico Exaustivo de Desperdício
 A maior fonte de desperdício de memória em todo o projeto `kansho` reside no fato de que cada folha ativa em `stats_pool` reserva espaço estático fixado para o pior caso de compilação: `HT_MAX_FEATURES` (16 ou 64 atributos) e modelos de regressão contínua com `HT_MAX_FEATURES` pesos SGD (`reg_weights`) e `HT_REG_NUM_SLOTS` (até 16 slots por feature).
 
-No modelo estático atual (`code/include/ht_memory.h`):
+No modelo estático atual (`code/include/core/ht_memory.h`):
 ```c
 typedef struct {
     ht_node_t       node_pool[HT_MAX_NODES];
@@ -406,7 +406,7 @@ Para reduzir fisicamente `sizeof(ht_tree_t)` na seção `.bss` (sem depender ape
      ```
 
 2. **Parametrização em Compilação de `HT_STATS_STORAGE_BYTES` + Âncora de Tipo (C11 §6.5):**
-   Em `code/include/ht_config.h` / `ht_memory.h`, o buffer `stats_storage` tem seu tamanho em `.bss` definido em compile-time por `HT_STATS_STORAGE_BYTES` com 3 regimes:
+   Em `code/include/core/ht_config.h` / `ht_memory.h`, o buffer `stats_storage` tem seu tamanho em `.bss` definido em compile-time por `HT_STATS_STORAGE_BYTES` com 3 regimes:
    - **Padrão (Compatibilidade Plena):** `(size_t)HT_MAX_ACTIVE_LEAVES * sizeof(ht_leaf_stats_t)` (suporta tanto classificação quanto regressão até `HT_MAX_FEATURES`).
    - **Classificação Pura (`-DHT_CLASSIF_ONLY`):** omite o bloco de `reg_weights` da reserva estática, usando `(size_t)HT_MAX_ACTIVE_LEAVES * HT_LEAF_CLASSIF_MAX_BYTES`, e faz `ht_tree_init` / `ht_tree_load` rejeitarem `HT_TASK_REGRESSION`.
    - **Override Explícito (`-DHT_STATS_STORAGE_BYTES=<bytes>`):** permite ajustar o slab em `.bss` exatamente ao orçamento da aplicação embarcada (ex.: `17312` bytes para Covertype com 54 features e 2 folhas).
@@ -493,8 +493,8 @@ Para que a implementação da Entrega 7.6 seja executada com risco zero, o desen
    * Proibido indexar `HT_MAX_FEATURES` em loops sobre folhas ativas ou acessar `stats->reg_weights` diretamente em `ht_tree.c`/`ht_criterion.c` (sempre usar `ht_leaf_reg_weights(stats, n_features)` e `ht_stats_get(pool, idx)`).
    * Em `ht_tree_init` e `ht_tree_load`, bloquear `HT_TASK_REGRESSION` quando `-DHT_CLASSIF_ONLY` estiver definido.
 3. **Testes de Integridade com Canários de Borda (*Canary Bytes*):**
-   * Em `code/tests/test_memory.c`, alocar duas folhas adjacentes, preencher toda a extensão `leaf_stride` (e margem de guarda) com padrões (`0xAA` / `0xDEADBEEF`) e comprovar zero invasão na folha vizinha e integridade de `next_free`.
-   * Atualizar também todos os pontos de chamada direta legada em `code/tests/test_tree.c` e `code/tests/test_criterion.c` para usar `ht_stats_get(...)` e `ht_leaf_reg_weights(...)`.
+   * Em `code/tests/core/test_memory.c`, alocar duas folhas adjacentes, preencher toda a extensão `leaf_stride` (e margem de guarda) com padrões (`0xAA` / `0xDEADBEEF`) e comprovar zero invasão na folha vizinha e integridade de `next_free`.
+   * Atualizar também todos os pontos de chamada direta legada em `code/tests/core/test_tree.c` e `code/tests/core/test_criterion.c` para usar `ht_stats_get(...)` e `ht_leaf_reg_weights(...)`.
 4. **Serialização Adaptativa e Métrica Precisa:**
    * Registrar/validar `leaf_stride` na serialização em `ht_tree_save` e `ht_tree_load`, executando `ht_memory_init_stride` na carga e `memcpy` delimitado estritamente por `pool->leaf_stride`.
    * Atualizar `ht_memory_bytes_used()` para contabilizar `stats_allocated * pool->leaf_stride`.
@@ -527,14 +527,14 @@ Comparação considerando o perfil compacto de classificação para Forest Cover
 
 #### 1. Fundamentação Teórica e Diagnóstico Completo (Pool ADWIN + `.bss` por Dataset + `feat_stats`)
 
-Uma auditoria cruzada entre [`code/include/ht_drift.h`](../code/include/ht_drift.h), [`code/include/ht_tree.h`](../code/include/ht_tree.h), [`main_benchmark/tune_hyperparams.py`](../main_benchmark/tune_hyperparams.py) e os firmwares QEMU identificou três fontes remanescentes de desperdício estático e uma trava de compilação:
+Uma auditoria cruzada entre [`code/include/core/ht_drift.h`](../code/include/core/ht_drift.h), [`code/include/core/ht_tree.h`](../code/include/core/ht_tree.h), [`main_benchmark/tune_hyperparams.py`](../main_benchmark/tune_hyperparams.py) e os firmwares QEMU identificou três fontes remanescentes de desperdício estático e uma trava de compilação:
 
-1. **Pool ADWIN Superdimensionado e `_Static_assert` Fixo em [`code/include/ht_drift.h`](../code/include/ht_drift.h):**
+1. **Pool ADWIN Superdimensionado e `_Static_assert` Fixo em [`code/include/core/ht_drift.h`](../code/include/core/ht_drift.h):**
    - Cada detector ADWIN possui $14$ níveis de buckets (`HT_ADWIN_LEVELS = 14`), pesando **$764\text{ bytes}$** em `float32` e **$1.504\text{ bytes}$** em `double64`. Com $128$ detectores no pool (`HT_MAX_ADWIN_DETECTORS = 128`), `ht_adwin_pool_t` consome exatamente **$98.068\text{ bytes}$ ($95,77\text{ KB}$)** em `float32` e **$192.792\text{ bytes}$ ($188,27\text{ KB}$)** em `double64`.
    - O nível 13 armazena buckets de $2^{13} = 8.192$ amostras, permitindo janelas de até $81.915$ amostras — desproporcional para microcontroladores de 32–256 KB SRAM operando em ciclos curtos. Reduzindo `HT_ADWIN_LEVELS` de `14` para `10` (janela máxima de $5 \times (2^{10} - 1) = 5.115$ amostras, suficiente para $\delta = 0,002$) e `HT_MAX_ADWIN_DETECTORS` de `128` para `32`:
      - Cada detector cai para $10 \times 52 + 36 = \mathbf{556\text{ B}}$ (`float32`) e $10 \times 104 + 48 = \mathbf{1.088\text{ B}}$ (`double64`).
      - `ht_adwin_pool_t` com 32 detectores passa a ocupar $32 \times 556 + 64 + 8 = \mathbf{17.864\text{ bytes}}$ (**$17,45\text{ KB}$** vs $95,77\text{ KB}$).
-   - **Bloqueio de Compilação Atual:** As linhas 77–81 de `code/include/ht_drift.h` impõem `_Static_assert(sizeof(ht_adwin_t) == 764)` (e `1504`) **sem guarda de `HT_ADWIN_LEVELS`**, quebrando imediatamente qualquer compilação com `-DHT_ADWIN_LEVELS=10`.
+   - **Bloqueio de Compilação Atual:** As linhas 77–81 de `code/include/core/ht_drift.h` impõem `_Static_assert(sizeof(ht_adwin_t) == 764)` (e `1504`) **sem guarda de `HT_ADWIN_LEVELS`**, quebrando imediatamente qualquer compilação com `-DHT_ADWIN_LEVELS=10`.
 2. **Reserva Ociosa em `.bss` no Compilador On-Demand (`main_benchmark/tune_hyperparams.py` e `main_benchmark.py`):**
    - Na Entrega 7.6, `ht_memory.h` introduziu `HT_STATS_STORAGE_BYTES` para ajustar o slab em `.bss`, mas `ensure_c11_binary()` em `main_benchmark/tune_hyperparams.py` ainda compila o Forest Covertype (`n_features = 54`) com `-DHT_MAX_FEATURES=64 -DHT_CLASSIF_ONLY` sem parametrizar `HT_STATS_STORAGE_BYTES` para as 54 features reais.
    - Com isso, o perfil Forest Covertype Tier 2 (`2` folhas ativas, `32` nós max) ainda reserva $20.512\text{ B}$ no slab (para 64 features) em vez de $17.312\text{ B}$ (54 features), acumulando **$3.200\text{ B}$ ($3,13\text{ KB}$)** mortos em `.bss` e mantendo `sizeof(ht_tree_t)` em **$23.352\text{ B}$ ($22,80\text{ KB}$)**.
@@ -543,7 +543,7 @@ Uma auditoria cruzada entre [`code/include/ht_drift.h`](../code/include/ht_drift
 
 #### 2. Arquitetura C11 e Salvaguardas Obrigatórias
 
-1. **Parametrização do `_Static_assert` em `code/include/ht_drift.h`:**
+1. **Parametrização do `_Static_assert` em `code/include/core/ht_drift.h`:**
    - Substituir o assert literal incondicional por asserção algébrica compatível com qualquer `HT_ADWIN_LEVELS`:
      ```c
      #ifndef HT_USE_DOUBLE
@@ -564,16 +564,16 @@ Uma auditoria cruzada entre [`code/include/ht_drift.h`](../code/include/ht_drift
      #endif
      #endif
      ```
-2. **Teste de Saturação do Último Nível Exponencial (`last_bucket_row == HT_ADWIN_LEVELS - 1`) em `code/tests/test_drift.c`:**
+2. **Teste de Saturação do Último Nível Exponencial (`last_bucket_row == HT_ADWIN_LEVELS - 1`) em `code/tests/core/test_drift.c`:**
    - Como a janela máxima com `10` níveis é de $\approx 5.115$ amostras, fluxos estacionários contínuos atingem o ramo `else` de descarte do bucket mais antigo em `ht_adwin_compress_buckets()`.
    - Incluir teste N1/N2 dedicado inserindo $> 6.000$ amostras (e/ou saturando todos os `HT_ADWIN_LEVELS`) validando que `width`, `total_sum` e `total_variance` permanecem consistentes, sem *underflow* negativo nem acesso fora dos limites de `rows[]`.
-3. **Guarda `#ifndef HT_CLASSIF_ONLY` para `feat_stats` em `code/include/ht_tree.h` e `code/src/ht_tree.c`:**
+3. **Guarda `#ifndef HT_CLASSIF_ONLY` para `feat_stats` em `code/include/core/ht_tree.h` e `code/src/core/ht_tree.c`:**
    - Condicionar `ht_var_stat_t feat_stats[HT_MAX_FEATURES]` e o bloco correspondente em `ht_tree.c` a `#ifndef HT_CLASSIF_ONLY`, removendo **$768\text{ B}$** ($64 \times 12\text{ B}$) em builds de classificação pura (ou $192\text{ B}$ com `F=16`).
 4. **Dimensionamento `.bss` por Dataset em `main_benchmark/tune_hyperparams.py` e `main_benchmark/main_benchmark.py`:**
    - Atualizar `ensure_c11_binary()` para receber/resolver o `n_features` real do dataset (ou calcular e passar `-DHT_STATS_STORAGE_BYTES=<bytes>` exato para `leaves * leaf_stride(n_features, task)`), materializando na seção `.bss` a economia da Entrega 7.6.
-5. **Perfis MCU nos Firmwares QEMU (`emulation/esp32/CMakeLists.txt` e `emulation/cortex-m3/Makefile`):**
+5. **Perfis MCU nos Firmwares QEMU (`emulation/esp32/main/CMakeLists.txt` e `emulation/cortex-m3/Makefile`):**
    - Atualizar diretamente os arquivos de build dos firmwares (não os scripts `run_qemu.sh` de orquestração):
-     - [`emulation/esp32/CMakeLists.txt`](../emulation/esp32/CMakeLists.txt): adicionar `HT_ADWIN_LEVELS=10` (junto a `HT_MAX_ADWIN_DETECTORS=32`).
+     - [`emulation/esp32/main/CMakeLists.txt`](../emulation/esp32/main/CMakeLists.txt): adicionar `HT_ADWIN_LEVELS=10` (junto a `HT_MAX_ADWIN_DETECTORS=32`).
      - [`emulation/cortex-m3/Makefile`](../emulation/cortex-m3/Makefile): adicionar `-DHT_ADWIN_LEVELS=10` em `CONFIG_DEFS` (mantendo `-DHT_MAX_ADWIN_DETECTORS=2`).
 
 #### 3. Economia de Memória e Impacto Consolidado

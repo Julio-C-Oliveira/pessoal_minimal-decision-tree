@@ -260,12 +260,12 @@ Todos os **5/5 cenários** concluíram em **0,33 s** com zero warnings sob `-std
 
 ---
 
-## 11. Status dos Requisitos Obrigatórios (Release Gates) para Upgrade de Versão (`0.4.1 -> 0.5.0`)
+## 11. Status dos Requisitos Obrigatórios (Release Gates) — Release `v0.5.0` Publicada
 
 1. **Gate A — Transporte de Rede Real (Entrega `11.10` `[x]` — Concluído em `d069f75`):**
    - Protocolo binário `HFED` validado ponta a ponta sobre sockets TCP POSIX em múltiplos processos independentes (`make bench-fed-net`, Seção 10).
 2. **Gate B — Compilação Cruzada nos Firmwares de Emulação (Entrega `11.11` `[x]` — Concluído em `fa9452f`):**
    - Compilação cruzada e sanidade funcional em `emulation/esp32/` (ESP-IDF / Xtensa) e `emulation/cortex-m3/` (`arm-none-eabi-gcc` + QEMU) validadas com zero warnings e zero regressão (Seção 9).
 
-> **Item Dispensado:** A validação de paridade numérica direta em Python contra `paularaissa/project-vfdt` (Flower + River) no mesmo CSV **não é requerida** para o upgrade de versão. Ambos os gates estão concluídos, liberando a proposta de bump SemVer (`0.4.1 -> 0.5.0`) sujeita à aprovação explícita do usuário.
+> **Conclusão:** A validação de paridade numérica direta em Python contra `paularaissa/project-vfdt` (Flower + River) no mesmo CSV foi explicitamente dispensada. Com ambos os gates concluídos, o bump SemVer `0.4.1 -> 0.5.0` foi aprovado pelo usuário e publicado em `main` (`a57e4ca`, [PR #4](https://github.com/Julio-C-Oliveira/pessoal_minimal-decision-tree/pull/4), tag **`v0.5.0`**), encerrando a Issue #3.
 

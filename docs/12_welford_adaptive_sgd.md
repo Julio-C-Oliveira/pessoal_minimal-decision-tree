@@ -1,14 +1,14 @@
 # 12 — Taxa de Aprendizado Adaptativa por Atributo (Welford-Adaptive SGD / AdaGrad Embarcado)
 
 > **Módulo / Fase:** Fase 10 do Plano Persistente ([`docs/06_implementation_plan.md`](file:///home/julio/Documentos/pessoal_minimal-decision-tree/docs/06_implementation_plan.md))  
-> **Escopo Alvo:** Regressor linear nas folhas de regressão contínua (`code/include/ht_tree.h`, `code/src/ht_tree.c`, `code/tests/test_tree.c`, `code/tests/test_e2e_flow.c`)  
+> **Escopo Alvo:** Regressor linear nas folhas de regressão contínua (`code/include/core/ht_tree.h`, `code/src/core/ht_tree.c`, `code/tests/core/test_tree.c`, `code/tests/core/test_e2e_flow.c`)  
 > **Meta:** Introduzir pré-condicionamento diagonal e decaimento adaptativo individual por atributo (`HT_SGD_WELFORD_ADAGRAD`) no SGD das folhas (`HT_LEAF_MODEL` e `HT_LEAF_ADAPTIVE`) com **0 bytes adicionais em `ht_leaf_stats_t`** (`1.360 B` em `float32` / `Q16.16`), desacoplando a regularização Ridge ($\ell_2$) do agendamento da taxa de aprendizado e estabilizando fluxos multiescala em regressão contínua.
 
 ---
 
 ## 1. Diagnóstico e Limitações do SGD Escalar Atual (`ht_tree.c`)
 
-Na implementação atual do regressor linear nas folhas ([`code/src/ht_tree.c`](file:///home/julio/Documentos/pessoal_minimal-decision-tree/code/src/ht_tree.c#L1883-L1909)), todas as coordenadas $f \in \{0 \dots F-1\}$ compartilham o mesmo escalar de taxa de aprendizado:
+Na implementação atual do regressor linear nas folhas ([`code/src/core/ht_tree.c`](file:///home/julio/Documentos/pessoal_minimal-decision-tree/code/src/core/ht_tree.c#L1937-L1964)), todas as coordenadas $f \in \{0 \dots F-1\}$ compartilham o mesmo escalar de taxa de aprendizado:
 
 $$\eta = \frac{\eta_0}{1 + \lambda_{\text{reg}} \cdot n}$$
 
@@ -42,7 +42,7 @@ flowchart TD
 
 ### 2.1 Extração Unificada de Momentos por Atributo (`ht_tree_get_feature_moments`)
 
-Unifica e estende a lógica já existente em [`ht_tree_normalize_feature_for_sgd`](file:///home/julio/Documentos/pessoal_minimal-decision-tree/code/src/ht_tree.c#L67-L126) para devolver $(n_{f,\text{eff}}, \mu_{f,\text{eff}}, \sigma_{f,\text{eff}}^2)$ em $O(1)$ sem alocar memória adicional:
+Unifica e estende a lógica já existente em [`ht_tree_normalize_feature_for_sgd`](file:///home/julio/Documentos/pessoal_minimal-decision-tree/code/src/core/ht_tree.c#L67-L126) para devolver $(n_{f,\text{eff}}, \mu_{f,\text{eff}}, \sigma_{f,\text{eff}}^2)$ em $O(1)$ sem alocar memória adicional:
 
 1. **Prior Global (`tree->feat_stats[f]`):**
    $$n_{\text{tree}} = \text{feat\_stats}[f].\text{count}, \quad \mu_{\text{tree}} = \text{feat\_stats}[f].\text{mean}, \quad \sigma_{\text{tree}}^2 = \max\left(\frac{\text{feat\_stats}[f].\text{m2}}{\max(n_{\text{tree}}, 1)}, \; 10^{-6}\right)$$
@@ -82,7 +82,7 @@ Unifica e estende a lógica já existente em [`ht_tree_normalize_feature_for_sgd
 
 ## 3. Contratos de API C11, Invariância de Memória e Compatibilidade `Q16.16`
 
-### 3.1 Extensão de `ht_config_params_t` (`code/include/ht_tree.h`)
+### 3.1 Extensão de `ht_config_params_t` (`code/include/core/ht_tree.h`)
 
 ```c
 /**
@@ -116,5 +116,5 @@ Quando compilado sob `-DHT_USE_FIXED_POINT` (Fase 8, faixa máxima $\pm 32.767{,
 | ID | Entrega | Arquivos Alvo | Critérios de Verificação (Níveis 1, 2 e 3) |
 | :---: | :--- | :--- | :--- |
 | **10.1** | Estudo Técnico e Especificação do Welford-Adaptive SGD | `docs/12_welford_adaptive_sgd.md`, `docs/06_implementation_plan.md` | Revisão das equações de momentos combinados, modos Z-Score AdaGrad / Raw Welford-NLMS, Ridge desacoplado e clipping por $3\hat{\sigma}_y$ |
-| **10.2** | Implementação `HT_SGD_WELFORD_ADAGRAD` e Testes em 3 Níveis | `code/include/ht_tree.h`, `code/src/ht_tree.c`, `code/tests/test_tree.c`, `code/tests/test_e2e_flow.c` | **N1:** `ht_tree_get_feature_moments`, $\eta_{t,f}$ diferenciado por atributo esparso vs denso, clipping $3\hat{\sigma}_y$ e `sizeof(ht_leaf_stats_t) == 1360`<br/>**N2:** herança de pesos mãe $\to$ filhas sem descontinuidade e paridade `HT_SGD_STANDARD` intacta<br/>**N3:** E2E em regressão multiescala (`float` e `double`) convergindo em MAE/RMSE com `NaN` |
+| **10.2** | Implementação `HT_SGD_WELFORD_ADAGRAD` e Testes em 3 Níveis | `code/include/core/ht_tree.h`, `code/src/core/ht_tree.c`, `code/tests/core/test_tree.c`, `code/tests/core/test_e2e_flow.c` | **N1:** `ht_tree_get_feature_moments`, $\eta_{t,f}$ diferenciado por atributo esparso vs denso, clipping $3\hat{\sigma}_y$ e `sizeof(ht_leaf_stats_t) == 1360`<br/>**N2:** herança de pesos mãe $\to$ filhas sem descontinuidade e paridade `HT_SGD_STANDARD` intacta<br/>**N3:** E2E em regressão multiescala (`float` e `double`) convergindo em MAE/RMSE com `NaN` |
 | **10.3** | Benchmark Experimental em Regressão Contínua e Atualização da Wiki | `benchmarks/`, `main_benchmark/`, `wiki/*.md`, `README.md` | Comparativo `HT_SGD_STANDARD` vs `HT_SGD_WELFORD_ADAGRAD` (Z-Score e Raw NLMS) em *Bikes*, *NYC Taxi*, *Friedman #1* e *Appliances Energy*; avaliação SemVer (`0.7.0` ou `MINOR` conforme ordem de execução) |

@@ -273,5 +273,5 @@ Conforme estipulado no padrão SemVer 2.0.0 adotado pelo projeto:
 - A adição de novas funcionalidades na API pública (`ht_prep.h`, novos parâmetros opcionais e suporte a múltiplos observadores) representa uma evolução **MINOR**.
 - A versão da biblioteca é promovida de `0.1.0` para **`0.2.0`** simultaneamente em:
   1. [`VERSION`](file:///home/julio/Documentos/pessoal_minimal-decision-tree/VERSION): `0.2.0`
-  2. [`code/include/ht_config.h`](file:///home/julio/Documentos/pessoal_minimal-decision-tree/code/include/ht_config.h): `HT_VERSION_MINOR = 2U`, `HT_VERSION_STRING = "0.2.0"`
+  2. [`code/include/core/ht_config.h`](file:///home/julio/Documentos/pessoal_minimal-decision-tree/code/include/core/ht_config.h): `HT_VERSION_MINOR = 2U`, `HT_VERSION_STRING = "0.2.0"`
   3. [`code/tests/test_main.c`](file:///home/julio/Documentos/pessoal_minimal-decision-tree/code/tests/test_main.c): `HT_ASSERT(HT_VERSION_CHECK(0, 2, 0))`

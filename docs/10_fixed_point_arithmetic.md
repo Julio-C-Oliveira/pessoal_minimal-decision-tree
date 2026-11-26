@@ -55,16 +55,16 @@ Como inteiros não possuem codificação IEEE-754 para `NaN` ou infinito, reserv
 
 > [!IMPORTANT]
 > **Invariância Completa de Structs e `_Static_assert`s:**
-> Como `sizeof(ht_float_t) == 4` é estritamente preservado, **todos os tamanhos e offsets da `v0.4.1` permanecem inalterados byte a byte**:
+> Como `sizeof(ht_float_t) == 4` é estritamente preservado, **todos os tamanhos e offsets da `v0.5.0` permanecem inalterados byte a byte**:
 > - `sizeof(ht_node_t) == 20 B`
 > - `sizeof(ht_gaussian_obs_t) == 20 B`
 > - `sizeof(ht_feature_obs_t) == 80 B`
 > - `sizeof(ht_leaf_stats_t) == 1360 B` (`offsetof(observers) == 16 B`)
 > - `sizeof(ht_memory_pool_t) == 430092 B`
 
-### 2.3 Abstração de Operadores e Constantes (`code/include/ht_config.h`)
+### 2.3 Abstração de Operadores e Constantes (`code/include/core/ht_config.h`)
 
-Para que todo o código em `code/src/` permaneça limpo e compartilhado entre `float32`, `double64` e `Q16.16` sem duplicação de lógica, `ht_config.h` passa a abstrair constantes e operadores aritméticos fundamentais:
+Para que todo o código em `code/src/core/` permaneça limpo e compartilhado entre `float32`, `double64` e `Q16.16` sem duplicação de lógica, `ht_config.h` passa a abstrair constantes e operadores aritméticos fundamentais:
 
 ```c
 #if defined(HT_USE_FIXED_POINT) && defined(HT_USE_DOUBLE)
@@ -203,7 +203,7 @@ Portanto, definimos uma **zona de guarda** em `16384.0` (`HT_FIXED_RESCALE_THRES
 
 ## 4. Motor Transcendental Inteiro Zero-Libm (`ht_math_fixed.h` / `ht_math_fixed.c`)
 
-Todo o motor transcendental será isolado em `code/include/ht_math_fixed.h` e `code/src/ht_math_fixed.c` (compilado somente quando `-DHT_USE_FIXED_POINT` estiver ativo), ocupando **$< 512\text{ B}$ de `.rodata`/`.text` na Flash** e **zero chamadas a `libm`**.
+Todo o motor transcendental será isolado em `code/include/core/ht_math_fixed.h` e `code/src/core/ht_math_fixed.c` (compilado somente quando `-DHT_USE_FIXED_POINT` estiver ativo), ocupando **$< 512\text{ B}$ de `.rodata`/`.text` na Flash** e **zero chamadas a `libm`**.
 
 ```mermaid
 flowchart LR
@@ -276,7 +276,7 @@ Essenciais para a CDF Normal (`ht_normal_cdf` nos splits Gaussianos) e para o te
    - Converter operações de `ht_scaler_t`, `ht_filter_hampel_t`, `ht_encoder_freq_t` e `ht_quantizer_t` para macros `HT_*` e `HT_CONST(...)` com *Block-Rescaling* nos pesos do quantizador e encoder.
 5. **`ht_tree.c` e Serialização Binária:**
    - Atualizar predição NBA (Log-Sum-Exp em `Q16.16`), SGD linear nas folhas (com gradient clipping seguro dentro de `[-HT_CONST(1000.0), +HT_CONST(1000.0)]`) e *Block-Rescaling* em `node->class_counts` e `train_weight_seen`.
-   - Adicionar a flag de formato binário em `code/include/ht_tree.h`:
+   - Adicionar a flag de formato binário em `code/include/core/ht_tree.h`:
      ```c
      #define HT_SERIAL_FLAG_FIXED (1U << 3) /**< Serialized with Q16.16 fixed-point ht_float_t */
      ```
@@ -287,7 +287,7 @@ Essenciais para a CDF Normal (`ht_normal_cdf` nos splits Gaussianos) e para o te
 | ID | Entrega | Arquivos Alvo | Critérios de Verificação (Níveis 1, 2 e 3) |
 | :---: | :--- | :--- | :--- |
 | **8.1** | Estudo Técnico e Especificação da Aritmética `Q16.16` | `docs/10_fixed_point_arithmetic.md`, `docs/06_implementation_plan.md` | Revisão de representação `Q16.16`, sentinelas, *Block-Rescaling* e polinômios minimax |
-| **8.2** | Núcleo Matemático `Q16.16` Zero-Libm (`ht_math_fixed`) | `code/include/ht_config.h`, `code/include/ht_math_fixed.h`, `code/src/ht_math_fixed.c`, `code/tests/test_fixed.c` | **N1:** `HT_ADD`/`SUB`/`MUL`/`DIV` saturados, `sqrt`, `log2`, `ln`, `exp`, `erf`, `erfc` vs `double` ($\le 4\text{ ULPs}$ / tolerância analítica)<br/>**N2:** `_Static_assert(sizeof(ht_float_t) == 4)` e verificação `nm` com zero símbolos `<math.h>`/`soft-fp` |
-| **8.3** | Observadores, Critérios, `libht_prep` e *Block-Rescaling* | `code/src/ht_observer.c`, `code/src/ht_criterion.c`, `code/src/ht_prep.c`, `code/tests/test_observer.c`, `code/tests/test_criterion.c`, `code/tests/test_prep.c` | **N1:** macros aritméticas + halving em Welford/Chan<br/>**N2:** stream de 100k amostras sem saturação/overflow<br/>**N3:** paridade de candidatos de split e impureza vs `float32` |
-| **8.4** | Árvore Completa (`VFDT`, `HAT`, `VFDT-R`, `HAT-R`) e `ADWIN2` em `Q16.16` | `code/src/ht_tree.c`, `code/src/ht_drift.c`, `code/include/ht_tree.h`, `code/Makefile`, `Makefile`, `code/tests/test_tree.c`, `code/tests/test_drift.c`, `code/tests/test_e2e_flow.c` | **N1:** NBA (LSE `Q16.16`), SGD linear, `ADWIN2` e `HT_SERIAL_FLAG_FIXED`<br/>**N2:** suíte completa verde em `float32`, `double64` e `fixed Q16.16` (linkando sem `-lm`)<br/>**N3:** fluxo E2E prequential e `save`/`load` em `Q16.16` |
-| **8.5** | Benchmark `Q16.16` vs `Soft-FP` e Emulação Bare-Metal (QEMU Cortex-M3/M0+) | `main_benchmark/`, `emulation/cortex-m3/`, `wiki/*.md`, `README.md` | Medição de ciclos (`SysTick`), Flash (`.text` sem `__aeabi_f*` / `-lm`), RAM e acurácia nos 8 datasets do `main_benchmark/` (sem rodar `benchmarks/`) + SemVer `0.5.0` |
+| **8.2** | Núcleo Matemático `Q16.16` Zero-Libm (`ht_math_fixed`) | `code/include/core/ht_config.h`, `code/include/core/ht_math_fixed.h`, `code/src/core/ht_math_fixed.c`, `code/tests/core/test_fixed.c` | **N1:** `HT_ADD`/`SUB`/`MUL`/`DIV` saturados, `sqrt`, `log2`, `ln`, `exp`, `erf`, `erfc` vs `double` ($\le 4\text{ ULPs}$ / tolerância analítica)<br/>**N2:** `_Static_assert(sizeof(ht_float_t) == 4)` e verificação `nm` com zero símbolos `<math.h>`/`soft-fp` |
+| **8.3** | Observadores, Critérios, `libht_prep` e *Block-Rescaling* | `code/src/core/ht_observer.c`, `code/src/core/ht_criterion.c`, `code/src/core/ht_prep.c`, `code/tests/core/test_observer.c`, `code/tests/core/test_criterion.c`, `code/tests/core/test_prep.c` | **N1:** macros aritméticas + halving em Welford/Chan<br/>**N2:** stream de 100k amostras sem saturação/overflow<br/>**N3:** paridade de candidatos de split e impureza vs `float32` |
+| **8.4** | Árvore Completa (`VFDT`, `HAT`, `VFDT-R`, `HAT-R`) e `ADWIN2` em `Q16.16` | `code/src/core/ht_tree.c`, `code/src/core/ht_drift.c`, `code/include/core/ht_tree.h`, `code/Makefile`, `Makefile`, `code/tests/core/test_tree.c`, `code/tests/core/test_drift.c`, `code/tests/core/test_e2e_flow.c` | **N1:** NBA (LSE `Q16.16`), SGD linear, `ADWIN2` e `HT_SERIAL_FLAG_FIXED`<br/>**N2:** suíte completa verde em `float32`, `double64` e `fixed Q16.16` (linkando sem `-lm`)<br/>**N3:** fluxo E2E prequential e `save`/`load` em `Q16.16` |
+| **8.5** | Benchmark `Q16.16` vs `Soft-FP` e Emulação Bare-Metal (QEMU Cortex-M3/M0+) | `main_benchmark/`, `emulation/cortex-m3/`, `wiki/*.md`, `README.md` | Medição de ciclos (`SysTick`), Flash (`.text` sem `__aeabi_f*` / `-lm`), RAM e acurácia nos 8 datasets do `main_benchmark/` (sem rodar `benchmarks/`) + SemVer `0.6.0+` |
