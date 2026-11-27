@@ -362,6 +362,84 @@ static void test_prep_edge_cases_nan_high_scale_and_quantizer_boundaries(void) {
     ht_float_t ord_hi = ht_quantizer_transform_one(&q, 2, HT_CONST(39.0)).num;
     HT_ASSERT(ord_lo >= HT_CONST(0.0) && ord_hi <= HT_CONST(3.0));
     HT_ASSERT(ord_hi > ord_lo);
+
+    /* 5. NULL / invalid / non-finite guards across all prep APIs + quantizer Q16 rescaling
+     *    + pipeline categorical->FREQ_RATIO->scaler chaining */
+    ht_scaler_init(NULL);
+    ht_scaler_set_mode(NULL, 0, HT_SCALER_STANDARD);
+    ht_scaler_set_mode(&sc, 99, HT_SCALER_STANDARD);
+    ht_scaler_update_one(NULL, 0, HT_CONST(1.0), HT_CONST(1.0));
+    ht_scaler_update_one(&sc, 99, HT_CONST(1.0), HT_CONST(1.0));
+    ht_scaler_update_one(&sc, 0, HT_INFINITY, HT_CONST(1.0));
+    ht_scaler_update_one(&sc, 0, HT_CONST(1.0), HT_CONST(0.0));
+    HT_ASSERT_FLOAT_EQ(ht_scaler_transform_one(NULL, 0, HT_CONST(3.0)), HT_CONST(3.0));
+
+    ht_hampel_init(NULL);
+    ht_hampel_set_enabled(NULL, 0, true);
+    ht_hampel_set_enabled(&hf, 99, true);
+    ht_hampel_set_threshold(NULL, HT_CONST(3.0));
+    ht_hampel_set_threshold(&hf, HT_CONST(0.0));
+    HT_ASSERT_FLOAT_EQ(ht_hampel_filter_one(NULL, 0, HT_CONST(3.0)), HT_CONST(3.0));
+    /* Even-length Hampel buffer (2, 4, 6 elements) exercises even median branch */
+    ht_hampel_init(&hf);
+    ht_hampel_set_enabled(&hf, 0, true);
+    for (int i = 1; i <= 6; ++i) {
+        HT_ASSERT(HT_ISFINITE(ht_hampel_filter_one(&hf, 0, HT_FROM_INT(i))));
+    }
+
+    ht_encoder_init(NULL);
+    ht_encoder_set_mode(NULL, 0, HT_ENC_TOP_K_CAT, 3U);
+    ht_encoder_set_mode(&enc, 99, HT_ENC_TOP_K_CAT, 3U);
+    ht_encoder_set_mode(&enc, 0, HT_ENC_TOP_K_CAT, 0U);
+    ht_encoder_update_one(NULL, 0, 1, HT_CONST(1.0));
+    ht_encoder_update_one(&enc, 99, 1, HT_CONST(1.0));
+    ht_encoder_update_one(&enc, 0, 1, HT_CONST(0.0));
+    HT_ASSERT_EQ(ht_encoder_transform_one(NULL, 0, 5).cat, 5);
+    HT_ASSERT_EQ(ht_encoder_transform_one(&enc, 99, 5).cat, 5);
+
+    ht_quantizer_init(NULL);
+    ht_quantizer_set_mode(NULL, 0, HT_QUANT_CDF_UNIFORM, 4);
+    ht_quantizer_set_mode(&q, 99, HT_QUANT_CDF_UNIFORM, 4);
+    ht_quantizer_update_one(NULL, 0, HT_CONST(1.0), HT_CONST(1.0));
+    ht_quantizer_update_one(&q, 99, HT_CONST(1.0), HT_CONST(1.0));
+    ht_quantizer_update_one(&q, 0, HT_INFINITY, HT_CONST(1.0));
+    ht_quantizer_update_one(&q, 0, HT_CONST(1.0), HT_CONST(0.0));
+    HT_ASSERT_FLOAT_EQ(ht_quantizer_cdf(NULL, HT_CONST(1.0)), HT_CONST(0.5));
+    HT_ASSERT_FLOAT_EQ(ht_quantizer_quantile(NULL, HT_CONST(0.5)), HT_CONST(0.0));
+    HT_ASSERT_FLOAT_EQ(ht_quantizer_transform_one(NULL, 0, HT_CONST(3.0)).num, HT_CONST(3.0));
+    /* Trigger Q16.16 quantizer weight rescaling */
+    for (int i = 0; i < 200; ++i) {
+        ht_quantizer_update_one(&q, 0, HT_FROM_INT(1 + (i % 5)), HT_CONST(100.0));
+    }
+    HT_ASSERT(HT_ISFINITE(ht_quantizer_cdf(&q.feat[0], HT_CONST(3.0))));
+
+    /* Pipeline NULL guards + categorical->FREQ_RATIO->STANDARD scaler chain */
+    ht_prep_pipeline_init(NULL, 2, NULL);
+    ht_prep_pipeline_update_types_out(NULL);
+    ht_prep_transform_one(NULL, NULL, NULL);
+    ht_prep_learn_transform_one(NULL, NULL, NULL, HT_CONST(1.0));
+
+    ht_prep_pipeline_t p2;
+    ht_feature_type_t ft[HT_MAX_FEATURES];
+    memset(ft, 0, sizeof(ft));
+    ft[0] = HT_FEAT_CATEGORICAL;
+    ht_prep_pipeline_init(&p2, 1, ft);
+    ht_encoder_set_mode(&p2.encoder, 0, HT_ENC_FREQ_RATIO, 3U);
+    ht_scaler_set_mode(&p2.scaler, 0, HT_SCALER_STANDARD);
+    ht_prep_pipeline_update_types_out(&p2);
+    HT_ASSERT_EQ(p2.feature_types_out[0], HT_FEAT_NUMERIC);
+
+    ht_value_t xin[HT_MAX_FEATURES], xout[HT_MAX_FEATURES];
+    memset(xin, 0, sizeof(xin));
+    memset(xout, 0, sizeof(xout));
+    ht_prep_learn_transform_one(&p2, xin, xout, HT_CONST(0.0)); /* weight <= 0 guard */
+    for (int i = 0; i < 20; ++i) {
+        xin[0].cat = i % 3;
+        ht_prep_learn_transform_one(&p2, xin, xout, HT_CONST(1.0));
+        HT_ASSERT(HT_ISFINITE(xout[0].num));
+    }
+    ht_prep_transform_one(&p2, xin, xout);
+    HT_ASSERT(HT_ISFINITE(xout[0].num));
 }
 
 void test_prep_run(void) {

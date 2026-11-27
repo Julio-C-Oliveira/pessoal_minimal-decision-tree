@@ -441,6 +441,394 @@ static void test_fed_vfdt_paper_exact_consensus_and_thresholds(void) {
     HT_ASSERT(!(srv.global_tree.memory.node_pool[right_leaf].flags & HT_NODE_IS_LEAF));
 }
 
+static void test_fed_vfdt_predict_proba_depth_and_error_paths(void) {
+    /* NULL / default guards */
+    ht_fed_vfdt_default_client_config(NULL, 1U, HT_FED_VFDT_COORDINATED, NULL);
+    ht_fed_vfdt_client_cfg_t ccfg;
+    ht_fed_vfdt_default_client_config(&ccfg, 1U, HT_FED_VFDT_COORDINATED, NULL);
+    ht_fed_vfdt_default_server_config(NULL, HT_FED_VFDT_COORDINATED, NULL);
+    ht_fed_vfdt_server_cfg_t scfg;
+    ht_fed_vfdt_default_server_config(&scfg, HT_FED_VFDT_COORDINATED, NULL);
+
+    HT_ASSERT_EQ(ht_fed_vfdt_client_init(NULL, &ccfg), HT_ERR_INVALID_ARG);
+    HT_ASSERT_EQ(ht_fed_vfdt_server_init(NULL, &scfg), HT_ERR_INVALID_ARG);
+    HT_ASSERT_EQ(ht_fed_vfdt_server_begin_round(NULL), HT_ERR_INVALID_ARG);
+    HT_ASSERT_EQ(ht_fed_vfdt_server_end_round(NULL, NULL), HT_ERR_INVALID_ARG);
+
+    static ht_fed_vfdt_client_t cli;
+    static ht_fed_vfdt_server_t srv;
+    static uint8_t wire[65536];
+    HT_ASSERT_EQ(ht_fed_vfdt_client_init(&cli, &ccfg), HT_OK);
+    HT_ASSERT_EQ(ht_fed_vfdt_server_init(&srv, &scfg), HT_OK);
+
+    ht_value_t x[HT_MAX_FEATURES];
+    memset(x, 0, sizeof(x));
+    ht_float_t probas[HT_MAX_CLASSES];
+
+    /* Cover ht_fed_vfdt_client_predict_proba (was 0%) + NULL guards */
+    HT_ASSERT_EQ(ht_fed_vfdt_client_predict_proba(NULL, x, probas), HT_ERR_INVALID_ARG);
+    HT_ASSERT_EQ(ht_fed_vfdt_client_predict_proba(&cli, x, probas), HT_OK);
+    HT_ASSERT_EQ(ht_fed_vfdt_client_predict(NULL, x), 0U);
+    HT_ASSERT_FLOAT_EQ(ht_fed_vfdt_client_predict_reg(NULL, x), HT_CONST(0.0));
+    HT_ASSERT_EQ(ht_fed_vfdt_client_learn_one(NULL, x, 0U, HT_CONST(1.0)), HT_ERR_INVALID_ARG);
+    HT_ASSERT_EQ(ht_fed_vfdt_client_learn_one_reg(NULL, x, HT_CONST(1.0), HT_CONST(1.0)), HT_ERR_INVALID_ARG);
+
+    /* Export / apply / ingest corrupt and buffer-too-small paths */
+    size_t w = 0;
+    HT_ASSERT_EQ(ht_fed_vfdt_client_export_update(NULL, wire, sizeof(wire), &w), HT_ERR_INVALID_ARG);
+    HT_ASSERT_EQ(ht_fed_vfdt_client_export_update(&cli, wire, 8U, &w), HT_ERR_BUFFER_TOO_SMALL);
+    HT_ASSERT_EQ(ht_fed_vfdt_client_apply_update(NULL, wire, 0U), HT_ERR_INVALID_ARG);
+    HT_ASSERT_EQ(ht_fed_vfdt_client_apply_update(&cli, wire, 4U), HT_ERR_CORRUPT_IMAGE);
+    HT_ASSERT_EQ(ht_fed_vfdt_server_ingest(NULL, wire, 0U), HT_ERR_INVALID_ARG);
+    HT_ASSERT_EQ(ht_fed_vfdt_server_ingest(&srv, wire, 4U), HT_ERR_CORRUPT_IMAGE);
+    HT_ASSERT_EQ(ht_fed_vfdt_server_export_update(NULL, 1U, 0U, wire, sizeof(wire), &w), HT_ERR_INVALID_ARG);
+
+    /* Multi-level split depth computation (covers ht_fed_compute_node_depth) */
+    srv.cfg.min_quorum = 1U;
+    srv.cfg.consensus = HT_FED_CONSENSUS_QUORUM;
+    srv.cfg.min_drift_quorum = 2U;
+
+    /* Round 1: split root -> children (depth 1) */
+    HT_ASSERT_EQ(ht_fed_vfdt_server_begin_round(&srv), HT_OK);
+    helper_push_proposal(&srv, 0U, 0U, HT_CONST(5.0), HT_CONST(0.9), HT_CONST(50.0), 1U);
+    uint16_t cmds = 0U;
+    HT_ASSERT_EQ(ht_fed_vfdt_server_end_round(&srv, &cmds), HT_OK);
+    HT_ASSERT_EQ(cmds, 1U);
+
+    /* Round 2: split right child (depth 1 -> depth 2) */
+    uint16_t rc = srv.global_tree.memory.node_pool[0].right_child;
+    HT_ASSERT_EQ(ht_fed_vfdt_server_begin_round(&srv), HT_OK);
+    helper_push_proposal(&srv, rc, 1U, HT_CONST(3.0), HT_CONST(0.8), HT_CONST(50.0), 1U);
+    HT_ASSERT_EQ(ht_fed_vfdt_server_end_round(&srv, &cmds), HT_OK);
+    HT_ASSERT_EQ(cmds, 1U);
+    HT_ASSERT(srv.global_tree.max_depth_seen >= 2U);
+
+    /* Drift vote accumulation across 2 clients (reaches min_drift_quorum = 2) */
+    HT_ASSERT_EQ(ht_fed_vfdt_server_export_update(&srv, 1U, 0U, wire, sizeof(wire), &w), HT_OK);
+    HT_ASSERT_EQ(ht_fed_vfdt_client_apply_update(&cli, wire, w), HT_OK);
+
+    static ht_fed_vfdt_client_t cli2;
+    ht_fed_vfdt_default_client_config(&ccfg, 2U, HT_FED_VFDT_COORDINATED, NULL);
+    HT_ASSERT_EQ(ht_fed_vfdt_client_init(&cli2, &ccfg), HT_OK);
+    HT_ASSERT_EQ(ht_fed_vfdt_client_apply_update(&cli2, wire, w), HT_OK);
+
+    HT_ASSERT_EQ(ht_fed_vfdt_server_begin_round(&srv), HT_OK);
+    ht_fed_vfdt_client_flag_drift(&cli, 0U);
+    ht_fed_vfdt_client_flag_drift(&cli2, 0U);
+    HT_ASSERT_EQ(ht_fed_vfdt_client_export_update(&cli, wire, sizeof(wire), &w), HT_OK);
+    HT_ASSERT_EQ(ht_fed_vfdt_server_ingest(&srv, wire, w), HT_OK);
+    HT_ASSERT_EQ(ht_fed_vfdt_client_export_update(&cli2, wire, sizeof(wire), &w), HT_OK);
+    HT_ASSERT_EQ(ht_fed_vfdt_server_ingest(&srv, wire, w), HT_OK);
+    HT_ASSERT_EQ(ht_fed_vfdt_server_end_round(&srv, &cmds), HT_OK);
+    HT_ASSERT(cmds >= 1U);
+}
+
+static void test_fed_vfdt_stats_merge_hist_and_categorical(void) {
+    /* Covers ht_hist_merge and ht_categorical_merge branches inside ht_fed_vfdt.c */
+    static ht_fed_vfdt_client_t c0, c1;
+    static ht_fed_vfdt_server_t srv;
+    static uint8_t wire[65536];
+
+    ht_config_params_t tp;
+    ht_default_params(&tp, 2, 2);
+    tp.feature_types[0] = HT_FEAT_NUMERIC;
+    tp.feature_types[1] = HT_FEAT_CATEGORICAL;
+    tp.numeric_obs_type = HT_OBS_HISTOGRAM;
+    tp.grace_period = 30U;
+    tp.delta = HT_CONST(1e-2);
+    tp.leaf_prediction = HT_LEAF_MC;
+
+    ht_fed_vfdt_server_cfg_t scfg;
+    ht_fed_vfdt_default_server_config(&scfg, HT_FED_VFDT_STATS_MERGE, &tp);
+    HT_ASSERT_EQ(ht_fed_vfdt_server_init(&srv, &scfg), HT_OK);
+
+    ht_fed_vfdt_client_cfg_t cfg0, cfg1;
+    ht_fed_vfdt_default_client_config(&cfg0, 1U, HT_FED_VFDT_STATS_MERGE, &tp);
+    ht_fed_vfdt_default_client_config(&cfg1, 2U, HT_FED_VFDT_STATS_MERGE, &tp);
+    HT_ASSERT_EQ(ht_fed_vfdt_client_init(&c0, &cfg0), HT_OK);
+    HT_ASSERT_EQ(ht_fed_vfdt_client_init(&c1, &cfg1), HT_OK);
+
+    ht_value_t x[HT_MAX_FEATURES];
+    memset(x, 0, sizeof(x));
+    for (int i = 0; i < 60; ++i) {
+        x[0].num = HT_ADD(HT_CONST(1.0), HT_MUL(HT_FROM_INT(i % 4), HT_CONST(0.2)));
+        x[1].cat = i % 2; /* noisy categorical feature so f0 strictly wins without tie */
+        HT_ASSERT_EQ(ht_fed_vfdt_client_learn_one(&c0, x, 0U, HT_CONST(1.0)), HT_OK);
+
+        x[0].num = HT_ADD(HT_CONST(10.0), HT_MUL(HT_FROM_INT(i % 4), HT_CONST(0.2)));
+        x[1].cat = (i + 1) % 2;
+        HT_ASSERT_EQ(ht_fed_vfdt_client_learn_one(&c1, x, 1U, HT_CONST(1.0)), HT_OK);
+    }
+
+    HT_ASSERT_EQ(ht_fed_vfdt_server_begin_round(&srv), HT_OK);
+    size_t w = 0;
+    HT_ASSERT_EQ(ht_fed_vfdt_client_export_update(&c0, wire, sizeof(wire), &w), HT_OK);
+    HT_ASSERT_EQ(ht_fed_vfdt_server_ingest(&srv, wire, w), HT_OK);
+    HT_ASSERT_EQ(ht_fed_vfdt_client_export_update(&c1, wire, sizeof(wire), &w), HT_OK);
+    HT_ASSERT_EQ(ht_fed_vfdt_server_ingest(&srv, wire, w), HT_OK);
+
+    uint16_t cmds = 0U;
+    HT_ASSERT_EQ(ht_fed_vfdt_server_end_round(&srv, &cmds), HT_OK);
+    HT_ASSERT_EQ(cmds, 1U);
+
+    HT_ASSERT_EQ(ht_fed_vfdt_server_export_update(&srv, 1U, 0U, wire, sizeof(wire), &w), HT_OK);
+    HT_ASSERT_EQ(ht_fed_vfdt_client_apply_update(&c0, wire, w), HT_OK);
+
+    ht_float_t probas[HT_MAX_CLASSES];
+    x[0].num = HT_CONST(10.2);
+    x[1].cat = 1;
+    HT_ASSERT_EQ(ht_fed_vfdt_client_predict_proba(&c0, x, probas), HT_OK);
+    HT_ASSERT(probas[1] > HT_CONST(0.7));
+}
+
+#ifndef HT_CLASSIF_ONLY
+static void test_fed_vfdt_stats_merge_high_amplitude_rescaling_and_cat(void) {
+    /* Reproduces NYC Taxi IID STATS-MERGE Block-Rescaling stall + covers ht_reg_categorical_merge */
+    static ht_fed_vfdt_client_t c0, c1;
+    static ht_fed_vfdt_server_t srv;
+    static uint8_t wire[65536];
+
+    ht_config_params_t tp;
+    ht_default_reg_params(&tp, 2);
+    tp.feature_types[0] = HT_FEAT_NUMERIC;
+    tp.feature_types[1] = HT_FEAT_CATEGORICAL;
+    tp.grace_period = 150U;
+    ht_params_set_delta_pow10(&tp, 3U);
+    tp.leaf_prediction = HT_LEAF_ADAPTIVE;
+
+    ht_fed_vfdt_server_cfg_t scfg;
+    ht_fed_vfdt_default_server_config(&scfg, HT_FED_VFDT_STATS_MERGE, &tp);
+    HT_ASSERT_EQ(ht_fed_vfdt_server_init(&srv, &scfg), HT_OK);
+
+    ht_fed_vfdt_client_cfg_t cfg0, cfg1;
+    ht_fed_vfdt_default_client_config(&cfg0, 1U, HT_FED_VFDT_STATS_MERGE, &tp);
+    ht_fed_vfdt_default_client_config(&cfg1, 2U, HT_FED_VFDT_STATS_MERGE, &tp);
+    HT_ASSERT_EQ(ht_fed_vfdt_client_init(&c0, &cfg0), HT_OK);
+    HT_ASSERT_EQ(ht_fed_vfdt_client_init(&c1, &cfg1), HT_OK);
+
+    ht_value_t x[HT_MAX_FEATURES];
+    memset(x, 0, sizeof(x));
+
+    for (int i = 0; i < 200; ++i) {
+        x[0].num = HT_ADD(HT_CONST(1.0), HT_MUL(HT_FROM_INT(i % 5), HT_CONST(0.2)));
+        x[1].cat = i % 3; /* noisy categorical feature so f0 strictly wins without tie */
+        HT_ASSERT_EQ(ht_fed_vfdt_client_learn_one_reg(&c0, x, HT_ADD(HT_CONST(300.0), HT_FROM_INT(i % 30)), HT_CONST(1.0)), HT_OK);
+
+        x[0].num = HT_ADD(HT_CONST(20.0), HT_MUL(HT_FROM_INT(i % 5), HT_CONST(0.2)));
+        x[1].cat = (i + 1) % 3;
+        HT_ASSERT_EQ(ht_fed_vfdt_client_learn_one_reg(&c1, x, HT_ADD(HT_CONST(3000.0), HT_FROM_INT(i % 40)), HT_CONST(1.0)), HT_OK);
+    }
+
+    HT_ASSERT_EQ(ht_fed_vfdt_server_begin_round(&srv), HT_OK);
+    size_t w = 0;
+    HT_ASSERT_EQ(ht_fed_vfdt_client_export_update(&c0, wire, sizeof(wire), &w), HT_OK);
+    HT_ASSERT_EQ(ht_fed_vfdt_server_ingest(&srv, wire, w), HT_OK);
+    HT_ASSERT_EQ(ht_fed_vfdt_client_export_update(&c1, wire, sizeof(wire), &w), HT_OK);
+    HT_ASSERT_EQ(ht_fed_vfdt_server_ingest(&srv, wire, w), HT_OK);
+
+    uint16_t cmds = 0U;
+    HT_ASSERT_EQ(ht_fed_vfdt_server_end_round(&srv, &cmds), HT_OK);
+    HT_ASSERT_EQ(cmds, 1U);
+
+    HT_ASSERT_EQ(ht_fed_vfdt_server_export_update(&srv, 1U, 0U, wire, sizeof(wire), &w), HT_OK);
+    HT_ASSERT_EQ(ht_fed_vfdt_client_apply_update(&c0, wire, w), HT_OK);
+
+    x[0].num = HT_CONST(1.2); x[1].cat = 0;
+    ht_float_t p_lo = ht_fed_vfdt_client_predict_reg(&c0, x);
+    x[0].num = HT_CONST(20.2); x[1].cat = 1;
+    ht_float_t p_hi = ht_fed_vfdt_client_predict_reg(&c0, x);
+    HT_ASSERT(HT_ISFINITE(p_lo) && HT_ISFINITE(p_hi));
+    HT_ASSERT(p_hi > HT_ADD(p_lo, HT_CONST(1000.0)));
+}
+#endif
+
+static void test_fed_vfdt_coordinated_cat_wire_corruption_and_snapshots(void) {
+    static ht_fed_vfdt_client_t cli;
+    static ht_fed_vfdt_server_t srv;
+    static uint8_t wire[65536];
+
+    ht_config_params_t tp;
+    ht_default_params(&tp, 2U, 2U);
+    tp.feature_types[0] = HT_FEAT_NUMERIC;
+    tp.feature_types[1] = HT_FEAT_CATEGORICAL;
+    tp.grace_period = 20U;
+
+    /* Zero quorum clamping in server init */
+    ht_fed_vfdt_server_cfg_t scfg;
+    ht_fed_vfdt_default_server_config(&scfg, HT_FED_VFDT_COORDINATED, &tp);
+    scfg.min_quorum = 0U;
+    scfg.min_drift_quorum = 0U;
+    scfg.consensus = HT_FED_CONSENSUS_WEIGHTED_MERIT;
+    HT_ASSERT_EQ(ht_fed_vfdt_server_init(&srv, &scfg), HT_OK);
+    HT_ASSERT_EQ(srv.cfg.min_quorum, 1U);
+    HT_ASSERT_EQ(srv.cfg.min_drift_quorum, 1U);
+
+    ht_fed_vfdt_client_cfg_t ccfg;
+    ht_fed_vfdt_default_client_config(&ccfg, 1U, HT_FED_VFDT_COORDINATED, &tp);
+    HT_ASSERT_EQ(ht_fed_vfdt_client_init(&cli, &ccfg), HT_OK);
+
+    /* 1. Categorical coordinated proposals -> exercises categorical consensus branch (L939, L972) */
+    HT_ASSERT_EQ(ht_fed_vfdt_server_begin_round(&srv), HT_OK);
+    ht_fed_split_proposal_t pc1, pc2;
+    memset(&pc1, 0, sizeof(pc1));
+    pc1.leaf_idx = 0U; pc1.best.feature_idx = 1U; pc1.best.is_categorical = true;
+    pc1.best.split_val.cat_val = 2; pc1.best.merit = HT_CONST(0.9);
+    pc1.total_weight = HT_CONST(40.0); pc1.locally_ready = 1U;
+    pc2 = pc1;
+    pc2.best.split_val.cat_val = 2; pc2.best.merit = HT_CONST(0.8); pc2.total_weight = HT_CONST(60.0);
+    srv.round_proposals[srv.n_round_proposals++] = pc1;
+    srv.round_proposals[srv.n_round_proposals++] = pc2;
+    uint16_t cmds = 0U;
+    HT_ASSERT_EQ(ht_fed_vfdt_server_end_round(&srv, &cmds), HT_OK);
+    HT_ASSERT_EQ(cmds, 1U);
+    HT_ASSERT((srv.global_tree.memory.node_pool[0].flags & HT_NODE_SPLIT_CAT) != 0U);
+    HT_ASSERT_EQ(srv.global_tree.memory.node_pool[0].split_val.cat_val, 2);
+
+    /* 2. Query-size (NULL) & buffer-too-small for client/server export + snapshot fallback */
+    size_t req = 0, w = 0;
+    HT_ASSERT_EQ(ht_fed_vfdt_client_export_update(&cli, NULL, 0U, &req), HT_OK);
+    HT_ASSERT_EQ(ht_fed_vfdt_server_export_update(&srv, 1U, 0U, NULL, 0U, &req), HT_OK);
+    HT_ASSERT_EQ(ht_fed_vfdt_server_export_update(&srv, 1U, 0U, wire, 8U, &w), HT_ERR_BUFFER_TOO_SMALL);
+
+    /* Future client_topology_version > server version forces FULL_SNAPSHOT fallback */
+    HT_ASSERT_EQ(ht_fed_vfdt_server_export_update(&srv, 1U, 999U, NULL, 0U, &req), HT_OK);
+    HT_ASSERT_EQ(ht_fed_vfdt_server_export_update(&srv, 1U, 999U, wire, 8U, &w), HT_ERR_BUFFER_TOO_SMALL);
+    HT_ASSERT_EQ(ht_fed_vfdt_server_export_update(&srv, 1U, 999U, wire, sizeof(wire), &w), HT_OK);
+    ht_fed_header_t hdr;
+    const uint8_t *pl = NULL;
+    HT_ASSERT_EQ(ht_fed_parse_frame(wire, w, &hdr, &pl), HT_OK);
+    HT_ASSERT_EQ(hdr.msg_type, (uint16_t)HT_FED_MSG_VFDT_FULL_SNAPSHOT);
+
+    /* Apply broadcast twice: first updates v0->v1, second hits already-applied skip */
+    HT_ASSERT_EQ(ht_fed_vfdt_server_export_update(&srv, 1U, 0U, wire, sizeof(wire), &w), HT_OK);
+    HT_ASSERT_EQ(ht_fed_vfdt_client_apply_update(&cli, wire, w), HT_OK);
+    HT_ASSERT_EQ(cli.topology_version, 1U);
+    HT_ASSERT_EQ(ht_fed_vfdt_client_apply_update(&cli, wire, w), HT_OK);
+
+    /* 3. Valid HFED frames with wrong msg_type / truncated payload -> HT_ERR_CORRUPT_IMAGE */
+    uint8_t junk[4] = {0};
+    uint16_t cls_flags = ht_fed_make_flags(HT_TASK_CLASSIFICATION);
+    HT_ASSERT_EQ(ht_fed_write_frame(wire, sizeof(wire), HT_FED_MSG_FOREST_CLIENT_TREE, cls_flags, 1U, 1U, 1U, junk, 4U, &w), HT_OK);
+    HT_ASSERT_EQ(ht_fed_vfdt_server_ingest(&srv, wire, w), HT_ERR_CORRUPT_IMAGE);
+    HT_ASSERT_EQ(ht_fed_vfdt_client_apply_update(&cli, wire, w), HT_ERR_CORRUPT_IMAGE);
+
+    HT_ASSERT_EQ(ht_fed_write_frame(wire, sizeof(wire), HT_FED_MSG_VFDT_SPLIT_BROADCAST, cls_flags, 1U, 1U, 1U, junk, 1U, &w), HT_OK);
+    HT_ASSERT_EQ(ht_fed_vfdt_client_apply_update(&cli, wire, w), HT_ERR_CORRUPT_IMAGE);
+    HT_ASSERT_EQ(ht_fed_write_frame(wire, sizeof(wire), HT_FED_MSG_VFDT_SPLIT_PROPOSAL, cls_flags, 1U, 1U, 1U, junk, 1U, &w), HT_OK);
+    HT_ASSERT_EQ(ht_fed_vfdt_server_ingest(&srv, wire, w), HT_ERR_CORRUPT_IMAGE);
+
+    /* 4. STATS-MERGE round where leaf does NOT reach grace_period -> preserves saved class_counts (L1106) */
+    ht_fed_vfdt_server_cfg_t mcfg;
+    ht_fed_vfdt_default_server_config(&mcfg, HT_FED_VFDT_STATS_MERGE, &tp);
+    HT_ASSERT_EQ(ht_fed_vfdt_server_init(&srv, &mcfg), HT_OK);
+    ht_fed_vfdt_default_client_config(&ccfg, 1U, HT_FED_VFDT_STATS_MERGE, &tp);
+    HT_ASSERT_EQ(ht_fed_vfdt_client_init(&cli, &ccfg), HT_OK);
+
+    ht_value_t x[HT_MAX_FEATURES];
+    memset(x, 0, sizeof(x));
+    for (int i = 0; i < 5; ++i) {
+        x[0].num = HT_FROM_INT(i);
+        HT_ASSERT_EQ(ht_fed_vfdt_client_learn_one(&cli, x, (uint8_t)(i % 2), HT_CONST(1.0)), HT_OK);
+    }
+    HT_ASSERT_EQ(ht_fed_vfdt_server_begin_round(&srv), HT_OK);
+    HT_ASSERT_EQ(ht_fed_vfdt_client_export_update(&cli, NULL, 0U, &req), HT_OK);
+    HT_ASSERT_EQ(ht_fed_vfdt_client_export_update(&cli, wire, 8U, &w), HT_ERR_BUFFER_TOO_SMALL);
+    HT_ASSERT_EQ(ht_fed_vfdt_client_export_update(&cli, wire, sizeof(wire), &w), HT_OK);
+    HT_ASSERT_EQ(ht_fed_vfdt_server_ingest(&srv, wire, w), HT_OK);
+    HT_ASSERT_EQ(ht_fed_vfdt_server_end_round(&srv, &cmds), HT_OK);
+    HT_ASSERT_EQ(cmds, 0U);
+    /* Stateless STATS-MERGE restores baseline leaf counts when no split occurs (zero double-counting) */
+    HT_ASSERT_FLOAT_EQ(srv.global_tree.memory.node_pool[0].class_counts[0], HT_CONST(0.0));
+
+    /* Corrupt LEAF_STATS payload */
+    HT_ASSERT_EQ(ht_fed_write_frame(wire, sizeof(wire), HT_FED_MSG_VFDT_LEAF_STATS, cls_flags, 1U, 1U, 0U, junk, 1U, &w), HT_OK);
+    HT_ASSERT_EQ(ht_fed_vfdt_server_ingest(&srv, wire, w), HT_ERR_CORRUPT_IMAGE);
+
+    /* 5. Multi-level STATS-MERGE split (depth >= 2) + competing categorical consensus +
+     *    reverse leaf_idx sorting & tie-breakers (BEST_MERIT / MAJORITY) */
+    ht_fed_vfdt_server_cfg_t c2;
+    ht_fed_vfdt_default_server_config(&c2, HT_FED_VFDT_COORDINATED, &tp);
+    c2.min_quorum = 1U;
+    c2.consensus = HT_FED_CONSENSUS_MERIT;
+    c2.require_locally_ready = true;
+    HT_ASSERT_EQ(ht_fed_vfdt_server_init(&srv, &c2), HT_OK);
+
+    /* Split root -> l1, r1; then split r1 -> l2, r2; then submit proposals in reverse leaf order (r2, l1) */
+    HT_ASSERT_EQ(ht_fed_vfdt_server_begin_round(&srv), HT_OK);
+    pc1.leaf_idx = 0U; pc1.best.feature_idx = 1U; pc1.best.is_categorical = true;
+    pc1.best.split_val.cat_val = 1; pc1.best.merit = HT_CONST(0.7); pc1.locally_ready = 1U;
+    pc2 = pc1;
+    pc2.best.split_val.cat_val = 2; pc2.best.merit = HT_CONST(0.9); pc2.total_weight = HT_CONST(80.0);
+    /* Also add a not-locally-ready proposal to exercise require_locally_ready filter */
+    ht_fed_split_proposal_t pc_unready = pc1;
+    pc_unready.locally_ready = 0U;
+    srv.round_proposals[srv.n_round_proposals++] = pc_unready;
+    srv.round_proposals[srv.n_round_proposals++] = pc1;
+    srv.round_proposals[srv.n_round_proposals++] = pc2;
+    HT_ASSERT_EQ(ht_fed_vfdt_server_end_round(&srv, &cmds), HT_OK);
+    HT_ASSERT_EQ(cmds, 1U);
+
+    uint16_t l1 = srv.global_tree.memory.node_pool[0].left_child;
+    uint16_t r1 = srv.global_tree.memory.node_pool[0].right_child;
+    HT_ASSERT_EQ(ht_fed_vfdt_server_begin_round(&srv), HT_OK);
+    /* Propose r1 (higher idx) BEFORE l1 (lower idx) to exercise unique_leaves insertion sort */
+    helper_push_proposal(&srv, r1, 0U, HT_CONST(4.0), HT_CONST(0.8), HT_CONST(50.0), 1U);
+    helper_push_proposal(&srv, l1, 0U, HT_CONST(2.0), HT_CONST(0.85), HT_CONST(50.0), 1U);
+    /* Also push a stale proposal for already-split root (non-leaf skip) */
+    helper_push_proposal(&srv, 0U, 0U, HT_CONST(1.0), HT_CONST(0.9), HT_CONST(50.0), 1U);
+    HT_ASSERT_EQ(ht_fed_vfdt_server_end_round(&srv, &cmds), HT_OK);
+    HT_ASSERT_EQ(cmds, 2U);
+
+    /* Sync a coordinated client to the multi-level topology and export proposals
+     * -> exercises ht_fed_compute_node_depth() DFS traversal (line 315) on non-root leaves */
+    ht_fed_vfdt_default_client_config(&ccfg, 3U, HT_FED_VFDT_COORDINATED, &tp);
+    HT_ASSERT_EQ(ht_fed_vfdt_client_init(&cli, &ccfg), HT_OK);
+    HT_ASSERT_EQ(ht_fed_vfdt_server_export_update(&srv, 3U, 0U, wire, sizeof(wire), &w), HT_OK);
+    HT_ASSERT_EQ(ht_fed_vfdt_client_apply_update(&cli, wire, w), HT_OK);
+    for (int i = 0; i < 40; ++i) {
+        x[0].num = HT_FROM_INT(i % 10);
+        x[1].cat = i % 3;
+        HT_ASSERT_EQ(ht_fed_vfdt_client_learn_one(&cli, x, (uint8_t)(i % 2), HT_CONST(1.0)), HT_OK);
+    }
+    HT_ASSERT_EQ(ht_fed_vfdt_client_export_update(&cli, wire, sizeof(wire), &w), HT_OK);
+    HT_ASSERT(srv.global_tree.n_decision_nodes >= 3U);
+
+#ifndef HT_CLASSIF_ONLY
+    /* 6. Coordinated regression proposals (merges lhs_var/rhs_var in consensus) +
+     *    HT_FED_CONSENSUS_MAJORITY tie-breaker & split_log overflow -> FULL_SNAPSHOT */
+    ht_config_params_t rtp;
+    ht_default_reg_params(&rtp, 2U);
+    rtp.grace_period = 20U;
+    ht_fed_vfdt_server_cfg_t rcfg;
+    ht_fed_vfdt_default_server_config(&rcfg, HT_FED_VFDT_COORDINATED, &rtp);
+    rcfg.min_quorum = 2U;
+    rcfg.consensus = HT_FED_CONSENSUS_MAJORITY;
+    rcfg.threshold_agg = HT_FED_THRESH_WEIGHTED_MEAN;
+    HT_ASSERT_EQ(ht_fed_vfdt_server_init(&srv, &rcfg), HT_OK);
+
+    HT_ASSERT_EQ(ht_fed_vfdt_server_begin_round(&srv), HT_OK);
+    ht_fed_split_proposal_t rp1, rp2;
+    memset(&rp1, 0, sizeof(rp1));
+    rp1.leaf_idx = 0U; rp1.best.feature_idx = 0U; rp1.best.split_val.threshold = HT_CONST(4.0);
+    rp1.best.merit = HT_CONST(120.0); rp1.total_weight = HT_CONST(50.0); rp1.locally_ready = 1U;
+    rp1.best.lhs_var.count = HT_CONST(25.0); rp1.best.lhs_var.mean = HT_CONST(10.0);
+    rp1.best.rhs_var.count = HT_CONST(25.0); rp1.best.rhs_var.mean = HT_CONST(90.0);
+    rp2 = rp1;
+    rp2.best.split_val.threshold = HT_CONST(6.0); rp2.best.merit = HT_CONST(140.0);
+    srv.round_proposals[srv.n_round_proposals++] = rp1;
+    srv.round_proposals[srv.n_round_proposals++] = rp2;
+    HT_ASSERT_EQ(ht_fed_vfdt_server_end_round(&srv, &cmds), HT_OK);
+    HT_ASSERT_EQ(cmds, 1U);
+
+    /* Simulate split_log head advancing past client_version -> triggers FULL_SNAPSHOT */
+    srv.split_log_head_version = 10U;
+    srv.topology_version = 75U;
+    HT_ASSERT_EQ(ht_fed_vfdt_server_export_update(&srv, 1U, 2U, wire, sizeof(wire), &w), HT_OK);
+    HT_ASSERT_EQ(ht_fed_parse_frame(wire, w, &hdr, &pl), HT_OK);
+    HT_ASSERT_EQ(hdr.msg_type, (uint16_t)HT_FED_MSG_VFDT_FULL_SNAPSHOT);
+#endif
+}
+
 void test_fed_vfdt_run(void) {
     HT_TEST_SUITE_BEGIN("Nivel 1, 2 & 3: Modo 2 Fed-VFDT Global (ht_fed_vfdt)");
     HT_RUN_TEST(test_fed_vfdt_coordinated_consensus_modes);
@@ -448,4 +836,10 @@ void test_fed_vfdt_run(void) {
     HT_RUN_TEST(test_fed_vfdt_stats_merge_extreme_non_iid);
     HT_RUN_TEST(test_fed_vfdt_stats_merge_regression);
     HT_RUN_TEST(test_fed_vfdt_straggler_catchup_snapshot_and_drift_reset);
+    HT_RUN_TEST(test_fed_vfdt_predict_proba_depth_and_error_paths);
+    HT_RUN_TEST(test_fed_vfdt_stats_merge_hist_and_categorical);
+#ifndef HT_CLASSIF_ONLY
+    HT_RUN_TEST(test_fed_vfdt_stats_merge_high_amplitude_rescaling_and_cat);
+#endif
+    HT_RUN_TEST(test_fed_vfdt_coordinated_cat_wire_corruption_and_snapshots);
 }

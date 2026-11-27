@@ -700,6 +700,34 @@ static void test_hoeffding_bound_ln_and_high_amplitude_vr64(void) {
     HT_ASSERT(HT_ISFINITE(cand.merit));
     HT_ASSERT(cand.merit > HT_CONST(100.0));
     HT_ASSERT(cand.split_val.threshold > HT_CONST(2.0) && cand.split_val.threshold < HT_CONST(21.0));
+
+    /* Exhaustive NULL / degenerate branch guards across criterion helpers */
+    ht_float_t z_dist[HT_MAX_CLASSES] = { 0, 0, 0, 0 };
+    ht_float_t neg_dist[HT_MAX_CLASSES] = { HT_CONST(-1.0), HT_CONST(10.0), 0, 0 };
+    HT_ASSERT_FLOAT_EQ(ht_compute_gini(z_dist, 0, HT_CONST(1.0)), HT_CONST(1.0));
+    HT_ASSERT_FLOAT_EQ(ht_compute_gini(z_dist, 2, HT_CONST(0.0)), HT_CONST(1.0));
+    HT_ASSERT_FLOAT_EQ(ht_compute_entropy(z_dist, 0), HT_CONST(0.0));
+    HT_ASSERT_FLOAT_EQ(ht_compute_entropy(z_dist, 2), HT_CONST(0.0));
+    HT_ASSERT(ht_compute_entropy(neg_dist, 2) >= HT_CONST(0.0));
+
+    const ht_criterion_vtable_t *ig = ht_criterion_get_vtable(HT_CRIT_INFO_GAIN);
+    const ht_criterion_vtable_t *gn = ht_criterion_get_vtable(HT_CRIT_GINI);
+    HT_ASSERT_EQ(ig->merit_of_split(z_dist, z_dist, z_dist, 2, HT_CONST(0.01)), -HT_INFINITY);
+    HT_ASSERT_EQ(gn->merit_of_split(z_dist, z_dist, z_dist, 2, HT_CONST(0.01)), -HT_INFINITY);
+    HT_ASSERT_FLOAT_EQ(ig->range_of_merit(z_dist, 1), HT_CONST(1.0));
+    HT_ASSERT_FLOAT_EQ(gn->range_of_merit(z_dist, 0), HT_CONST(1.0));
+
+    HT_ASSERT_EQ(ht_hoeffding_bound(HT_CONST(1.0), HT_CONST(0.0), HT_CONST(10.0)), HT_INFINITY);
+    HT_ASSERT_EQ(ht_hoeffding_bound(HT_CONST(1.0), HT_CONST(1.5), HT_CONST(10.0)), HT_CONST(0.0));
+    HT_ASSERT_EQ(ht_hoeffding_bound(HT_CONST(0.0), HT_CONST(0.01), HT_CONST(10.0)), HT_CONST(0.0));
+    HT_ASSERT_EQ(ht_hoeffding_bound(HT_CONST(1.0), HT_CONST(0.01), HT_CONST(0.0)), HT_INFINITY);
+
+    HT_ASSERT(!ht_should_split(NULL, NULL, HT_CONST(0.1), HT_CONST(0.05)));
+    HT_ASSERT(!ht_should_split_reg(NULL, NULL, HT_CONST(0.1), HT_CONST(0.05)));
+    HT_ASSERT_EQ(ht_compute_variance_reduction(NULL, &pre_var, &pre_var, HT_CONST(5.0), HT_CONST(0.01)), -HT_INFINITY);
+    HT_ASSERT_EQ(ht_compute_variance_reduction(&pre_var, NULL, &pre_var, HT_CONST(5.0), HT_CONST(0.01)), -HT_INFINITY);
+    HT_ASSERT_EQ(ht_compute_variance_reduction(&pre_var, &pre_var, NULL, HT_CONST(5.0), HT_CONST(0.01)), -HT_INFINITY);
+    HT_ASSERT_NULL(ht_criterion_get_vtable((ht_criterion_type_t)99));
 }
 
 /* ========================================================================= */

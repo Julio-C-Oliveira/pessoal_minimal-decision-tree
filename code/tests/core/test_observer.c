@@ -1079,6 +1079,73 @@ static void test_histogram_full_lifecycle_merge_log_proba_and_rescaling(void) {
     ht_categorical_merge(&c1, &c2, 2U);
     HT_ASSERT(ht_categorical_cond_proba(&c1, 0, 0) > HT_CONST(0.5));
     HT_ASSERT(ht_categorical_cond_proba(&c1, 1, 1) > HT_CONST(0.5));
+
+    /* NULL / non-finite / out-of-range guards across Gaussian, Hist, Categorical, Var, Reg observers */
+    ht_gaussian_obs_t ga[HT_MAX_CLASSES];
+    for (uint8_t c = 0; c < HT_MAX_CLASSES; ++c) ht_gaussian_init(&ga[c]);
+    ht_gaussian_update(NULL, 0, HT_CONST(1.0), HT_CONST(1.0));
+    ht_gaussian_update(ga, HT_MAX_CLASSES, HT_CONST(1.0), HT_CONST(1.0));
+    ht_gaussian_update(ga, 0, HT_NAN_VAL, HT_CONST(1.0));
+    ht_gaussian_update(ga, 0, HT_INFINITY, HT_CONST(1.0));
+    ht_gaussian_update(ga, 0, HT_CONST(1.0), HT_CONST(0.0));
+    HT_ASSERT_FLOAT_EQ(ht_gaussian_cond_proba(NULL, HT_CONST(1.0)), HT_CONST(0.0));
+    HT_ASSERT_FLOAT_EQ(ht_gaussian_cond_proba(&ga[0], HT_NAN_VAL), HT_CONST(0.0));
+    HT_ASSERT_FLOAT_EQ(ht_gaussian_cond_proba(&ga[0], HT_INFINITY), HT_CONST(0.0));
+    HT_ASSERT_EQ(ht_gaussian_cond_log_proba(NULL, HT_CONST(1.0)), -HT_INFINITY);
+    HT_ASSERT_EQ(ht_gaussian_cond_log_proba(&ga[0], HT_NAN_VAL), -HT_INFINITY);
+    HT_ASSERT_EQ(ht_gaussian_cond_log_proba(&ga[0], HT_INFINITY), -HT_INFINITY);
+
+    ht_float_t sp[HT_GAUSSIAN_SPLITS];
+    ht_float_t dl[HT_MAX_CLASSES], dr[HT_MAX_CLASSES];
+    HT_ASSERT_EQ(ht_gaussian_split_suggestions(NULL, 2, sp), 0U);
+    HT_ASSERT_EQ(ht_gaussian_split_suggestions(ga, 0, sp), 0U);
+    HT_ASSERT_EQ(ht_gaussian_split_suggestions(ga, 2, NULL), 0U);
+    ht_gaussian_binary_split_dists(NULL, 2, HT_CONST(0.0), dl, dr);
+    ht_gaussian_binary_split_dists(ga, 2, HT_CONST(0.0), NULL, dr);
+    HT_ASSERT_EQ(ht_hist_split_suggestions(NULL, 2, sp), 0U);
+    HT_ASSERT_EQ(ht_hist_split_suggestions(&h1, 2, NULL), 0U);
+    ht_hist_binary_split_dists(NULL, 2, HT_CONST(0.0), dl, dr);
+    ht_hist_binary_split_dists(&h1, 2, HT_CONST(0.0), NULL, dr);
+    HT_ASSERT_FLOAT_EQ(ht_categorical_cond_proba(NULL, 0, 0), HT_CONST(0.0));
+    HT_ASSERT_FLOAT_EQ(ht_categorical_cond_proba(&c1, 0, -1), HT_CONST(0.0));
+    HT_ASSERT_FLOAT_EQ(ht_categorical_cond_proba(&c1, 0, HT_MAX_CATEGORIES), HT_CONST(0.0));
+    ht_categorical_binary_split_dists(NULL, 2, 0, dl, dr);
+    ht_categorical_binary_split_dists(&c1, 2, 0, NULL, dr);
+
+    /* High-amplitude Gaussian stream triggering Q16.16 m2 >= INT32_MAX Block-Rescaling */
+    for (int i = 0; i < 300; ++i) {
+        ht_float_t v = ((i & 1) == 0) ? HT_CONST(-400.0) : HT_CONST(400.0);
+        ht_gaussian_update(ga, 0, v, HT_CONST(1.0));
+    }
+    HT_ASSERT(HT_ISFINITE(ga[0].mean));
+    HT_ASSERT(ht_gaussian_stddev(&ga[0]) > HT_CONST(0.0));
+
+    /* Regression observer NULL / NaN / Inf / invalid guards */
+    ht_var_stat_t vs;
+    ht_var_init(&vs);
+    ht_var_update(NULL, HT_CONST(1.0), HT_CONST(1.0));
+    ht_var_update(&vs, HT_NAN_VAL, HT_CONST(1.0));
+    ht_var_update(&vs, HT_INFINITY, HT_CONST(1.0));
+    ht_var_update(&vs, HT_CONST(1.0), HT_CONST(0.0));
+    HT_ASSERT_FLOAT_EQ(ht_var_value(NULL), HT_CONST(0.0));
+
+    ht_reg_numeric_obs_t rn;
+    ht_reg_numeric_init(&rn);
+    ht_reg_numeric_update(NULL, HT_CONST(1.0), HT_CONST(1.0), HT_CONST(1.0));
+    ht_reg_numeric_update(&rn, HT_NAN_VAL, HT_CONST(1.0), HT_CONST(1.0));
+    ht_reg_numeric_update(&rn, HT_INFINITY, HT_CONST(1.0), HT_CONST(1.0));
+    ht_reg_numeric_update(&rn, HT_CONST(1.0), HT_NAN_VAL, HT_CONST(1.0));
+    ht_reg_numeric_update(&rn, HT_CONST(1.0), HT_INFINITY, HT_CONST(1.0));
+    ht_reg_numeric_update(&rn, HT_CONST(1.0), HT_CONST(1.0), HT_CONST(0.0));
+
+    ht_reg_categorical_obs_t rc;
+    ht_reg_categorical_init(&rc);
+    ht_reg_categorical_update(NULL, 0, HT_CONST(1.0), HT_CONST(1.0));
+    ht_reg_categorical_update(&rc, -1, HT_CONST(1.0), HT_CONST(1.0));
+    ht_reg_categorical_update(&rc, HT_MAX_CATEGORIES, HT_CONST(1.0), HT_CONST(1.0));
+    ht_reg_categorical_update(&rc, 0, HT_NAN_VAL, HT_CONST(1.0));
+    ht_reg_categorical_update(&rc, 0, HT_INFINITY, HT_CONST(1.0));
+    ht_reg_categorical_update(&rc, 0, HT_CONST(1.0), HT_CONST(0.0));
 }
 
 /* ========================================================================= */

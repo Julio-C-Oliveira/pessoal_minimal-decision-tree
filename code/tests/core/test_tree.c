@@ -1341,6 +1341,275 @@ static void test_tree_high_amplitude_regression_long_stream_splits(void) {
 }
 #endif
 
+static void test_tree_comprehensive_edge_and_error_branches(void) {
+    /* 1. Default param NULL guards and delta_pow10 clamping (>15) */
+    ht_default_params(NULL, 2U, 2U);
+    ht_default_hat_params(NULL, 2U, 2U);
+    ht_default_reg_params(NULL, 2U);
+    ht_default_hat_reg_params(NULL, 2U);
+    ht_params_set_delta_pow10(NULL, 7U);
+
+    ht_config_params_t p;
+    ht_default_params(&p, 2U, 2U);
+    ht_params_set_delta_pow10(&p, 25U); /* clamps to 15 */
+    HT_ASSERT_EQ(p.delta_neg_log10, 15U);
+
+    /* 2. ht_tree_init invalid parameter validation branches */
+    static ht_tree_t tree;
+    HT_ASSERT_EQ(ht_tree_init(NULL, &p), HT_ERR_INVALID_ARG);
+    HT_ASSERT_EQ(ht_tree_init(&tree, NULL), HT_ERR_INVALID_ARG);
+
+    ht_config_params_t bad;
+    ht_default_params(&bad, 2U, 2U); bad.n_features = 0U;
+    HT_ASSERT_EQ(ht_tree_init(&tree, &bad), HT_ERR_INVALID_ARG);
+    ht_default_params(&bad, 2U, 2U); bad.n_classes = 1U;
+    HT_ASSERT_EQ(ht_tree_init(&tree, &bad), HT_ERR_INVALID_ARG);
+    ht_default_params(&bad, 2U, 2U); bad.max_share_to_split = HT_CONST(0.0);
+    HT_ASSERT_EQ(ht_tree_init(&tree, &bad), HT_ERR_INVALID_ARG);
+    ht_default_params(&bad, 2U, 2U); bad.criterion = (ht_criterion_type_t)99;
+    HT_ASSERT_EQ(ht_tree_init(&tree, &bad), HT_ERR_INVALID_ARG);
+    ht_default_params(&bad, 2U, 2U); bad.tau = HT_CONST(-0.1);
+    HT_ASSERT_EQ(ht_tree_init(&tree, &bad), HT_ERR_INVALID_ARG);
+    ht_default_params(&bad, 2U, 2U); bad.min_branch_fraction = HT_CONST(-0.1);
+    HT_ASSERT_EQ(ht_tree_init(&tree, &bad), HT_ERR_INVALID_ARG);
+    ht_default_params(&bad, 2U, 2U); bad.delta = HT_CONST(0.0); bad.delta_neg_log10 = 0U;
+    HT_ASSERT_EQ(ht_tree_init(&tree, &bad), HT_ERR_INVALID_ARG);
+    ht_default_params(&bad, 2U, 2U); bad.delta = HT_CONST(1.5); bad.delta_neg_log10 = 0U;
+    HT_ASSERT_EQ(ht_tree_init(&tree, &bad), HT_ERR_INVALID_ARG);
+
+    /* 3. Defer splits toggle, evaluate_leaf_split & apply_split error paths */
+    ht_default_params(&p, 2U, 2U);
+    p.feature_types[0] = HT_FEAT_NUMERIC;
+    p.feature_types[1] = HT_FEAT_CATEGORICAL;
+    HT_ASSERT_EQ(ht_tree_init(&tree, &p), HT_OK);
+    ht_tree_set_defer_splits(&tree, true);
+    HT_ASSERT((tree.tree_flags & HT_TREE_FLAG_DEFER_SPLITS) != 0U);
+    ht_tree_set_defer_splits(&tree, false);
+    HT_ASSERT((tree.tree_flags & HT_TREE_FLAG_DEFER_SPLITS) == 0U);
+
+    ht_split_candidate_t best, second;
+    bool should = false;
+    HT_ASSERT_EQ(ht_tree_evaluate_leaf_split(NULL, 0U, &best, &second, &should), HT_ERR_INVALID_ARG);
+    HT_ASSERT_EQ(ht_tree_evaluate_leaf_split(&tree, HT_INVALID_IDX, &best, &second, &should), HT_ERR_INVALID_ARG);
+    HT_ASSERT_EQ(ht_tree_evaluate_leaf_split(&tree, 0U, &best, &second, &should), HT_OK);
+    HT_ASSERT(!should);
+
+    /* Deactivated leaf evaluation returns HT_OK with should == false */
+    HT_ASSERT_EQ(ht_tree_deactivate_leaf(&tree, 0U), HT_OK);
+    should = true;
+    HT_ASSERT_EQ(ht_tree_evaluate_leaf_split(&tree, 0U, &best, &second, &should), HT_OK);
+    HT_ASSERT(!should);
+    /* Resetting an inactive leaf reactivates it in-place */
+    HT_ASSERT_EQ(ht_tree_reset_subtree_to_leaf(&tree, 0U), HT_OK);
+    HT_ASSERT_EQ(tree.n_active_leaves, 1U);
+    HT_ASSERT_EQ(tree.n_inactive_leaves, 0U);
+
+    /* Apply split invalid guards */
+    ht_split_candidate_t bad_c;
+    memset(&bad_c, 0, sizeof(bad_c));
+    bad_c.feature_idx = HT_NO_FEATURE;
+    HT_ASSERT_EQ(ht_tree_apply_split(NULL, 0U, &bad_c, 0U, NULL, NULL), HT_ERR_INVALID_ARG);
+    HT_ASSERT_EQ(ht_tree_apply_split(&tree, HT_INVALID_IDX, &bad_c, 0U, NULL, NULL), HT_ERR_INVALID_ARG);
+    HT_ASSERT_EQ(ht_tree_apply_split(&tree, 0U, &bad_c, 0U, NULL, NULL), HT_ERR_INVALID_ARG);
+
+    /* 4. Multi-level tree (internal child subtrees) + NaN/missing categorical routing
+     *    -> exercises ht_node_total_weight iterative stack & HAT predict_proba paths */
+    ht_split_candidate_t c0, c1;
+    memset(&c0, 0, sizeof(c0));
+    c0.feature_idx = 0U; c0.is_categorical = false; c0.split_val.threshold = HT_CONST(5.0);
+    uint16_t lc = 0, rc = 0, rlc = 0, rrc = 0;
+    HT_ASSERT_EQ(ht_tree_apply_split(&tree, 0U, &c0, 0U, &lc, &rc), HT_OK);
+
+    memset(&c1, 0, sizeof(c1));
+    c1.feature_idx = 1U; c1.is_categorical = true; c1.split_val.cat_val = 1;
+    HT_ASSERT_EQ(ht_tree_apply_split(&tree, rc, &c1, 1U, &rlc, &rrc), HT_OK);
+
+    /* Populate asymmetric weights so right subtree (2 leaves) outweighs left */
+    tree.memory.node_pool[lc].class_counts[0] = HT_CONST(5.0);
+    tree.memory.node_pool[rlc].class_counts[1] = HT_CONST(20.0);
+    tree.memory.node_pool[rrc].class_counts[0] = HT_CONST(15.0);
+
+    /* Apply split on non-leaf must fail */
+    HT_ASSERT_EQ(ht_tree_apply_split(&tree, 0U, &c0, 0U, NULL, NULL), HT_ERR_INVALID_ARG);
+
+    ht_value_t x[HT_MAX_FEATURES];
+    memset(x, 0, sizeof(x));
+    ht_float_t probas[HT_MAX_CLASSES];
+    HT_ASSERT_EQ(ht_tree_predict_proba(NULL, x, probas), HT_ERR_INVALID_ARG);
+    HT_ASSERT_EQ(ht_tree_route(NULL, x, NULL, NULL, NULL), HT_INVALID_IDX);
+
+    /* NaN on root + missing cat on internal right child exercises deep subtree weight sum */
+    x[0].num = HT_NAN_VAL;
+    x[1].cat = -1;
+    uint16_t routed = ht_tree_route(&tree, x, NULL, NULL, NULL);
+    HT_ASSERT_EQ(routed, rlc);
+    HT_ASSERT_EQ(ht_tree_predict_proba(&tree, x, probas), HT_OK);
+    HT_ASSERT(probas[1] > HT_CONST(0.9));
+
+    /* Attach an alternate subtree to root and verify HAT routing + reset_subtree frees alt */
+    static ht_adwin_pool_t ad_pool;
+    HT_ASSERT_EQ(ht_adwin_pool_init(&ad_pool), HT_OK);
+    HT_ASSERT_EQ(ht_tree_set_adwin_pool(&tree, &ad_pool), HT_OK);
+    tree.params.enable_hat = true;
+    uint16_t alt = ht_node_alloc(&tree.memory);
+    uint16_t alt_st = ht_stats_alloc(&tree.memory);
+    HT_ASSERT_NEQ(alt, HT_INVALID_IDX);
+    HT_ASSERT_NEQ(alt_st, HT_INVALID_IDX);
+    tree.memory.node_pool[alt].stats_idx = alt_st;
+    tree.memory.node_pool[alt].class_counts[0] = HT_CONST(10.0);
+    tree.node_drift[alt].adwin_idx = ht_adwin_pool_alloc(&ad_pool, NULL);
+    tree.node_drift[0].alt_tree_idx = alt;
+    tree.n_alternate_trees = 1U;
+    tree.n_active_leaves++;
+
+    /* HAT predict_proba traverses main + alternate tree */
+    HT_ASSERT_EQ(ht_tree_predict_proba(&tree, x, probas), HT_OK);
+    HT_ASSERT(HT_ISFINITE(probas[0]) && HT_ISFINITE(probas[1]));
+
+    /* Reset root frees both main children AND alternate subtree */
+    HT_ASSERT_EQ(ht_tree_reset_subtree_to_leaf(&tree, 0U), HT_OK);
+    HT_ASSERT_EQ(tree.n_decision_nodes, 0U);
+    HT_ASSERT_EQ(tree.n_active_leaves, 1U);
+
+    /* 5. Exhaust node_pool to hit HT_ERR_OUT_OF_NODES in ht_tree_apply_split */
+    uint16_t held[HT_MAX_NODES];
+    uint16_t n_held = 0U;
+    while (ht_node_available(&tree.memory) > 1U) {
+        uint16_t ni = ht_node_alloc(&tree.memory);
+        HT_ASSERT_NEQ(ni, HT_INVALID_IDX);
+        held[n_held++] = ni;
+    }
+    HT_ASSERT_EQ(ht_tree_apply_split(&tree, 0U, &c0, 0U, NULL, NULL), HT_ERR_OUT_OF_NODES);
+    for (uint16_t i = 0; i < n_held; ++i) {
+        ht_node_free(&tree.memory, held[i]);
+    }
+    HT_ASSERT_EQ(ht_node_count(&tree.memory), 1U);
+
+#ifndef HT_CLASSIF_ONLY
+    /* 6. Regression reset_subtree_to_leaf + NaN routing on deep regression subtree */
+    ht_config_params_t rp;
+    ht_default_reg_params(&rp, 2U);
+    rp.leaf_prediction = HT_LEAF_MEAN;
+    HT_ASSERT_EQ(ht_tree_init(&tree, &rp), HT_OK);
+    HT_ASSERT_EQ(ht_tree_apply_split(&tree, 0U, &c0, 0U, &lc, &rc), HT_OK);
+    tree.memory.node_pool[lc].reg_stats.count = HT_CONST(5.0);
+    tree.memory.node_pool[lc].reg_stats.mean = HT_CONST(10.0);
+    tree.memory.node_pool[rc].reg_stats.count = HT_CONST(30.0);
+    tree.memory.node_pool[rc].reg_stats.mean = HT_CONST(80.0);
+    x[0].num = HT_NAN_VAL;
+    HT_ASSERT_FLOAT_NEAR(ht_tree_predict_reg(&tree, x), HT_CONST(80.0), HT_TEST_TOL(1e-3));
+    HT_ASSERT_EQ(ht_tree_reset_subtree_to_leaf(&tree, 0U), HT_OK);
+    HT_ASSERT_EQ(tree.n_decision_nodes, 0U);
+#endif
+
+    /* 7. Learn/predict guard branches, all-NaN NB, stats-pool exhaustion inside apply_split,
+     *    and depth-3 subtree NaN routing (hits ht_node_total_weight nested internal stack) */
+    ht_default_params(&p, 2U, 2U);
+    p.feature_types[0] = HT_FEAT_NUMERIC;
+    p.feature_types[1] = HT_FEAT_CATEGORICAL;
+    p.leaf_prediction = HT_LEAF_NB;
+    HT_ASSERT_EQ(ht_tree_init(&tree, &p), HT_OK);
+
+    HT_ASSERT_EQ(ht_tree_learn_one(NULL, x, 0U, HT_CONST(1.0)), HT_ERR_INVALID_ARG);
+    HT_ASSERT_EQ(ht_tree_learn_one(&tree, NULL, 0U, HT_CONST(1.0)), HT_ERR_INVALID_ARG);
+    HT_ASSERT_EQ(ht_tree_learn_one(&tree, x, 0U, HT_CONST(0.0)), HT_OK); /* zero-weight no-op */
+    HT_ASSERT_EQ(ht_tree_learn_one(&tree, x, HT_MAX_CLASSES, HT_CONST(1.0)), HT_ERR_INVALID_ARG);
+#ifndef HT_CLASSIF_ONLY
+    HT_ASSERT_EQ(ht_tree_learn_one_reg(NULL, x, HT_CONST(1.0), HT_CONST(1.0)), HT_ERR_INVALID_ARG);
+    HT_ASSERT_EQ(ht_tree_learn_one_reg(&tree, NULL, HT_CONST(1.0), HT_CONST(1.0)), HT_ERR_INVALID_ARG);
+    HT_ASSERT_EQ(ht_tree_learn_one_reg(&tree, x, HT_CONST(1.0), HT_CONST(0.0)), HT_ERR_INVALID_ARG);
+    HT_ASSERT_EQ(ht_tree_learn_one_reg(&tree, x, HT_NAN_VAL, HT_CONST(1.0)), HT_ERR_INVALID_ARG);
+    HT_ASSERT_FLOAT_EQ(ht_tree_predict_reg(NULL, x), HT_CONST(0.0));
+    HT_ASSERT_FLOAT_EQ(ht_tree_predict_reg(&tree, NULL), HT_CONST(0.0));
+#endif
+
+    /* All-NaN / missing features under HT_LEAF_NB (num_observed == 0 fallback) */
+    x[0].num = HT_CONST(1.0); x[1].cat = 0;
+    HT_ASSERT_EQ(ht_tree_learn_one(&tree, x, 0U, HT_CONST(1.0)), HT_OK);
+    x[0].num = HT_NAN_VAL; x[1].cat = -1;
+    HT_ASSERT_EQ(ht_tree_predict_proba(&tree, x, probas), HT_OK);
+    HT_ASSERT(HT_ISFINITE(probas[0]) && HT_ISFINITE(probas[1]));
+
+    /* Depth-3 tree with nested internal branches on right child */
+    uint16_t l1 = 0, r1 = 0, l2 = 0, r2 = 0, l3 = 0, r3 = 0;
+    HT_ASSERT_EQ(ht_tree_apply_split(&tree, 0U, &c0, 0U, &l1, &r1), HT_OK);
+    HT_ASSERT_EQ(ht_tree_apply_split(&tree, r1, &c1, 1U, &l2, &r2), HT_OK);
+    HT_ASSERT_EQ(ht_tree_apply_split(&tree, r2, &c0, 2U, &l3, &r3), HT_OK);
+    tree.memory.node_pool[l1].class_counts[0] = HT_CONST(2.0);
+    tree.memory.node_pool[l2].class_counts[0] = HT_CONST(3.0);
+    tree.memory.node_pool[l3].class_counts[1] = HT_CONST(10.0);
+    tree.memory.node_pool[r3].class_counts[1] = HT_CONST(20.0);
+    x[0].num = HT_NAN_VAL;
+    x[1].cat = HT_MAX_CATEGORIES;
+    HT_ASSERT_EQ(ht_tree_route(&tree, x, NULL, NULL, NULL), r3);
+
+    /* Exhaust stats_pool while splitting -> triggers promise deactivation inside ht_tree_apply_split */
+    uint16_t held_stats[HT_MAX_ACTIVE_LEAVES];
+    uint16_t n_hs = 0U;
+    while (ht_stats_available(&tree.memory) > 0U) {
+        uint16_t si = ht_stats_alloc(&tree.memory);
+        HT_ASSERT_NEQ(si, HT_INVALID_IDX);
+        held_stats[n_hs++] = si;
+    }
+    uint16_t l4 = 0, r4 = 0;
+    HT_ASSERT_EQ(ht_tree_apply_split(&tree, r3, &c0, 3U, &l4, &r4), HT_OK);
+    for (uint16_t i = 0; i < n_hs; ++i) {
+        ht_stats_free(&tree.memory, held_stats[i]);
+    }
+
+    /* Deactivating when 0 active leaves remain returns HT_ERR_OUT_OF_STATS */
+    while (tree.n_active_leaves > 0U) {
+        HT_ASSERT_EQ(ht_tree_deactivate_least_promising_leaf(&tree), HT_OK);
+    }
+    HT_ASSERT_EQ(ht_tree_deactivate_least_promising_leaf(&tree), HT_ERR_OUT_OF_STATS);
+    HT_ASSERT_EQ(ht_tree_deactivate_least_promising_leaf(NULL), HT_ERR_OUT_OF_STATS);
+
+    /* 8. HAT classification & HAT-R regression learning across categorical/numeric splits
+     *    with missing values (NaN and invalid category) + leaf reactivation/deactivation edge guards */
+    HT_ASSERT_EQ(ht_tree_deactivate_leaf(NULL, 0U), HT_ERR_INVALID_ARG);
+    HT_ASSERT_EQ(ht_tree_deactivate_leaf(&tree, HT_INVALID_IDX), HT_ERR_INVALID_ARG);
+    HT_ASSERT_EQ(ht_tree_reactivate_leaf(NULL, 0U), HT_ERR_INVALID_ARG);
+    HT_ASSERT_EQ(ht_tree_reactivate_leaf(&tree, HT_INVALID_IDX), HT_ERR_INVALID_ARG);
+    HT_ASSERT_EQ(ht_tree_free_subtree(NULL, 0U), HT_ERR_INVALID_ARG);
+    HT_ASSERT_EQ(ht_tree_free_subtree(&tree, HT_INVALID_IDX), HT_ERR_INVALID_ARG);
+
+    ht_default_hat_params(&p, 2U, 2U);
+    p.feature_types[0] = HT_FEAT_NUMERIC;
+    p.feature_types[1] = HT_FEAT_CATEGORICAL;
+    p.bootstrap_sampling = false;
+    HT_ASSERT_EQ(ht_adwin_pool_init(&ad_pool), HT_OK);
+    HT_ASSERT_EQ(ht_tree_init_hat(&tree, &p, &ad_pool), HT_OK);
+    HT_ASSERT_EQ(ht_tree_apply_split(&tree, 0U, &c0, 0U, &l1, &r1), HT_OK);
+    HT_ASSERT_EQ(ht_tree_apply_split(&tree, r1, &c1, 1U, &l2, &r2), HT_OK);
+    x[0].num = HT_NAN_VAL; x[1].cat = -1;
+    HT_ASSERT_EQ(ht_tree_learn_one(&tree, x, 0U, HT_CONST(1.0)), HT_OK);
+    x[0].num = HT_CONST(8.0); x[1].cat = 1;
+    HT_ASSERT_EQ(ht_tree_learn_one(&tree, x, 1U, HT_CONST(1.0)), HT_OK);
+    x[0].num = HT_CONST(8.0); x[1].cat = 0;
+    HT_ASSERT_EQ(ht_tree_learn_one(&tree, x, 0U, HT_CONST(1.0)), HT_OK);
+    x[0].num = HT_CONST(8.0); x[1].cat = HT_MAX_CATEGORIES;
+    HT_ASSERT_EQ(ht_tree_learn_one(&tree, x, 1U, HT_CONST(1.0)), HT_OK);
+
+#ifndef HT_CLASSIF_ONLY
+    ht_default_hat_reg_params(&rp, 2U);
+    rp.feature_types[0] = HT_FEAT_NUMERIC;
+    rp.feature_types[1] = HT_FEAT_CATEGORICAL;
+    rp.bootstrap_sampling = false;
+    HT_ASSERT_EQ(ht_adwin_pool_init(&ad_pool), HT_OK);
+    HT_ASSERT_EQ(ht_tree_init_hat(&tree, &rp, &ad_pool), HT_OK);
+    HT_ASSERT_EQ(ht_tree_apply_split(&tree, 0U, &c0, 0U, &l1, &r1), HT_OK);
+    HT_ASSERT_EQ(ht_tree_apply_split(&tree, r1, &c1, 1U, &l2, &r2), HT_OK);
+    x[0].num = HT_NAN_VAL; x[1].cat = -1;
+    HT_ASSERT_EQ(ht_tree_learn_one_reg(&tree, x, HT_CONST(10.0), HT_CONST(1.0)), HT_OK);
+    x[0].num = HT_CONST(8.0); x[1].cat = 1;
+    HT_ASSERT_EQ(ht_tree_learn_one_reg(&tree, x, HT_CONST(20.0), HT_CONST(1.0)), HT_OK);
+    x[0].num = HT_CONST(8.0); x[1].cat = 0;
+    HT_ASSERT_EQ(ht_tree_learn_one_reg(&tree, x, HT_CONST(30.0), HT_CONST(1.0)), HT_OK);
+    x[0].num = HT_CONST(8.0); x[1].cat = HT_MAX_CATEGORIES;
+    HT_ASSERT_EQ(ht_tree_learn_one_reg(&tree, x, HT_CONST(40.0), HT_CONST(1.0)), HT_OK);
+#endif
+}
+
 /* ========================================================================= */
 /* --- Test Runner Entry Point --------------------------------------------- */
 /* ========================================================================= */
@@ -1391,4 +1660,5 @@ void test_tree_run(void) {
 #ifndef HT_CLASSIF_ONLY
     HT_RUN_TEST(test_tree_high_amplitude_regression_long_stream_splits);
 #endif
+    HT_RUN_TEST(test_tree_comprehensive_edge_and_error_branches);
 }

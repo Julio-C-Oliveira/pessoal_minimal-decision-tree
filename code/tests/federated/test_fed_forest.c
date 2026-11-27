@@ -221,10 +221,255 @@ static void test_fed_forest_regression_and_drift_downweighting(void) {
 #endif
 }
 
+static void test_fed_proto_corrupt_frames_and_fixed_flag(void) {
+    HT_ASSERT_EQ(ht_fed_crc32(NULL, 10U), 0U);
+
+    uint8_t payload[8] = {1, 2, 3, 4, 5, 6, 7, 8};
+    uint8_t wire[128];
+    size_t req = 0, w = 0;
+    uint16_t flags = ht_fed_make_flags(HT_TASK_CLASSIFICATION);
+
+    /* Query size & buffer-too-small paths */
+    HT_ASSERT_EQ(ht_fed_write_frame(NULL, 0U, HT_FED_MSG_FOREST_CLIENT_TREE, flags, 1U, 1U, 0U, payload, 8U, &req), HT_OK);
+    HT_ASSERT_EQ(req, sizeof(ht_fed_header_t) + 8U);
+    HT_ASSERT_EQ(ht_fed_write_frame(wire, 8U, HT_FED_MSG_FOREST_CLIENT_TREE, flags, 1U, 1U, 0U, payload, 8U, &w), HT_ERR_BUFFER_TOO_SMALL);
+    HT_ASSERT_EQ(ht_fed_finalize_frame(NULL, 0U, HT_FED_MSG_FOREST_CLIENT_TREE, flags, 1U, 1U, 0U, 8U, &req), HT_OK);
+    HT_ASSERT_EQ(ht_fed_finalize_frame(wire, 8U, HT_FED_MSG_FOREST_CLIENT_TREE, flags, 1U, 1U, 0U, 8U, &w), HT_ERR_BUFFER_TOO_SMALL);
+    HT_ASSERT_EQ(ht_fed_write_frame(wire, sizeof(wire), HT_FED_MSG_FOREST_CLIENT_TREE, flags, 1U, 1U, 0U, payload, 8U, &w), HT_OK);
+
+    ht_fed_header_t hdr;
+    const uint8_t *pl = NULL;
+    HT_ASSERT_EQ(ht_fed_parse_frame(NULL, w, &hdr, &pl), HT_ERR_INVALID_ARG);
+    HT_ASSERT_EQ(ht_fed_parse_frame(wire, 4U, &hdr, &pl), HT_ERR_CORRUPT_IMAGE);
+
+    /* Corrupt magic */
+    uint8_t bad[128];
+    memcpy(bad, wire, w);
+    bad[0] ^= 0xFFU;
+    HT_ASSERT_EQ(ht_fed_parse_frame(bad, w, &hdr, &pl), HT_ERR_CORRUPT_IMAGE);
+
+    /* Corrupt protocol version */
+    memcpy(bad, wire, w);
+    ht_fed_header_t ch;
+    memcpy(&ch, bad, sizeof(ch));
+    ch.proto_version = 99U;
+    memcpy(bad, &ch, sizeof(ch));
+    HT_ASSERT_EQ(ht_fed_parse_frame(bad, w, &hdr, &pl), HT_ERR_CORRUPT_IMAGE);
+
+    /* Cross-precision flag mismatch (flip HT_FED_FLAG_FIXED) */
+    memcpy(bad, wire, w);
+    memcpy(&ch, bad, sizeof(ch));
+    ch.flags ^= HT_FED_FLAG_FIXED;
+    memcpy(bad, &ch, sizeof(ch));
+    HT_ASSERT_EQ(ht_fed_parse_frame(bad, w, &hdr, &pl), HT_ERR_CORRUPT_IMAGE);
+
+    /* Truncated payload relative to payload_len */
+    HT_ASSERT_EQ(ht_fed_parse_frame(wire, w - 2U, &hdr, &pl), HT_ERR_CORRUPT_IMAGE);
+
+    /* Bit-flip CRC failure */
+    memcpy(bad, wire, w);
+    bad[sizeof(ht_fed_header_t)] ^= 0x01U;
+    HT_ASSERT_EQ(ht_fed_parse_frame(bad, w, &hdr, &pl), HT_ERR_CORRUPT_IMAGE);
+}
+
+static void test_fed_forest_policies_adwin_and_error_paths(void) {
+    /* NULL / default guards */
+    ht_fed_forest_default_client_config(NULL, 1U, NULL);
+    ht_fed_forest_client_cfg_t ccfg;
+    ht_fed_forest_default_client_config(&ccfg, 1U, NULL); /* exercises default tree_params branch */
+    ht_fed_forest_default_server_config(NULL, HT_TASK_CLASSIFICATION);
+    HT_ASSERT_EQ(ht_fed_forest_client_init(NULL, &ccfg), HT_ERR_INVALID_ARG);
+    HT_ASSERT_EQ(ht_fed_forest_client_set_adwin_pool(NULL, NULL), HT_ERR_INVALID_ARG);
+    HT_ASSERT_EQ(ht_fed_forest_server_init(NULL, NULL), HT_ERR_INVALID_ARG);
+    ht_fed_forest_server_advance_round(NULL);
+
+    static ht_fed_forest_client_t cli;
+    static ht_adwin_pool_t adwin_pool;
+    HT_ASSERT_EQ(ht_adwin_pool_init(&adwin_pool), HT_OK);
+    HT_ASSERT_EQ(ht_fed_forest_client_init(&cli, &ccfg), HT_OK);
+    HT_ASSERT_EQ(ht_fed_forest_client_set_adwin_pool(&cli, &adwin_pool), HT_OK);
+
+    /* Predict/learn NULL guards */
+    ht_float_t probas[HT_MAX_CLASSES];
+    ht_value_t x[HT_MAX_FEATURES];
+    memset(x, 0, sizeof(x));
+    HT_ASSERT_EQ(ht_fed_forest_client_predict_proba(NULL, x, probas), HT_ERR_INVALID_ARG);
+    HT_ASSERT_EQ(ht_fed_forest_client_predict(NULL, x), 0U);
+    HT_ASSERT_EQ(ht_fed_forest_client_learn_one(NULL, x, 0U, HT_CONST(1.0)), HT_ERR_INVALID_ARG);
+    HT_ASSERT_FLOAT_EQ(ht_fed_forest_client_predict_reg(NULL, x), HT_CONST(0.0));
+    HT_ASSERT_EQ(ht_fed_forest_client_learn_one_reg(NULL, x, HT_CONST(1.0), HT_CONST(1.0)), HT_ERR_INVALID_ARG);
+
+    /* Export/import/ingest error paths */
+    static uint8_t wire[32768];
+    size_t w = 0;
+    HT_ASSERT_EQ(ht_fed_forest_client_export_update(NULL, wire, sizeof(wire), &w), HT_ERR_INVALID_ARG);
+    HT_ASSERT_EQ(ht_fed_forest_client_export_update(&cli, wire, 8U, &w), HT_ERR_BUFFER_TOO_SMALL);
+    HT_ASSERT_EQ(ht_fed_forest_client_import_forest(NULL, wire, 0U), HT_ERR_INVALID_ARG);
+    HT_ASSERT_EQ(ht_fed_forest_client_import_forest(&cli, wire, 4U), HT_ERR_CORRUPT_IMAGE);
+
+    /* Server policies: ALL and ROUND_ROBIN + table saturation beyond HT_FED_SERVER_MAX_TREES */
+    static ht_fed_forest_server_t srv;
+    ht_fed_forest_server_cfg_t scfg;
+    ht_fed_forest_default_server_config(&scfg, HT_TASK_CLASSIFICATION);
+    scfg.agg_policy = HT_FED_FOREST_AGG_ROUND_ROBIN;
+    scfg.max_forest_size = 2U;
+    HT_ASSERT_EQ(ht_fed_forest_server_init(&srv, &scfg), HT_OK);
+    HT_ASSERT_EQ(ht_fed_forest_server_ingest(NULL, wire, 0U), HT_ERR_INVALID_ARG);
+    HT_ASSERT_EQ(ht_fed_forest_server_ingest(&srv, wire, 4U), HT_ERR_CORRUPT_IMAGE);
+
+    for (uint16_t cid = 1U; cid <= (uint16_t)(HT_FED_SERVER_MAX_TREES + 2U); ++cid) {
+        cli.client_id = cid;
+        x[0].num = HT_FROM_UINT(cid);
+        HT_ASSERT_EQ(ht_fed_forest_client_learn_one(&cli, x, (uint8_t)(cid % 2U), HT_CONST(1.0)), HT_OK);
+        HT_ASSERT_EQ(ht_fed_forest_client_export_update(&cli, wire, sizeof(wire), &w), HT_OK);
+        HT_ASSERT_EQ(ht_fed_forest_server_ingest(&srv, wire, w), HT_OK);
+    }
+    HT_ASSERT_EQ(srv.n_entries, HT_FED_SERVER_MAX_TREES);
+
+    /* Round-robin bundle build, import, and post-import classification learning (updates peer faded error) */
+    HT_ASSERT_EQ(ht_fed_forest_server_build_forest(&srv, 1U, true, wire, sizeof(wire), &w), HT_OK);
+    HT_ASSERT_EQ(ht_fed_forest_client_import_forest(&cli, wire, w), HT_OK);
+    HT_ASSERT_EQ(cli.n_peers, 2U);
+    HT_ASSERT_EQ(ht_fed_forest_client_learn_one(&cli, x, 0U, HT_CONST(1.0)), HT_OK);
+    ht_fed_forest_server_advance_round(&srv);
+
+    /* Policy ALL */
+    srv.cfg.agg_policy = HT_FED_FOREST_AGG_ALL;
+    HT_ASSERT_EQ(ht_fed_forest_server_build_forest(&srv, 1U, false, wire, sizeof(wire), &w), HT_OK);
+    HT_ASSERT_EQ(ht_fed_forest_client_import_forest(&cli, wire, w), HT_OK);
+    HT_ASSERT_EQ(cli.n_peers, 2U);
+}
+
+#ifndef HT_CLASSIF_ONLY
+static void test_fed_forest_high_amplitude_regression(void) {
+    /* Reproduces Appliances/NYC Taxi high-amplitude Fed-Forest regression in Q16.16 */
+    static ht_fed_forest_client_t c0, c1;
+    static ht_fed_forest_server_t srv;
+    static uint8_t wire[32768];
+
+    ht_config_params_t tp;
+    ht_default_reg_params(&tp, 2);
+    tp.grace_period = 25U;
+    tp.delta = HT_CONST(1e-2);
+    tp.leaf_prediction = HT_LEAF_MEAN;
+
+    ht_fed_forest_client_cfg_t cfg0, cfg1;
+    ht_fed_forest_default_client_config(&cfg0, 1U, &tp);
+    ht_fed_forest_default_client_config(&cfg1, 2U, &tp);
+    HT_ASSERT_EQ(ht_fed_forest_client_init(&c0, &cfg0), HT_OK);
+    HT_ASSERT_EQ(ht_fed_forest_client_init(&c1, &cfg1), HT_OK);
+
+    ht_fed_forest_server_cfg_t scfg;
+    ht_fed_forest_default_server_config(&scfg, HT_TASK_REGRESSION);
+    scfg.agg_policy = HT_FED_FOREST_AGG_TOP_M;
+    HT_ASSERT_EQ(ht_fed_forest_server_init(&srv, &scfg), HT_OK);
+
+    ht_value_t x[HT_MAX_FEATURES];
+    memset(x, 0, sizeof(x));
+    for (int i = 0; i < 120; ++i) {
+        x[0].num = HT_FROM_INT(i % 10);
+        HT_ASSERT_EQ(ht_fed_forest_client_learn_one_reg(&c0, x, HT_CONST(300.0), HT_CONST(1.0)), HT_OK);
+        HT_ASSERT_EQ(ht_fed_forest_client_learn_one_reg(&c1, x, HT_CONST(3200.0), HT_CONST(1.0)), HT_OK);
+    }
+
+    size_t w = 0;
+    HT_ASSERT_EQ(ht_fed_forest_client_export_update(&c1, wire, sizeof(wire), &w), HT_OK);
+    HT_ASSERT_EQ(ht_fed_forest_server_ingest(&srv, wire, w), HT_OK);
+    HT_ASSERT_EQ(ht_fed_forest_server_build_forest(&srv, 1U, true, wire, sizeof(wire), &w), HT_OK);
+    HT_ASSERT_EQ(ht_fed_forest_client_import_forest(&c0, wire, w), HT_OK);
+
+    for (int i = 0; i < 30; ++i) {
+        x[0].num = HT_FROM_INT(i % 10);
+        HT_ASSERT_EQ(ht_fed_forest_client_learn_one_reg(&c0, x, HT_CONST(300.0), HT_CONST(1.0)), HT_OK);
+    }
+    ht_float_t pred = ht_fed_forest_client_predict_reg(&c0, x);
+    HT_ASSERT(HT_ISFINITE(pred));
+    HT_ASSERT(pred > HT_CONST(200.0) && pred < HT_CONST(600.0));
+}
+#endif
+
+static void test_fed_forest_wire_corruption_and_server_clamps(void) {
+    static ht_fed_forest_client_t cli;
+    static ht_fed_forest_server_t srv;
+    static uint8_t wire[32768];
+
+    ht_config_params_t tp;
+    ht_default_params(&tp, 2U, 2U);
+    ht_fed_forest_client_cfg_t ccfg;
+    ht_fed_forest_default_client_config(&ccfg, 7U, &tp);
+    HT_ASSERT_EQ(ht_fed_forest_client_init(&cli, &ccfg), HT_OK);
+
+    /* Server clamping max_forest_size == 0 and > HT_FED_FOREST_MAX_TREES */
+    ht_fed_forest_server_cfg_t scfg;
+    ht_fed_forest_default_server_config(&scfg, HT_TASK_CLASSIFICATION);
+    scfg.max_forest_size = 0U;
+    HT_ASSERT_EQ(ht_fed_forest_server_init(&srv, &scfg), HT_OK);
+    HT_ASSERT_EQ(srv.cfg.max_forest_size, (uint8_t)HT_FED_FOREST_MAX_TREES);
+
+    /* Export query-size (NULL) + ingest twice for SAME client_id (exercises in-place slot update) */
+    size_t req = 0, w = 0;
+    HT_ASSERT_EQ(ht_fed_forest_client_export_update(&cli, NULL, 0U, &req), HT_OK);
+    HT_ASSERT(req > sizeof(ht_fed_header_t));
+    HT_ASSERT_EQ(ht_fed_forest_client_export_update(&cli, wire, sizeof(wire), &w), HT_OK);
+    HT_ASSERT_EQ(w, req);
+    HT_ASSERT_EQ(ht_fed_forest_server_ingest(&srv, wire, w), HT_OK);
+    HT_ASSERT_EQ(srv.n_entries, 1U);
+    HT_ASSERT_EQ(ht_fed_forest_server_ingest(&srv, wire, w), HT_OK);
+    HT_ASSERT_EQ(srv.n_entries, 1U);
+
+    /* Build forest query-size (NULL), buffer-too-small, and NULL server guard */
+    HT_ASSERT_EQ(ht_fed_forest_server_build_forest(NULL, 7U, false, wire, sizeof(wire), &w), HT_ERR_INVALID_ARG);
+    HT_ASSERT_EQ(ht_fed_forest_server_build_forest(&srv, 7U, false, NULL, 0U, &req), HT_OK);
+    HT_ASSERT_EQ(ht_fed_forest_server_build_forest(&srv, 7U, false, wire, 8U, &w), HT_ERR_BUFFER_TOO_SMALL);
+
+    /* Valid HFED frame with wrong msg_type / task mismatch / truncated payload */
+    uint8_t junk[8] = {0};
+    uint16_t cls_flags = ht_fed_make_flags(HT_TASK_CLASSIFICATION);
+    uint16_t reg_flags = ht_fed_make_flags(HT_TASK_REGRESSION);
+
+    HT_ASSERT_EQ(ht_fed_write_frame(wire, sizeof(wire), HT_FED_MSG_VFDT_SPLIT_PROPOSAL, cls_flags, 7U, 1U, 0U, junk, 8U, &w), HT_OK);
+    HT_ASSERT_EQ(ht_fed_forest_server_ingest(&srv, wire, w), HT_ERR_CORRUPT_IMAGE);
+    HT_ASSERT_EQ(ht_fed_forest_client_import_forest(&cli, wire, w), HT_ERR_CORRUPT_IMAGE);
+
+    /* Task mismatch (reg frame into classif server/client) */
+    HT_ASSERT_EQ(ht_fed_write_frame(wire, sizeof(wire), HT_FED_MSG_FOREST_CLIENT_TREE, reg_flags, 7U, 1U, 0U, junk, 8U, &w), HT_OK);
+    HT_ASSERT_EQ(ht_fed_forest_server_ingest(&srv, wire, w), HT_ERR_CORRUPT_IMAGE);
+    HT_ASSERT_EQ(ht_fed_write_frame(wire, sizeof(wire), HT_FED_MSG_FOREST_SERVER_BUNDLE, reg_flags, 7U, 1U, 0U, junk, 8U, &w), HT_OK);
+    HT_ASSERT_EQ(ht_fed_forest_client_import_forest(&cli, wire, w), HT_ERR_CORRUPT_IMAGE);
+
+    /* Truncated bundle header / invalid n_trees inside bundle */
+    HT_ASSERT_EQ(ht_fed_write_frame(wire, sizeof(wire), HT_FED_MSG_FOREST_SERVER_BUNDLE, cls_flags, 7U, 1U, 0U, junk, 2U, &w), HT_OK);
+    HT_ASSERT_EQ(ht_fed_forest_client_import_forest(&cli, wire, w), HT_ERR_CORRUPT_IMAGE);
+    HT_ASSERT_EQ(ht_fed_write_frame(wire, sizeof(wire), HT_FED_MSG_FOREST_CLIENT_TREE, cls_flags, 7U, 1U, 0U, junk, 2U, &w), HT_OK);
+    HT_ASSERT_EQ(ht_fed_forest_server_ingest(&srv, wire, w), HT_ERR_CORRUPT_IMAGE);
+
+    /* TOP_M tie-breaking (identical reported_error, differing train_weight) & max_forest_size > MAX clamp */
+    scfg.max_forest_size = (uint8_t)(HT_FED_FOREST_MAX_TREES + 4U);
+    scfg.agg_policy = HT_FED_FOREST_AGG_TOP_M;
+    HT_ASSERT_EQ(ht_fed_forest_server_init(&srv, &scfg), HT_OK);
+    HT_ASSERT_EQ(srv.cfg.max_forest_size, (uint8_t)HT_FED_FOREST_MAX_TREES);
+    for (uint16_t cid = 1U; cid <= 3U; ++cid) {
+        cli.client_id = cid;
+        cli.member_faded_error[0] = HT_CONST(0.1);
+        cli.local_tree.train_weight_seen = HT_FROM_UINT(cid * 10U);
+        HT_ASSERT_EQ(ht_fed_forest_client_export_update(&cli, wire, sizeof(wire), &w), HT_OK);
+        HT_ASSERT_EQ(ht_fed_forest_server_ingest(&srv, wire, w), HT_OK);
+    }
+    HT_ASSERT_EQ(ht_fed_forest_server_build_forest(&srv, 99U, false, wire, sizeof(wire), &w), HT_OK);
+    HT_ASSERT_EQ(ht_fed_forest_client_import_forest(&cli, wire, w), HT_OK);
+    HT_ASSERT_EQ(cli.n_peers, 3U);
+}
+
 void test_fed_forest_run(void) {
     HT_TEST_SUITE_BEGIN("Nivel 1, 2 & 3: Modo 1 Floresta Federada (ht_fed_forest)");
     HT_RUN_TEST(test_fed_proto_framing_and_crc32);
     HT_RUN_TEST(test_fed_forest_server_policies_and_exclude_self);
     HT_RUN_TEST(test_fed_forest_non_iid_collaboration_gain);
     HT_RUN_TEST(test_fed_forest_regression_and_drift_downweighting);
+    HT_RUN_TEST(test_fed_proto_corrupt_frames_and_fixed_flag);
+    HT_RUN_TEST(test_fed_forest_policies_adwin_and_error_paths);
+#ifndef HT_CLASSIF_ONLY
+    HT_RUN_TEST(test_fed_forest_high_amplitude_regression);
+#endif
+    HT_RUN_TEST(test_fed_forest_wire_corruption_and_server_clamps);
 }
