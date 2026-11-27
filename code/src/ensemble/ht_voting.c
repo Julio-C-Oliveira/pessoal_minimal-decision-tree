@@ -26,10 +26,37 @@ void ht_voting_update_error_reg(ht_float_t *faded_mse,
     if (faded_mse == NULL || HT_ISNAN(y_pred) || HT_ISNAN(y_true)) {
         return;
     }
+#ifdef HT_USE_FIXED_POINT
+    /* Clamp squared error and faded MSE strictly below HT_INFINITY (32000.0 in Q16.16)
+     * so high-amplitude targets (Bikes, Appliances, NYC Taxi) never overflow into
+     * +HT_INFINITY and zero out member weights in ht_voting_member_weight. */
+    int64_t diff = (int64_t)y_true - (int64_t)y_pred;
+    uint64_t ad = (diff < 0) ? (uint64_t)(-diff) : (uint64_t)diff;
+    uint64_t sq_q16 = (ad * ad + 32768ULL) >> 16;
+    const uint64_t max_mse_q16 = (uint64_t)HT_CONST(32000.0);
+    if (sq_q16 > max_mse_q16) {
+        sq_q16 = max_mse_q16;
+    }
+    int64_t d_q16 = (int64_t)decay;
+    if (d_q16 < 0) d_q16 = 0;
+    if (d_q16 > (int64_t)HT_FIXED_ONE) d_q16 = (int64_t)HT_FIXED_ONE;
+    uint64_t one_m_d_q16 = (uint64_t)((int64_t)HT_FIXED_ONE - d_q16);
+    uint64_t prev = (*faded_mse > 0) ? (uint64_t)(uint32_t)*faded_mse : 0ULL;
+    if (prev > max_mse_q16) {
+        prev = max_mse_q16;
+    }
+    uint64_t next = ((prev * (uint64_t)d_q16 + 32768ULL) >> 16) +
+                    ((sq_q16 * one_m_d_q16 + 32768ULL) >> 16);
+    if (next > max_mse_q16) {
+        next = max_mse_q16;
+    }
+    *faded_mse = (ht_float_t)next;
+#else
     ht_float_t diff = HT_SUB(y_true, y_pred);
     ht_float_t sq = HT_MUL(diff, diff);
     ht_float_t one_m_decay = HT_SUB(HT_CONST(1.0), decay);
     *faded_mse = HT_ADD(HT_MUL(decay, *faded_mse), HT_MUL(one_m_decay, sq));
+#endif
 }
 
 ht_float_t ht_voting_member_weight(ht_voting_strategy_t strategy,
@@ -38,11 +65,35 @@ ht_float_t ht_voting_member_weight(ht_voting_strategy_t strategy,
     if (strategy == HT_VOTE_UNIFORM) {
         return HT_CONST(1.0);
     }
+#ifdef HT_USE_FIXED_POINT
+    uint64_t e = (faded_error > 0) ? (uint64_t)(uint32_t)faded_error : 0ULL;
+    if (e > (uint64_t)HT_CONST(32000.0)) {
+        e = (uint64_t)HT_CONST(32000.0);
+    }
+    if (task_type == HT_TASK_REGRESSION) {
+        /* 1 / (MSE + eps) in Q16.16 with strict positive floor >= 1 ULP so valid
+         * high-amplitude regression models never yield zero total weight. */
+        uint64_t denom = e + (uint64_t)HT_VOTE_EPS;
+        if (denom < 1ULL) denom = 1ULL;
+        uint64_t w = ((uint64_t)HT_FIXED_ONE << 16) / denom;
+        if (w < 1ULL) w = 1ULL;
+        if (w > (uint64_t)HT_CONST(16384.0)) w = (uint64_t)HT_CONST(16384.0);
+        return (ht_float_t)w;
+    }
+    uint64_t e2_q16 = (e * e + 32768ULL) >> 16;
+    uint64_t denom = e2_q16 + (uint64_t)HT_VOTE_EPS;
+    if (denom < 1ULL) denom = 1ULL;
+    uint64_t w = ((uint64_t)HT_FIXED_ONE << 16) / denom;
+    if (w < 1ULL) w = 1ULL;
+    if (w > (uint64_t)HT_CONST(16384.0)) w = (uint64_t)HT_CONST(16384.0);
+    return (ht_float_t)w;
+#else
     ht_float_t e = (faded_error > HT_CONST(0.0)) ? faded_error : HT_CONST(0.0);
     if (task_type == HT_TASK_REGRESSION) {
         return HT_DIV(HT_CONST(1.0), HT_ADD(e, HT_VOTE_EPS));
     }
     return HT_DIV(HT_CONST(1.0), HT_ADD(HT_MUL(e, e), HT_VOTE_EPS));
+#endif
 }
 
 ht_status_t ht_voting_combine_proba(uint16_t n_members,

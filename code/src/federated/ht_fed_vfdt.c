@@ -684,7 +684,19 @@ ht_status_t ht_fed_vfdt_server_ingest(ht_fed_vfdt_server_t *server,
             ht_float_t client_local_w = HT_CONST(0.0);
             if (is_reg) {
                 ht_var_stat_t delta_reg = ht_var_subtract(&item.reg_stats, &gnode->reg_stats);
+#ifdef HT_USE_FIXED_POINT
+                if (delta_reg.count <= HT_CONST(0.0) && incoming_stats.last_split_attempt_at > HT_CONST(0.0)) {
+                    /* Client reg_stats.count was halved by Q26.6 Block-Rescaling on high-variance streams */
+                    delta_reg = item.reg_stats;
+                    client_local_w = incoming_stats.last_split_attempt_at;
+                } else {
+                    client_local_w = (incoming_stats.last_split_attempt_at > delta_reg.count)
+                        ? incoming_stats.last_split_attempt_at
+                        : delta_reg.count;
+                }
+#else
                 client_local_w = delta_reg.count;
+#endif
                 server->merge_leaf_delta[s_idx].reg_stats =
                     ht_var_combine(&server->merge_leaf_delta[s_idx].reg_stats, &delta_reg);
             } else {
@@ -1071,6 +1083,15 @@ static ht_status_t ht_fed_vfdt_end_round_stats_merge(ht_fed_vfdt_server_t *serve
 
         if (is_reg) {
             delta_w = server->merge_leaf_delta[s_idx].reg_stats.count;
+#ifdef HT_USE_FIXED_POINT
+            if (server->merge_sgd_weight_sum[s_idx] > delta_w) {
+                delta_w = server->merge_sgd_weight_sum[s_idx];
+            }
+            ht_leaf_stats_t *st_ptr = ht_stats_get(&server->global_tree.memory, s_idx);
+            if (st_ptr != NULL) {
+                st_ptr->last_split_attempt_at = delta_w;
+            }
+#endif
             if (delta_w < HT_FROM_UINT(server->cfg.tree_params.grace_period)) {
                 continue;
             }
