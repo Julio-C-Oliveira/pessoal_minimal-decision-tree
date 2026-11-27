@@ -298,10 +298,12 @@ def compile_fed_runner(
     n_features: int,
     n_classes: int,
     reg_slots: int,
+    fixed_point: bool = False,
 ) -> Path:
     build_dir = repo_root / "code" / "build"
     build_dir.mkdir(parents=True, exist_ok=True)
-    bin_path = build_dir / f"fed_c_runner_{dataset_id}"
+    suffix = "_q16" if fixed_point else ""
+    bin_path = build_dir / f"fed_c_runner_{dataset_id}{suffix}"
 
     src_files: List[str] = []
     for sub in ("core", "ensemble", "federated"):
@@ -335,6 +337,9 @@ def compile_fed_runner(
     else:
         defines.append("-DHT_MAX_CLASSES=2")
         defines.append(f"-DHT_REG_NUM_SLOTS={reg_slots}")
+
+    if fixed_point:
+        defines.append("-DHT_USE_FIXED_POINT")
 
     cmd = [
         "gcc",
@@ -728,6 +733,7 @@ def main() -> int:
     parser.add_argument("--alpha", type=float, default=0.3)
     parser.add_argument("--quorum", type=int, default=3)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--fixed-point", action="store_true", help="Compile and run C11 federated benchmark in Q16.16 zero-libm fixed-point mode (-DHT_USE_FIXED_POINT)")
     parser.add_argument("--datasets", type=str, nargs="*", default=None, help="Optional subset of dataset IDs")
     args = parser.parse_args()
 
@@ -741,20 +747,24 @@ def main() -> int:
         print("No matching datasets selected.", file=sys.stderr)
         return 1
 
+    precision_label = "Q16.16 Fixed-Point (-DHT_USE_FIXED_POINT)" if args.fixed_point else "IEEE 754 float32"
+
     print("=" * 84)
     print(" KANSHO FEDERATED LEARNING BENCHMARK SUITE (8 REAL DATASETS x Non-IID & IID)")
+    print(f" Precision: {precision_label}")
     print(f" K={args.n_clients} clients | R={args.rounds} rounds | Dirichlet alpha={args.alpha} | Tier 8 (<=100 KB)")
     print("=" * 84)
 
     t_start = time.time()
     all_results: Dict[str, Any] = {
         "experiment": {
+            "precision": "q16_16" if args.fixed_point else "float32",
             "n_clients": args.n_clients,
             "rounds": args.rounds,
             "alpha": args.alpha,
             "quorum": args.quorum,
             "seed": args.seed,
-            "profile": "MCU Tier 8 (HT_MAX_ACTIVE_LEAVES=8, HT_MAX_NODES=128, M=5)",
+            "profile": f"MCU Tier 8 (HT_MAX_ACTIVE_LEAVES=8, HT_MAX_NODES=128, M=5, {precision_label})",
         },
         "datasets": {},
     }
@@ -779,6 +789,7 @@ def main() -> int:
                 n_features=meta["n_features"],
                 n_classes=meta["n_classes"],
                 reg_slots=reg_slots,
+                fixed_point=args.fixed_point,
             )
 
             # Centralized Oracle (runs once per dataset)

@@ -14,7 +14,7 @@
 | Dataset | Hiperparâmetros (Tier 4) | Treino | Teste | Acurácia Holdout | Precisão Macro | Recall Macro | F1-Score Macro | Acurácia Preq. | Topologia (Nós) |
 | :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
 | **SEA** | `grace=400`, `delta=0.0001`, `tau=0.15`, `crit=info_gain`, `leaf=nba` | 14,000 | 6,000 | **96.82%** | 96.79% | 95.87% | **96.31%** | 96.56% | 21 nós (4 folhas) |
-| **Electricity** | `grace=100`, `delta=1e-07`, `tau=0.05`, `crit=info_gain`, `leaf=nba` | 31,718 | 13,594 | **60.36%** | 60.12% | 58.46% | **57.61%** | 61.44% | 41 nós (4 folhas) |
+| **Electricity** | `grace=100`, `delta=1e-07`, `tau=0.05`, `crit=info_gain`, `leaf=nba` | 31,718 | 13,594 | **64.26%** | 63.85% | 63.50% | **63.54%** | 64.20% | 17 nós (4 folhas) |
 | **Forest Covertype** | `grace=50`, `delta=0.001`, `tau=0.1`, `crit=gini`, `leaf=nba` | 17,500 | 7,500 | **64.44%** | 65.47% | 61.04% | **62.08%** | 59.24% | 49 nós (4 folhas) |
 | **Airlines** | `grace=50`, `delta=0.001`, `tau=0.1`, `crit=gini`, `leaf=nba` | 17,500 | 7,500 | **77.19%** | 67.14% | 56.63% | **56.64%** | 76.16% | 33 nós (4 folhas) |
 
@@ -42,7 +42,7 @@
 | Dataset | Tarefa | Latência Média | Latência p95 | Latência p99 | Throughput (Vazão) | Model Footprint | Consumo RAM (SRAM / Heap) | FLOPs / Amostra |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
 | **SEA** | Classificação | **8.53 µs** | 24.16 µs | 43.40 µs | **117,233 amostras/s** | 494 B (21 nós) | 48.5 KB (.bss) / **0 B Heap** | **69 FLOPs** |
-| **Electricity** | Classificação | **16.95 µs** | 40.78 µs | 82.34 µs | **58,997 amostras/s** | 934 B (41 nós) | 48.5 KB (.bss) / **0 B Heap** | **149 FLOPs** |
+| **Electricity** | Classificação | **26.14 µs** | 52.38 µs | 151.04 µs | **38,256 amostras/s** | 406 B (17 nós) | 48.5 KB (.bss) / **0 B Heap** | **149 FLOPs** |
 | **Forest Covertype** | Classificação | **95.84 µs** | 430.64 µs | 775.60 µs | **10,434 amostras/s** | 1,110 B (49 nós) | 48.5 KB (.bss) / **0 B Heap** | **2250 FLOPs** |
 | **Airlines** | Classificação | **11.51 µs** | 37.20 µs | 89.36 µs | **86,881 amostras/s** | 758 B (33 nós) | 48.5 KB (.bss) / **0 B Heap** | **133 FLOPs** |
 | **Friedman #1** | Regressão | **9.17 µs** | 21.90 µs | 47.72 µs | **109,051 amostras/s** | 626 B (27 nós) | 48.5 KB (.bss) / **0 B Heap** | **138 FLOPs** |
@@ -58,10 +58,10 @@
 
 | Seção / Auditoria | `float32 soft-fp` (`-lm` + `_printf_float`) | `Q16.16 Zero-Libm` (`-DHT_USE_FIXED_POINT`) | Variação |
 | :--- | :---: | :---: | :---: |
-| **Flash (`.text`)** | `66,220 B` (`64.7 KB`) | **`49,200 B` (`48.0 KB`)** | **`-17,020 B` (`-25.7%`)** |
+| **Flash (`.text`)** | `66,220 B` (`64.7 KB`) | **`49,264 B` (`48.1 KB`)** | **`-16,956 B` (`-25.6%`)** |
 | **`.data` (SRAM inicializada)** | `468 B` | **`104 B`** | **`-364 B` (`-77.8%`)** |
 | **`.bss` (SRAM estática)** | `57,000 B` | **`57,000 B`** | `0 B` (idêntico) |
-| **Total (`dec`)** | `123,688 B` | **`106,304 B`** | **`-17,384 B` (`-14.1%`)** |
+| **Total (`dec`)** | `123,688 B` | **`106,368 B`** | **`-17,320 B` (`-14.0%`)** |
 | **Símbolos `soft-fp` / `libm` / `_printf_float`** | Presentes | **0 (PASS via `arm-none-eabi-nm`)** | **100% eliminados** |
 
 ### 4.2 Latência SysTick @ 50 MHz, Speedup e Qualidade Preditiva (8 Datasets)
@@ -69,7 +69,7 @@
 | Dataset | Tarefa | `float32` Média | `Q16.16` Média | **Speedup** | `float32` p99 | `Q16.16` p99 | `float32` Holdout | `Q16.16` Holdout |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
 | **SEA** | Cls | `20.08 µs` | **`8.53 µs`** | **`2.35×`** | `85.62 µs` | **`43.40 µs`** | `97.30%` | `96.82%` |
-| **Electricity** | Cls | `65.57 µs` | **`16.95 µs`** | **`3.87×`** | `374.12 µs` | **`82.34 µs`** | `64.34%` | `60.36%` |
+| **Electricity** | Cls | `65.57 µs` | **`26.14 µs`** | **`2.51×`** | `374.12 µs` | **`151.04 µs`** | `64.34%` | **`64.26%`** |
 | **Forest Covertype** | Cls | `285.41 µs` | **`95.84 µs`** | **`2.98×`** | `1901.28 µs` | **`775.60 µs`** | `64.17%` | **`64.44%`** |
 | **Airlines** | Cls | `21.46 µs` | **`11.51 µs`** | **`1.86×`** | `114.76 µs` | **`89.36 µs`** | `77.19%` | **`77.19%`** |
 | **Friedman #1** | Reg | `22.68 µs` | **`9.17 µs`** | **`2.47×`** | `73.42 µs` | **`47.72 µs`** | `MAE 2.4935` (`R² 0.6044`) | **`MAE 2.3755` (`R² 0.6413`)** |
@@ -85,5 +85,5 @@
 
 2. **Zero Alocação Dinâmica:** Comprovado $\Delta\text{Heap} = 0\text{ bytes}$ durante todo o ciclo de treino online e inferência holdout, garantindo determinismo temporal estrito e ausência de fragmentação de memória.
 
-3. **Eficiência Zero-Libm em Ponto Fixo Q16.16 @ 50 MHz:** Operando com aritmética 100% inteira (zero símbolos `__aeabi_f*`/`__aeabi_d*`, zero `_printf_float`, zero `-lm`, `-25.7%` de Flash), o Cortex-M3 atingiu vazões de **10.434 a 133.690 amostras/s** (`1.86×` a `4.48×` mais rápido que `float32 soft-fp`, média `3.03×`).
+3. **Eficiência Zero-Libm em Ponto Fixo Q16.16 @ 50 MHz:** Operando com aritmética 100% inteira (zero símbolos `__aeabi_f*`/`__aeabi_d*`, zero `_printf_float`, zero `-lm`, `-25.6%` de Flash), o Cortex-M3 atingiu vazões de **10.434 a 133.690 amostras/s** (`1.86×` a `4.48×` mais rápido que `float32 soft-fp`, média `2.86×`).
 

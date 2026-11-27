@@ -29,6 +29,27 @@
 #include <math.h>
 #include <time.h>
 
+static inline ht_float_t fed_from_double(double v) {
+#ifdef HT_USE_FIXED_POINT
+    if (isnan(v)) return HT_NAN_VAL;
+    if (v >= 32767.9999) return INT32_MAX;
+    if (v <= -32767.9999) return -INT32_MAX;
+    double scaled = v * 65536.0;
+    return (ht_float_t)(scaled >= 0.0 ? (scaled + 0.5) : (scaled - 0.5));
+#else
+    return (ht_float_t)v;
+#endif
+}
+
+static inline double fed_to_double(ht_float_t v) {
+#ifdef HT_USE_FIXED_POINT
+    if (HT_ISNAN(v)) return NAN;
+    return (double)v / 65536.0;
+#else
+    return (double)v;
+#endif
+}
+
 #define MAX_SIM_CLIENTS 16
 #define LINE_BUF_SIZE   4096
 #define WIRE_BUF_SIZE   524288
@@ -81,7 +102,7 @@ static void scaler_learn_transform_vec(ht_scaler_t *sc,
                                        ht_value_t x_out[HT_MAX_FEATURES]) {
     for (uint8_t f = 0U; f < n_features; ++f) {
         if (ftypes[f] == HT_FEAT_NUMERIC) {
-            x_out[f].num = ht_scaler_learn_transform_one(sc, f, x_in[f].num, (ht_float_t)1.0);
+            x_out[f].num = ht_scaler_learn_transform_one(sc, f, x_in[f].num, HT_CONST(1.0));
         } else {
             x_out[f] = x_in[f];
         }
@@ -167,7 +188,7 @@ static bool read_csv_row(FILE *fp,
                 x_out[f].cat = (int32_t)v;
             } else {
                 double v = strtod(p, &endp);
-                x_out[f].num = (ht_float_t)v;
+                x_out[f].num = fed_from_double(v);
             }
             if (endp == p) {
                 return false;
@@ -179,7 +200,7 @@ static bool read_csv_row(FILE *fp,
         if (is_reg) {
             double yv = strtod(p, &endp);
             if (endp == p) return false;
-            *y_reg = (ht_float_t)yv;
+            *y_reg = fed_from_double(yv);
         } else {
             long yc = strtol(p, &endp, 10);
             if (endp == p) return false;
@@ -315,8 +336,20 @@ int main(int argc, char **argv) {
         base_params.feature_types[f] = meta.feature_types[f];
     }
     base_params.grace_period = (uint16_t)grace_period;
+#ifdef HT_USE_FIXED_POINT
+    if (delta > 0.0 && delta < 1e-4) {
+        int neg_log10 = (int)(-log10(delta) + 0.5);
+        if (neg_log10 < 1) neg_log10 = 1;
+        if (neg_log10 > 15) neg_log10 = 15;
+        ht_params_set_delta_pow10(&base_params, (uint8_t)neg_log10);
+    } else {
+        base_params.delta = fed_from_double(delta);
+        base_params.delta_neg_log10 = 0U;
+    }
+#else
     base_params.delta = (ht_float_t)delta;
-    base_params.tau = (ht_float_t)tau;
+#endif
+    base_params.tau = fed_from_double(tau);
 
     ht_config_params_t client_params = base_params;
     client_params.grace_period = (uint16_t)client_grace;
@@ -350,7 +383,7 @@ int main(int argc, char **argv) {
 
         ht_value_t x_raw[HT_MAX_FEATURES], x_in[HT_MAX_FEATURES];
         uint8_t yc = 0U;
-        ht_float_t yr = (ht_float_t)0.0;
+        ht_float_t yr = HT_CONST(0.0);
         while (read_csv_row(fp, &meta, is_reg, x_raw, &yc, &yr)) {
             const ht_value_t *xp = x_raw;
             if (use_scaler) {
@@ -359,14 +392,14 @@ int main(int argc, char **argv) {
             }
             if (is_reg) {
                 ht_float_t yp = ht_tree_predict_reg(&g_central_tree, xp);
-                preq_abs_err_sum += fabs((double)yp - (double)yr);
+                preq_abs_err_sum += fabs(fed_to_double(yp) - fed_to_double(yr));
                 preq_total++;
-                ht_tree_learn_one_reg(&g_central_tree, xp, yr, (ht_float_t)1.0);
+                ht_tree_learn_one_reg(&g_central_tree, xp, yr, HT_CONST(1.0));
             } else {
                 uint8_t yp = ht_tree_predict(&g_central_tree, xp);
                 if (yp == yc) preq_correct++;
                 preq_total++;
-                ht_tree_learn_one(&g_central_tree, xp, yc, (ht_float_t)1.0);
+                ht_tree_learn_one(&g_central_tree, xp, yc, HT_CONST(1.0));
             }
         }
         fclose(fp);
@@ -418,7 +451,7 @@ int main(int argc, char **argv) {
                 ht_fed_forest_client_cfg_t ccfg;
                 ht_fed_forest_default_client_config(&ccfg, (uint16_t)(k + 1), &client_params);
                 ccfg.voting = HT_VOTE_WEIGHTED;
-                ccfg.error_decay = (ht_float_t)0.98;
+                ccfg.error_decay = HT_CONST(0.98);
                 if (ht_fed_forest_client_init(&g_ff_clients[k], &ccfg) != HT_OK) return 1;
             }
         } else {
@@ -452,7 +485,7 @@ int main(int argc, char **argv) {
         /* Round-based federated streaming loop */
         ht_value_t x_raw[HT_MAX_FEATURES], x_in[HT_MAX_FEATURES];
         uint8_t yc = 0U;
-        ht_float_t yr = (ht_float_t)0.0;
+        ht_float_t yr = HT_CONST(0.0);
 
         for (int r = 0; r < n_rounds; ++r) {
             for (int k = 0; k < n_clients; ++k) {
@@ -470,33 +503,33 @@ int main(int argc, char **argv) {
 
                     if (strat == STRAT_LOCAL) {
                         if (is_reg) {
-                            preq_abs_err_sum += fabs((double)ht_tree_predict_reg(&g_local_trees[k], xp) - (double)yr);
+                            preq_abs_err_sum += fabs(fed_to_double(ht_tree_predict_reg(&g_local_trees[k], xp)) - fed_to_double(yr));
                             preq_total++;
-                            ht_tree_learn_one_reg(&g_local_trees[k], xp, yr, (ht_float_t)1.0);
+                            ht_tree_learn_one_reg(&g_local_trees[k], xp, yr, HT_CONST(1.0));
                         } else {
                             if (ht_tree_predict(&g_local_trees[k], xp) == yc) preq_correct++;
                             preq_total++;
-                            ht_tree_learn_one(&g_local_trees[k], xp, yc, (ht_float_t)1.0);
+                            ht_tree_learn_one(&g_local_trees[k], xp, yc, HT_CONST(1.0));
                         }
                     } else if (strat == STRAT_FED_FOREST_TOPM || strat == STRAT_FED_FOREST_RR) {
                         if (is_reg) {
-                            preq_abs_err_sum += fabs((double)ht_fed_forest_client_predict_reg(&g_ff_clients[k], xp) - (double)yr);
+                            preq_abs_err_sum += fabs(fed_to_double(ht_fed_forest_client_predict_reg(&g_ff_clients[k], xp)) - fed_to_double(yr));
                             preq_total++;
-                            ht_fed_forest_client_learn_one_reg(&g_ff_clients[k], xp, yr, (ht_float_t)1.0);
+                            ht_fed_forest_client_learn_one_reg(&g_ff_clients[k], xp, yr, HT_CONST(1.0));
                         } else {
                             if (ht_fed_forest_client_predict(&g_ff_clients[k], xp) == yc) preq_correct++;
                             preq_total++;
-                            ht_fed_forest_client_learn_one(&g_ff_clients[k], xp, yc, (ht_float_t)1.0);
+                            ht_fed_forest_client_learn_one(&g_ff_clients[k], xp, yc, HT_CONST(1.0));
                         }
                     } else {
                         if (is_reg) {
-                            preq_abs_err_sum += fabs((double)ht_fed_vfdt_client_predict_reg(&g_fv_clients[k], xp) - (double)yr);
+                            preq_abs_err_sum += fabs(fed_to_double(ht_fed_vfdt_client_predict_reg(&g_fv_clients[k], xp)) - fed_to_double(yr));
                             preq_total++;
-                            ht_fed_vfdt_client_learn_one_reg(&g_fv_clients[k], xp, yr, (ht_float_t)1.0);
+                            ht_fed_vfdt_client_learn_one_reg(&g_fv_clients[k], xp, yr, HT_CONST(1.0));
                         } else {
                             if (ht_fed_vfdt_client_predict(&g_fv_clients[k], xp) == yc) preq_correct++;
                             preq_total++;
-                            ht_fed_vfdt_client_learn_one(&g_fv_clients[k], xp, yc, (ht_float_t)1.0);
+                            ht_fed_vfdt_client_learn_one(&g_fv_clients[k], xp, yc, HT_CONST(1.0));
                         }
                     }
                 }
@@ -575,13 +608,14 @@ int main(int argc, char **argv) {
 
     ht_value_t x_raw[HT_MAX_FEATURES], x_in[HT_MAX_FEATURES];
     uint8_t yc = 0U;
-    ht_float_t yr = (ht_float_t)0.0;
+    ht_float_t yr = HT_CONST(0.0);
 
     while (read_csv_row(fp_test, &meta, is_reg, x_raw, &yc, &yr)) {
         test_n++;
+        double yr_d = fed_to_double(yr);
         if (is_reg) {
-            y_sum += (double)yr;
-            y_sq_sum += (double)yr * (double)yr;
+            y_sum += yr_d;
+            y_sq_sum += yr_d * yr_d;
         }
 
         for (int m = 0; m < eval_models; ++m) {
@@ -593,14 +627,14 @@ int main(int argc, char **argv) {
             }
 
             if (is_reg) {
-                ht_float_t yp = (ht_float_t)0.0;
+                ht_float_t yp = HT_CONST(0.0);
                 if (strat == STRAT_CENTRAL) yp = ht_tree_predict_reg(&g_central_tree, xp);
                 else if (strat == STRAT_LOCAL) yp = ht_tree_predict_reg(&g_local_trees[m], xp);
                 else if (strat == STRAT_FED_FOREST_TOPM || strat == STRAT_FED_FOREST_RR)
                     yp = ht_fed_forest_client_predict_reg(&g_ff_clients[m], xp);
                 else yp = ht_fed_vfdt_client_predict_reg(&g_fv_clients[m], xp);
 
-                double err = (double)yp - (double)yr;
+                double err = fed_to_double(yp) - yr_d;
                 eval_ae[m] += fabs(err);
                 eval_se[m] += err * err;
             } else {
