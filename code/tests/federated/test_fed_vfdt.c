@@ -163,6 +163,14 @@ static void test_fed_vfdt_stats_merge_extreme_non_iid(void) {
 }
 
 static void test_fed_vfdt_stats_merge_regression(void) {
+#ifdef HT_CLASSIF_ONLY
+    static ht_fed_vfdt_server_t srv;
+    ht_config_params_t tp;
+    ht_default_reg_params(&tp, 2);
+    ht_fed_vfdt_server_cfg_t scfg;
+    ht_fed_vfdt_default_server_config(&scfg, HT_FED_VFDT_STATS_MERGE, &tp);
+    HT_ASSERT_EQ(ht_fed_vfdt_server_init(&srv, &scfg), HT_ERR_INVALID_ARG);
+#else
     static ht_fed_vfdt_client_t c0, c1;
     static ht_fed_vfdt_server_t srv;
     static uint8_t wire[65536];
@@ -215,6 +223,7 @@ static void test_fed_vfdt_stats_merge_regression(void) {
     HT_ASSERT_FLOAT_NEAR(ht_fed_vfdt_client_predict_reg(&c0, x), HT_CONST(5.0), HT_CONST(2.0));
     x[0].num = HT_CONST(10.2);
     HT_ASSERT_FLOAT_NEAR(ht_fed_vfdt_client_predict_reg(&c0, x), HT_CONST(50.0), HT_CONST(2.0));
+#endif
 }
 
 static void test_fed_vfdt_straggler_catchup_snapshot_and_drift_reset(void) {

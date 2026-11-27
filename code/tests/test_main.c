@@ -18,11 +18,31 @@ bool g_current_test_failed = false;
 /* --- Milestone 1.1: Config, Types, and Harness Unit Tests --- */
 
 static void test_config_constants(void) {
+#if HT_MAX_FEATURES == 16U
     HT_ASSERT_EQ(HT_MAX_FEATURES, 16U);
+#else
+    HT_ASSERT(HT_MAX_FEATURES >= 1U && HT_MAX_FEATURES <= 128U);
+#endif
+#if HT_MAX_CLASSES == 4U
     HT_ASSERT_EQ(HT_MAX_CLASSES, 4U);
+#else
+    HT_ASSERT(HT_MAX_CLASSES >= 2U && HT_MAX_CLASSES <= 64U);
+#endif
+#if HT_MAX_CATEGORIES == 5U
     HT_ASSERT_EQ(HT_MAX_CATEGORIES, 5U);
+#else
+    HT_ASSERT(HT_MAX_CATEGORIES >= 2U);
+#endif
+#if HT_MAX_NODES == 4096U
     HT_ASSERT_EQ(HT_MAX_NODES, 4096U);
+#else
+    HT_ASSERT(HT_MAX_NODES >= 8U);
+#endif
+#if HT_MAX_ACTIVE_LEAVES == 256U
     HT_ASSERT_EQ(HT_MAX_ACTIVE_LEAVES, 256U);
+#else
+    HT_ASSERT(HT_MAX_ACTIVE_LEAVES >= 1U && HT_MAX_ACTIVE_LEAVES <= HT_MAX_NODES);
+#endif
     HT_ASSERT_EQ(HT_GAUSSIAN_SPLITS, 10U);
 
     HT_ASSERT_EQ(HT_ADWIN_MAX_BUCKETS, 5U);
@@ -161,6 +181,16 @@ int main(void) {
 #else
     printf(" Precision Mode: float (32-bit single precision)\n");
 #endif
+    printf(" Profile: nodes=%u leaves=%u feat=%u cls=%u adwin_lvl=%u%s\n",
+           (unsigned)HT_MAX_NODES, (unsigned)HT_MAX_ACTIVE_LEAVES,
+           (unsigned)HT_MAX_FEATURES, (unsigned)HT_MAX_CLASSES,
+           (unsigned)HT_ADWIN_LEVELS,
+#ifdef HT_CLASSIF_ONLY
+           " [CLASSIF_ONLY]"
+#else
+           ""
+#endif
+    );
     printf("==================================================\n");
 
     /* Nível 1: Módulos e Tipos Básicos */

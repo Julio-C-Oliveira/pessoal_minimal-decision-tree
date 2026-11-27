@@ -76,6 +76,7 @@ static void test_compact_tree_classif_parity_and_serialization(void) {
     HT_ASSERT_EQ(ht_compact_tree_predict(&ct_loaded, x), 1U);
 }
 
+#ifndef HT_CLASSIF_ONLY
 static void test_compact_tree_reg_and_subspace(void) {
     ht_config_params_t params;
     ht_default_reg_params(&params, 2);
@@ -117,6 +118,7 @@ static void test_compact_tree_reg_and_subspace(void) {
     ht_float_t y_sub = ht_compact_tree_predict_reg(&ct, x_global);
     HT_ASSERT(y_sub > HT_CONST(30.0));
 }
+#endif
 
 static void test_voting_weighted_and_uniform(void) {
     ht_float_t err_good = HT_CONST(0.5);
@@ -167,6 +169,8 @@ static void test_voting_weighted_and_uniform(void) {
 void test_compact_tree_run(void) {
     HT_TEST_SUITE_BEGIN("Nivel 1 & 2: Arvore Compacta e Motor de Votacao (ensemble/)");
     HT_RUN_TEST(test_compact_tree_classif_parity_and_serialization);
+#ifndef HT_CLASSIF_ONLY
     HT_RUN_TEST(test_compact_tree_reg_and_subspace);
+#endif
     HT_RUN_TEST(test_voting_weighted_and_uniform);
 }

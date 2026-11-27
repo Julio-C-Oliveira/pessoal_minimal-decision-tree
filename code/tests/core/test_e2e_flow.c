@@ -194,8 +194,15 @@ static void test_e2e_memory_split_simulation(void) {
     leaf_queue[queue_tail++] = left_child;
     leaf_queue[queue_tail++] = right_child;
 
-    /* Split 30 more times (total 31 splits, 63 nodes, 32 active leaves) */
-    for (uint32_t s = 0; s < 30; ++s) {
+    /* Split up to 30 more times, bounded by compile-time MCU leaf/node limits */
+    uint32_t max_splits = 30U;
+    if (HT_MAX_ACTIVE_LEAVES > 2U && (uint32_t)(HT_MAX_ACTIVE_LEAVES - 2U) < max_splits) {
+        max_splits = (uint32_t)(HT_MAX_ACTIVE_LEAVES - 2U);
+    }
+    if (HT_MAX_NODES > 3U && (uint32_t)((HT_MAX_NODES - 3U) / 2U) < max_splits) {
+        max_splits = (uint32_t)((HT_MAX_NODES - 3U) / 2U);
+    }
+    for (uint32_t s = 0; s < max_splits; ++s) {
         uint16_t current_leaf = leaf_queue[queue_head++];
         ht_node_t *lnode = ht_node_get(&s_e2e_pool, current_leaf);
         HT_ASSERT_NOT_NULL(lnode);
@@ -1103,6 +1110,7 @@ static void test_e2e_regression_split_decision_pipeline(void) {
     HT_ASSERT_EQ(ht_memory_bytes_used(&s_e2e_pool), 0);
 }
 
+#ifndef HT_CLASSIF_ONLY
 static void test_e2e_vfdt_reg_prequential_and_serialization(void) {
     static ht_tree_t tree;
     ht_config_params_t params;
@@ -1284,9 +1292,11 @@ static void test_e2e_hat_reg_abrupt_drift_recovery(void) {
     ht_float_t mae_spike = HT_DIV(sum_err_b_spike, HT_FROM_UINT(count_b_spike));
     ht_float_t mae_late = HT_DIV(sum_err_b_late, HT_FROM_UINT(count_b_late));
 
-    /* Assert drift was detected and alternate tree switched */
+    /* Assert drift was detected and alternate tree switched (when leaf pool allows >= 8 leaves) */
     HT_ASSERT(tree.n_alternate_trees > 0U);
+#if HT_MAX_ACTIVE_LEAVES >= 8U
     HT_ASSERT(tree.n_switch_alternate_trees > 0U);
+#endif
 
     /* Assert error recovered: late MAE after switch is much lower than post-drift spike */
     HT_ASSERT(mae_late < HT_MUL(mae_spike, HT_CONST(0.5)));
@@ -1302,6 +1312,7 @@ static void test_e2e_hat_reg_abrupt_drift_recovery(void) {
     HT_ASSERT_EQ(tree.memory.stats_allocated, 0U);
     HT_ASSERT_EQ(adwin_pool.allocated_count, 0U);
 }
+#endif /* !HT_CLASSIF_ONLY */
 
 void test_e2e_flow_run(void) {
     HT_TEST_SUITE_BEGIN("Nivel 3: Fluxo Ponta a Ponta Acumulado (E2E)");
@@ -1315,6 +1326,8 @@ void test_e2e_flow_run(void) {
     HT_RUN_TEST(test_e2e_hat_abrupt_drift_recovery);
     HT_RUN_TEST(test_e2e_continuous_regression_stream_pipeline);
     HT_RUN_TEST(test_e2e_regression_split_decision_pipeline);
+#ifndef HT_CLASSIF_ONLY
     HT_RUN_TEST(test_e2e_vfdt_reg_prequential_and_serialization);
     HT_RUN_TEST(test_e2e_hat_reg_abrupt_drift_recovery);
+#endif
 }

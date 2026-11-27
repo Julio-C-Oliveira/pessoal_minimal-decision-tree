@@ -164,6 +164,14 @@ static void test_fed_forest_non_iid_collaboration_gain(void) {
 }
 
 static void test_fed_forest_regression_and_drift_downweighting(void) {
+#ifdef HT_CLASSIF_ONLY
+    static ht_fed_forest_client_t c_reg;
+    ht_config_params_t tp;
+    ht_default_reg_params(&tp, 2);
+    ht_fed_forest_client_cfg_t cfg;
+    ht_fed_forest_default_client_config(&cfg, 1U, &tp);
+    HT_ASSERT_EQ(ht_fed_forest_client_init(&c_reg, &cfg), HT_ERR_INVALID_ARG);
+#else
     static ht_fed_forest_client_t c_good, c_stale;
     static ht_fed_forest_server_t srv;
     static uint8_t wire[32768];
@@ -210,6 +218,7 @@ static void test_fed_forest_regression_and_drift_downweighting(void) {
     }
     ht_float_t pred = ht_fed_forest_client_predict_reg(&c_good, x);
     HT_ASSERT_FLOAT_NEAR(pred, HT_CONST(10.0), HT_CONST(1.0));
+#endif
 }
 
 void test_fed_forest_run(void) {

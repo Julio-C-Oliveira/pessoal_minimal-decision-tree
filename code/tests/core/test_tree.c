@@ -588,6 +588,19 @@ static void test_tree_serialization_roundtrip_full_and_inference(void) {
 /* --- Milestone 4.4: Regression Trees (VFDT-R & HAT-R) Tests -------------- */
 /* ========================================================================= */
 
+#ifdef HT_CLASSIF_ONLY
+static void test_tree_classif_only_rejects_regression(void) {
+    ht_config_params_t params;
+    ht_default_reg_params(&params, 4);
+    ht_tree_t tree;
+    HT_ASSERT_EQ(ht_tree_init(&tree, &params), HT_ERR_INVALID_ARG);
+
+    ht_adwin_pool_t ad_pool;
+    HT_ASSERT_EQ(ht_adwin_pool_init(&ad_pool), HT_OK);
+    ht_default_hat_reg_params(&params, 4);
+    HT_ASSERT_EQ(ht_tree_init_hat(&tree, &params, &ad_pool), HT_ERR_INVALID_ARG);
+}
+#else
 static void test_tree_reg_default_params_and_init(void) {
     ht_config_params_t params;
     ht_default_reg_params(&params, 4);
@@ -818,12 +831,13 @@ static void test_tree_reg_leaf_deactivation_by_depth(void) {
     }
 
     uint16_t active_before = tree.n_active_leaves;
+    uint16_t inactive_before = tree.n_inactive_leaves;
     HT_ASSERT(active_before >= 2);
 
     /* Deactivate least promising leaf */
     HT_ASSERT_EQ(ht_tree_deactivate_least_promising_leaf(&tree), HT_OK);
     HT_ASSERT_EQ(tree.n_active_leaves, (uint16_t)(active_before - 1));
-    HT_ASSERT_EQ(tree.n_inactive_leaves, 1U);
+    HT_ASSERT_EQ(tree.n_inactive_leaves, (uint16_t)(inactive_before + 1));
 }
 
 static void test_tree_reg_serialization_roundtrip(void) {
@@ -976,6 +990,7 @@ static void test_tree_leaf_sgd_hybrid_normalization(void) {
     HT_ASSERT(s_w[1] < HT_CONST(100.0));
     HT_ASSERT(s_w[1] > HT_CONST(-100.0));
 }
+#endif /* !HT_CLASSIF_ONLY */
 
 static void test_tree_attached_prep_pipeline(void) {
     ht_config_params_t params;
@@ -1137,6 +1152,9 @@ void test_tree_run(void) {
     HT_RUN_TEST(test_tree_serialization_roundtrip_full_and_inference);
 
     /* Nível 1 & 2: Regressão Contínua (VFDT-R & HAT-R) */
+#ifdef HT_CLASSIF_ONLY
+    HT_RUN_TEST(test_tree_classif_only_rejects_regression);
+#else
     HT_RUN_TEST(test_tree_reg_default_params_and_init);
     HT_RUN_TEST(test_tree_reg_predict_leaf_mean);
     HT_RUN_TEST(test_tree_reg_predict_leaf_model_sgd_and_clipping);
@@ -1146,8 +1164,9 @@ void test_tree_run(void) {
     HT_RUN_TEST(test_tree_reg_serialization_roundtrip);
     HT_RUN_TEST(test_tree_hat_reg_alternate_tree_switch_and_prune);
 
-    /* Nível 2: Micro-Pipeline & Normalização SGD Híbrida */
+    /* Nível 2: Normalização SGD Híbrida */
     HT_RUN_TEST(test_tree_leaf_sgd_hybrid_normalization);
+#endif
     HT_RUN_TEST(test_tree_attached_prep_pipeline);
 
     /* Nível 1 & 2: Primitivas de Coordenação Externa (Fed-VFDT) & Sub-ULP Delta */
