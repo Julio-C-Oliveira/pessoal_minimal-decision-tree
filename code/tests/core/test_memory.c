@@ -385,17 +385,17 @@ static void test_node_asymmetric_union_leaf_vs_branch(void) {
     /* 1. Leaf state validation */
     HT_ASSERT((node->flags & HT_NODE_IS_LEAF) != 0);
     HT_ASSERT((node->flags & HT_NODE_IN_USE) != 0);
-    node->class_counts[0] = (ht_float_t)10.0;
-    node->class_counts[1] = (ht_float_t)25.0;
-    node->class_counts[2] = (ht_float_t)5.0;
-    node->class_counts[3] = (ht_float_t)1.0;
+    node->class_counts[0] = HT_CONST(10.0);
+    node->class_counts[1] = HT_CONST(25.0);
+    node->class_counts[2] = HT_CONST(5.0);
+    node->class_counts[3] = HT_CONST(1.0);
     node->stats_idx = 42;
 
     /* Verify leaf fields */
-    HT_ASSERT_FLOAT_EQ(node->class_counts[0], (ht_float_t)10.0);
-    HT_ASSERT_FLOAT_EQ(node->class_counts[1], (ht_float_t)25.0);
-    HT_ASSERT_FLOAT_EQ(node->class_counts[2], (ht_float_t)5.0);
-    HT_ASSERT_FLOAT_EQ(node->class_counts[3], (ht_float_t)1.0);
+    HT_ASSERT_FLOAT_EQ(node->class_counts[0], HT_CONST(10.0));
+    HT_ASSERT_FLOAT_EQ(node->class_counts[1], HT_CONST(25.0));
+    HT_ASSERT_FLOAT_EQ(node->class_counts[2], HT_CONST(5.0));
+    HT_ASSERT_FLOAT_EQ(node->class_counts[3], HT_CONST(1.0));
     HT_ASSERT_EQ(node->stats_idx, 42);
     HT_ASSERT((node->flags & HT_NODE_IS_LEAF) != 0);
     HT_ASSERT((node->flags & HT_NODE_IN_USE) != 0);
@@ -403,7 +403,7 @@ static void test_node_asymmetric_union_leaf_vs_branch(void) {
     /* 2. Transition from Leaf to Decision Branch (Split event) */
     node->flags &= ~HT_NODE_IS_LEAF;
     node->feature_idx = 3;
-    node->split_val.threshold = (ht_float_t)12.75;
+    node->split_val.threshold = HT_CONST(12.75);
     node->left_child = 101;
     node->right_child = 102;
 
@@ -411,7 +411,7 @@ static void test_node_asymmetric_union_leaf_vs_branch(void) {
     HT_ASSERT(!(node->flags & HT_NODE_IS_LEAF));
     HT_ASSERT((node->flags & HT_NODE_IN_USE) != 0);
     HT_ASSERT_EQ(node->feature_idx, 3);
-    HT_ASSERT_FLOAT_EQ(node->split_val.threshold, (ht_float_t)12.75);
+    HT_ASSERT_FLOAT_EQ(node->split_val.threshold, HT_CONST(12.75));
     HT_ASSERT_EQ(node->left_child, 101);
     HT_ASSERT_EQ(node->right_child, 102);
 
@@ -505,14 +505,14 @@ static void test_node_unified_regression_stats(void) {
     HT_ASSERT_FLOAT_EQ(node->reg_stats.m2, (ht_float_t)0.0);
 
     /* Set regression target values */
-    node->reg_stats.count = (ht_float_t)150.0;
-    node->reg_stats.mean = (ht_float_t)42.5;
-    node->reg_stats.m2 = (ht_float_t)12.25;
+    node->reg_stats.count = HT_CONST(150.0);
+    node->reg_stats.mean = HT_CONST(42.5);
+    node->reg_stats.m2 = HT_CONST(12.25);
 
     /* Verify through regression accessor */
-    HT_ASSERT_FLOAT_EQ(node->reg_stats.count, (ht_float_t)150.0);
-    HT_ASSERT_FLOAT_EQ(node->reg_stats.mean, (ht_float_t)42.5);
-    HT_ASSERT_FLOAT_EQ(node->reg_stats.m2, (ht_float_t)12.25);
+    HT_ASSERT_FLOAT_EQ(node->reg_stats.count, HT_CONST(150.0));
+    HT_ASSERT_FLOAT_EQ(node->reg_stats.mean, HT_CONST(42.5));
+    HT_ASSERT_FLOAT_EQ(node->reg_stats.m2, HT_CONST(12.25));
 
     /* Verify memory recycling */
     ht_node_free(&s_test_pool, n_idx);
@@ -553,16 +553,16 @@ static void test_leaf_stats_regression_observers_and_weights(void) {
     }
 
     /* Assign regression SGD weights and fMSE accumulators */
-    stats->fmse_mean = (ht_float_t)1.234;
-    stats->fmse_model = (ht_float_t)0.567;
-    stats->reg_intercept = (ht_float_t)3.14;
+    stats->fmse_mean = HT_CONST(1.234);
+    stats->fmse_model = HT_CONST(0.567);
+    stats->reg_intercept = HT_CONST(3.14);
     for (uint8_t f = 0; f < HT_MAX_FEATURES; ++f) {
-        reg_w[f] = (ht_float_t)(f * 0.5);
+        reg_w[f] = HT_MUL(HT_FROM_UINT(f), HT_CONST(0.5));
     }
 
-    HT_ASSERT_FLOAT_NEAR(stats->fmse_mean, (ht_float_t)1.234, 1e-4);
-    HT_ASSERT_FLOAT_NEAR(stats->fmse_model, (ht_float_t)0.567, 1e-4);
-    HT_ASSERT_FLOAT_NEAR(stats->reg_intercept, (ht_float_t)3.14, 1e-4);
+    HT_ASSERT_FLOAT_NEAR(stats->fmse_mean, HT_CONST(1.234), HT_TEST_TOL(1e-4));
+    HT_ASSERT_FLOAT_NEAR(stats->fmse_model, HT_CONST(0.567), HT_TEST_TOL(1e-4));
+    HT_ASSERT_FLOAT_NEAR(stats->reg_intercept, HT_CONST(3.14), HT_TEST_TOL(1e-4));
 
     /* Free and reallocate to test clean recycling */
     ht_stats_free(&s_test_pool, s_idx);

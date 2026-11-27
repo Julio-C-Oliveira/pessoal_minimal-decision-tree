@@ -67,8 +67,10 @@ extern bool g_current_test_failed;
 
 #ifdef HT_USE_FIXED_POINT
 #define HT_FMT_FLOAT_VAL(v) ((double)(v) / 65536.0)
+#define HT_TEST_TOL(x)      (HT_CONST(x) > HT_FLOAT_TOL ? HT_CONST(x) : HT_FLOAT_TOL)
 #else
 #define HT_FMT_FLOAT_VAL(v) ((double)(v))
+#define HT_TEST_TOL(x)      ((ht_float_t)(x))
 #endif
 
 #define HT_ASSERT_FLOAT_NEAR(a, b, tol) do { \

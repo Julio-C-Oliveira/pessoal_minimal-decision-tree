@@ -53,8 +53,8 @@ typedef int32_t ht_float_t;
 #define HT_FIXED_ONE                 ((ht_float_t)(1L << HT_FIXED_SHIFT))       /* 65536 */
 #define HT_FIXED_HALF                ((ht_float_t)(1L << (HT_FIXED_SHIFT - 1))) /* 32768 */
 #define HT_FIXED_RESCALE_THRESHOLD   ((ht_float_t)0x40000000L)                  /* 16384.0 in Q16.16 */
-#define HT_FIXED_M2_SHIFT            8                                          /* Q24.8 for ht_var_stat_t.m2 */
-#define HT_FIXED_M2_RESCALE_THR      ((ht_float_t)0x40000000L)                  /* 4194304.0 in Q24.8 */
+#define HT_FIXED_M2_SHIFT            6                                          /* Q26.6 for ht_var_stat_t.m2 (max ~33.5M) */
+#define HT_FIXED_M2_RESCALE_THR      ((ht_float_t)0x40000000L)                  /* 16777216.0 in Q26.6 */
 
 /* Compile-time literal conversion (folded at compile time, zero runtime float!) */
 #define HT_CONST(x)                  ((ht_float_t)((double)(x) >= 0.0 \

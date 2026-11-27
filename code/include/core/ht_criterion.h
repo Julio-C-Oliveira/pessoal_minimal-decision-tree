@@ -129,6 +129,21 @@ ht_float_t ht_hoeffding_bound(ht_float_t range_val,
                               ht_float_t total_weight);
 
 /**
+ * @brief Computes Hoeffding bound epsilon directly from precomputed -ln(delta).
+ *
+ * Avoids underflow of very small delta values (e.g., 1e-7) in Q16.16 fixed-point mode
+ * while remaining mathematically identical to ht_hoeffding_bound().
+ *
+ * @param range_val Range of merit R.
+ * @param neg_ln_delta Precomputed ln(1 / delta) > 0.
+ * @param total_weight Accumulated weight seen at the node.
+ * @return Hoeffding bound epsilon.
+ */
+ht_float_t ht_hoeffding_bound_ln(ht_float_t range_val,
+                                 ht_float_t neg_ln_delta,
+                                 ht_float_t total_weight);
+
+/**
  * @brief Evaluates numeric Gaussian observer to find best split threshold.
  *
  * Generates suggested split points from observer, computes post-split distributions,
