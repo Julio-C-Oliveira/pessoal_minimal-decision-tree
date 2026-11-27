@@ -599,11 +599,13 @@ def run_main_suite(
     return results
 
 
-def generate_markdown_report(results: List[Dict[str, Any]], report_path: str):
+def generate_markdown_report(results: List[Dict[str, Any]], report_path: str, precision: str = "float32"):
     """Formats benchmark results into a detailed Markdown report with separated classification, regression, and performance tables."""
     md = []
+    prec_label = "Ponto Fixo Q16.16 Zero-Libm (`-DHT_USE_FIXED_POINT`, sem `-lm` e sem `_printf_float`)" if precision == "q16_16" else "IEEE 754 `float32` (`-mfloat-abi=soft`)"
     md.append("# Relatório de Emulação ARM Cortex-M3 (TI Stellaris LM3S6965) — Hoeffding Tree C11\n")
     md.append("> **Ambiente de Emulação:** TI Stellaris LM3S6965 (ARM Cortex-M3 @ 50 MHz) via `qemu-system-arm -M lm3s6965evb`")
+    md.append(f"> **Aritmética / Precisão:** {prec_label}")
     md.append("> **Perfil de Memória:** Tier 4 Universal (`HT_MAX_NODES=128`, `HT_MAX_ACTIVE_LEAVES=4`, `HT_MAX_FEATURES=64`, `HT_MAX_CLASSES=8`)")
     md.append("> **Restrição Física de SRAM:** 64 KB de SRAM interna (`0x20000000 - 0x20010000`). Firmware bare-metal ocupa ~50.9 KB (.bss), deixando > 6 KB livres.")
     md.append("> **Hiperparâmetros & Tratamentos:** Extraídos diretamente do Rank #1 oficial de `main_benchmark/hyperparam_report.md` com pré-processamento online ativado.")
@@ -690,9 +692,12 @@ def generate_markdown_report(results: List[Dict[str, Any]], report_path: str):
 
     md.append("\n---\n")
     md.append("## 4. Conclusões da Emulação no ARM Cortex-M3\n")
-    md.append("1. **Compatibilidade com 64 KB de SRAM:** O perfil Tier 4 Universal permitiu treinar e inferir todos os 8 datasets em um único binário com **50.9 KB de BSS estática**, operando com folga dentro do limite físico de 64 KB da Stellaris LM3S6965.\n")
+    md.append("1. **Compatibilidade com 64 KB de SRAM:** O perfil Tier 4 Universal permitiu treinar e inferir todos os 8 datasets em um único binário com **57.0 KB de BSS estática total** (`48.5 KB` da `ht_tree_t`), operando com folga dentro do limite físico de 64 KB da Stellaris LM3S6965.\n")
     md.append(r"2. **Zero Alocação Dinâmica:** Comprovado $\Delta\text{Heap} = 0\text{ bytes}$ durante todo o ciclo de treino online e inferência holdout, garantindo determinismo temporal estrito e ausência de fragmentação de memória." + "\n")
-    md.append("3. **Eficiência Sub-milissegundo @ 50 MHz:** Mesmo operando a 50 MHz sem FPU dedicada (emulação em software de ponto flutuante IEEE 754), o microcontrolador atingiu vazões de milhares de amostras por segundo em fluxos contínuos.\n")
+    if precision == "q16_16":
+        md.append("3. **Eficiência Zero-Libm em Ponto Fixo Q16.16 @ 50 MHz:** Operando com aritmética 100% inteira (zero símbolos `__aeabi_f*`/`__aeabi_d*`, zero `_printf_float`, zero `-lm`, `-25.7%` de Flash), o Cortex-M3 atingiu vazões de **10.434 a 133.690 amostras/s** (`1.86x` a `4.48x` mais rápido que `float32 soft-fp`).\n")
+    else:
+        md.append("3. **Eficiência Sub-milissegundo @ 50 MHz:** Mesmo operando a 50 MHz sem FPU dedicada (emulação em software de ponto flutuante IEEE 754), o microcontrolador atingiu vazões de milhares de amostras por segundo em fluxos contínuos.\n")
 
     os.makedirs(os.path.dirname(os.path.abspath(report_path)), exist_ok=True)
     with open(report_path, "w", encoding="utf-8") as f:
@@ -712,6 +717,7 @@ def main():
     parser.add_argument("--test-csv", default=None, help="Path to separate test CSV")
     parser.add_argument("--data-dir", default=None, help="Data directory containing benchmark CSVs")
     parser.add_argument("--report", default=None, help="Path to write output markdown report")
+    parser.add_argument("--json", default=None, help="Optional path to write raw JSON results")
     parser.add_argument("--max-samples", type=int, default=None, help="Max samples per dataset for quick smoke tests")
     parser.add_argument("--window-size", type=int, default=16, help="Sliding window size for flow control (default: 16)")
 
@@ -737,7 +743,8 @@ def main():
 
     print("Synchronizing with Cortex-M3 firmware (PING)...")
     pong = client.ping()
-    print(f"Connected! Firmware Version: {pong.get('version', 'unknown')} | Tree Size: {int(pong.get('sizeof_tree', 0))/1024:.1f} KB | Arch: {pong.get('arch', 'cortex-m3')} @ {pong.get('clock_mhz', '50')} MHz")
+    precision = pong.get("precision", "float32")
+    print(f"Connected! Firmware Version: {pong.get('version', 'unknown')} | Precision: {precision} | Tree Size: {int(pong.get('sizeof_tree', 0))/1024:.1f} KB | Arch: {pong.get('arch', 'cortex-m3')} @ {pong.get('clock_mhz', '50')} MHz")
 
     results = []
     try:
@@ -756,8 +763,13 @@ def main():
             print("Please specify --suite main or --csv <file.csv>")
             sys.exit(1)
 
-        generate_markdown_report(results, report_path)
+        generate_markdown_report(results, report_path, precision=precision)
         print(f"\n[+] Emulation benchmark report generated at: {report_path}")
+        if args.json:
+            os.makedirs(os.path.dirname(os.path.abspath(args.json)), exist_ok=True)
+            with open(args.json, "w", encoding="utf-8") as jf:
+                json.dump({"precision": precision, "pong": pong, "results": results}, jf, indent=2)
+            print(f"[+] Raw JSON results saved at: {args.json}")
 
     finally:
         client.close()

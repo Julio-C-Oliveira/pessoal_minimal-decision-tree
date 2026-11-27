@@ -62,6 +62,35 @@ static double test_sum_y = 0.0;
 static double test_sum_y_sq = 0.0;
 static double test_elapsed_us = 0.0;
 
+static ht_float_t bench_from_double(double v) {
+#ifdef HT_USE_FIXED_POINT
+    if (isnan(v)) {
+        return HT_NAN_VAL;
+    }
+    double scaled = v * 65536.0;
+    if (scaled >= (double)INT32_MAX) {
+        return INT32_MAX;
+    }
+    if (scaled <= (double)(INT32_MIN + 1)) {
+        return INT32_MIN + 1;
+    }
+    return (ht_float_t)(scaled >= 0.0 ? (scaled + 0.5) : (scaled - 0.5));
+#else
+    return (ht_float_t)v;
+#endif
+}
+
+static double bench_to_double(ht_float_t v) {
+#ifdef HT_USE_FIXED_POINT
+    if (HT_ISNAN(v)) {
+        return (double)NAN;
+    }
+    return (double)v / 65536.0;
+#else
+    return (double)v;
+#endif
+}
+
 static double get_time_diff_us(struct timespec start, struct timespec end) {
     double sec = (double)(end.tv_sec - start.tv_sec);
     double nsec = (double)(end.tv_nsec - start.tv_nsec);
@@ -316,39 +345,51 @@ int main(int argc, char *argv[]) {
             ht_default_hat_reg_params(&params, (uint8_t)n_features);
             params.bootstrap_sampling = bootstrap_sampling;
             params.drift_window_threshold = drift_window_threshold;
-            params.switch_significance = (ht_float_t)switch_significance;
-            params.adwin_delta = (ht_float_t)adwin_delta;
+            params.switch_significance = bench_from_double(switch_significance);
+            params.adwin_delta = bench_from_double(adwin_delta);
         } else {
             ht_default_reg_params(&params, (uint8_t)n_features);
         }
         params.leaf_prediction = leaf_pred;
-        params.learning_rate = (ht_float_t)learning_rate;
-        params.l2_regularization = (ht_float_t)l2_reg;
-        params.model_selector_decay = (ht_float_t)decay_rate;
-        params.min_samples_split = (ht_float_t)min_samples_split;
+        params.learning_rate = bench_from_double(learning_rate);
+        params.l2_regularization = bench_from_double(l2_reg);
+        params.model_selector_decay = bench_from_double(decay_rate);
+        params.min_samples_split = bench_from_double(min_samples_split);
     } else {
         if (enable_hat) {
             ht_default_hat_params(&params, (uint8_t)n_features, (uint8_t)n_classes);
             params.bootstrap_sampling = bootstrap_sampling;
             params.drift_window_threshold = drift_window_threshold;
-            params.switch_significance = (ht_float_t)switch_significance;
-            params.adwin_delta = (ht_float_t)adwin_delta;
+            params.switch_significance = bench_from_double(switch_significance);
+            params.adwin_delta = bench_from_double(adwin_delta);
         } else {
             ht_default_params(&params, (uint8_t)n_features, (uint8_t)n_classes);
         }
         params.criterion = criterion;
         params.leaf_prediction = leaf_pred;
-        params.nb_threshold = (ht_float_t)0.0;
+        params.nb_threshold = HT_CONST(0.0);
     }
 
     for (uint8_t f = 0; f < n_features; ++f) {
         params.feature_types[f] = feat_types[f];
     }
     params.grace_period = grace_period;
+#ifdef HT_USE_FIXED_POINT
+    if (delta_val > 0.0 && delta_val < 1.53e-5) {
+        long long neg_log10 = llround(-log10(delta_val));
+        if (neg_log10 < 1) neg_log10 = 1;
+        if (neg_log10 > 15) neg_log10 = 15;
+        ht_params_set_delta_pow10(&params, (uint8_t)neg_log10);
+    } else {
+        params.delta = bench_from_double(delta_val);
+        params.delta_neg_log10 = 0U;
+    }
+#else
     params.delta = (ht_float_t)delta_val;
-    params.tau = (ht_float_t)tau_val;
-    params.min_branch_fraction = (ht_float_t)0.01;
-    params.max_share_to_split = (ht_float_t)0.99;
+#endif
+    params.tau = bench_from_double(tau_val);
+    params.min_branch_fraction = HT_CONST(0.01);
+    params.max_share_to_split = HT_CONST(0.99);
     params.merit_preprune = true;
     params.numeric_obs_type = numeric_obs_type;
     params.leaf_sgd_normalize = leaf_sgd_normalize;
@@ -379,7 +420,7 @@ int main(int argc, char *argv[]) {
                     ht_hampel_set_enabled(&prep_pipeline_instance.hampel, f, true);
                 }
             }
-            ht_hampel_set_threshold(&prep_pipeline_instance.hampel, (ht_float_t)3.0);
+            ht_hampel_set_threshold(&prep_pipeline_instance.hampel, HT_CONST(3.0));
         }
         if (prep_scaler_all) {
             for (uint8_t f = 0; f < n_features; ++f) {
@@ -391,7 +432,13 @@ int main(int argc, char *argv[]) {
         ht_tree_set_prep_pipeline(&tree_instance, &prep_pipeline_instance);
     }
 
-    const char *mode_str = (sizeof(ht_float_t) == 8) ? "float64 (double)" : "float32 (single)";
+#ifdef HT_USE_FIXED_POINT
+    const char *mode_str = "fixed Q16.16 (int32)";
+#elif defined(HT_USE_DOUBLE)
+    const char *mode_str = "float64 (double)";
+#else
+    const char *mode_str = "float32 (single)";
+#endif
     size_t model_struct_bytes = sizeof(ht_tree_t) + (enable_hat ? sizeof(ht_adwin_pool_t) : 0);
     if (use_prep_pipeline) {
         model_struct_bytes += sizeof(ht_prep_pipeline_t);
@@ -457,7 +504,7 @@ int main(int argc, char *argv[]) {
             if (feat_types[f_idx] == HT_FEAT_CATEGORICAL) {
                 x[f_idx].cat = (int32_t)val;
             } else {
-                x[f_idx].num = (ht_float_t)val;
+                x[f_idx].num = bench_from_double(val);
             }
             f_idx++;
             tok = strtok_r(NULL, ",\r\n", &saveptr);
@@ -474,9 +521,9 @@ int main(int argc, char *argv[]) {
         clock_gettime(CLOCK_MONOTONIC, &t_start);
 
         if (task_type == HT_TASK_REGRESSION) {
-            ht_float_t y_target = (ht_float_t)y_val_double;
+            ht_float_t y_target = bench_from_double(y_val_double);
             ht_float_t y_pred = ht_tree_predict_reg(&tree_instance, x);
-            ht_status_t learn_status = ht_tree_learn_one_reg(&tree_instance, x, y_target, (ht_float_t)1.0);
+            ht_status_t learn_status = ht_tree_learn_one_reg(&tree_instance, x, y_target, HT_CONST(1.0));
             if (learn_status != HT_OK) {
                 fprintf(stderr, "Error during ht_tree_learn_one_reg at sample %u: %d\n", sample_idx, learn_status);
                 fclose(fp);
@@ -485,18 +532,19 @@ int main(int argc, char *argv[]) {
             clock_gettime(CLOCK_MONOTONIC, &t_end);
             total_elapsed_us += get_time_diff_us(t_start, t_end);
 
-            double err = fabs((double)(y_target - y_pred));
+            double y_pred_d = bench_to_double(y_pred);
+            double err = fabs(y_val_double - y_pred_d);
             total_abs_error += err;
             total_sq_error += err * err;
-            sum_y += (double)y_target;
-            sum_y_sq += (double)(y_target * y_target);
+            sum_y += y_val_double;
+            sum_y_sq += y_val_double * y_val_double;
         } else {
             uint8_t y_label = (uint8_t)atoi(tok);
             uint8_t y_pred = ht_tree_predict(&tree_instance, x);
             if (y_pred == y_label) {
                 correct_preds++;
             }
-            ht_status_t learn_status = ht_tree_learn_one(&tree_instance, x, y_label, (ht_float_t)1.0);
+            ht_status_t learn_status = ht_tree_learn_one(&tree_instance, x, y_label, HT_CONST(1.0));
             if (learn_status != HT_OK) {
                 fprintf(stderr, "Error during ht_tree_learn_one at sample %u: %d\n", sample_idx, learn_status);
                 fclose(fp);
@@ -608,7 +656,7 @@ int main(int argc, char *argv[]) {
                 if (feat_types[f_idx] == HT_FEAT_CATEGORICAL) {
                     x[f_idx].cat = (int32_t)val;
                 } else {
-                    x[f_idx].num = (ht_float_t)val;
+                    x[f_idx].num = bench_from_double(val);
                 }
                 f_idx++;
                 tok = strtok_r(NULL, ",\r\n", &saveptr);
@@ -628,14 +676,15 @@ int main(int argc, char *argv[]) {
                 clock_gettime(CLOCK_MONOTONIC, &t_end);
                 test_elapsed_us += get_time_diff_us(t_start, t_end);
 
-                double err = fabs((double)(y_target_double - y_pred));
+                double y_pred_d = bench_to_double(y_pred);
+                double err = fabs(y_target_double - y_pred_d);
                 test_abs_error += err;
                 test_sq_error += err * err;
                 test_sum_y += y_target_double;
                 test_sum_y_sq += y_target_double * y_target_double;
 
                 if (num_test_samples < MAX_TEST_SAMPLES) {
-                    test_reg_predictions[num_test_samples++] = (double)y_pred;
+                    test_reg_predictions[num_test_samples++] = y_pred_d;
                 }
             } else {
                 uint8_t y_label = (uint8_t)atoi(tok);
@@ -731,7 +780,13 @@ int main(int argc, char *argv[]) {
             fprintf(jfp, "{\n");
             fprintf(jfp, "  \"stream\": \"%s\",\n", stream_name);
             fprintf(jfp, "  \"task\": \"%s\",\n", (task_type == HT_TASK_REGRESSION) ? "regression" : "classification");
-            fprintf(jfp, "  \"precision\": \"%s\",\n", (sizeof(ht_float_t) == 8) ? "double" : "float");
+#ifdef HT_USE_FIXED_POINT
+            fprintf(jfp, "  \"precision\": \"fixed_q16_16\",\n");
+#elif defined(HT_USE_DOUBLE)
+            fprintf(jfp, "  \"precision\": \"double\",\n");
+#else
+            fprintf(jfp, "  \"precision\": \"float\",\n");
+#endif
             fprintf(jfp, "  \"enable_hat\": %s,\n", enable_hat ? "true" : "false");
             if (enable_hat) {
                 fprintf(jfp, "  \"n_alternate_trees\": %u,\n", tree_instance.n_alternate_trees);

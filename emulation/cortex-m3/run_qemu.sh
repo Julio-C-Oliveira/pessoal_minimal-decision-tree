@@ -6,7 +6,19 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
-BUILD_DIR="${SCRIPT_DIR}/build"
+FIXED_POINT="${FIXED_POINT:-0}"
+if [ "${FIXED_POINT}" = "1" ]; then
+    BUILD_SUBDIR="build_fixed"
+    MAKE_FLAGS="FIXED_POINT=1"
+    REPORT_NAME="cortex_m3_fixed_point_report.md"
+    JSON_NAME="cortex_m3_fixed_point_results.json"
+else
+    BUILD_SUBDIR="build"
+    MAKE_FLAGS=""
+    REPORT_NAME="cortex_m3_emulation_report.md"
+    JSON_NAME="cortex_m3_float32_results.json"
+fi
+BUILD_DIR="${SCRIPT_DIR}/${BUILD_SUBDIR}"
 ELF_IMG="${BUILD_DIR}/cortex_m3_hoeffding_tree.elf"
 BIN_IMG="${BUILD_DIR}/cortex_m3_hoeffding_tree.bin"
 PORT="${QEMU_SERIAL_PORT:-4001}"
@@ -72,16 +84,16 @@ setup_env
 # Subcommands
 # ------------------------------------------------------------------------------
 cmd_build() {
-    log_info "Building ARM Cortex-M3 firmware in ${SCRIPT_DIR}..."
+    log_info "Building ARM Cortex-M3 firmware (FIXED_POINT=${FIXED_POINT}) in ${SCRIPT_DIR}..."
     cd "${SCRIPT_DIR}"
 
     if [ "${USE_DOCKER}" -eq 1 ]; then
         docker run --rm -v "${PROJECT_ROOT}:/project" -w "/project/emulation/cortex-m3" \
-            "${DOCKER_IMAGE}" make
+            "${DOCKER_IMAGE}" make ${MAKE_FLAGS}
         docker run --rm -v "${PROJECT_ROOT}:/project" \
-            "${DOCKER_IMAGE}" chmod -R 777 "/project/emulation/cortex-m3/build"
+            "${DOCKER_IMAGE}" chmod -R 777 "/project/emulation/cortex-m3/${BUILD_SUBDIR}"
     else
-        make
+        make ${MAKE_FLAGS}
     fi
     log_success "Cortex-M3 Firmware built successfully: ${ELF_IMG}"
 }
@@ -93,7 +105,7 @@ cmd_qemu() {
     fi
 
     if [ "${USE_DOCKER}" -eq 1 ]; then
-        log_info "Starting ARM Cortex-M3 QEMU via Docker container on port ${target_port}..."
+        log_info "Starting ARM Cortex-M3 QEMU (FIXED_POINT=${FIXED_POINT}) via Docker container on port ${target_port}..."
         docker run --rm -it \
             -v "${PROJECT_ROOT}:/project" \
             -w "/project/emulation/cortex-m3" \
@@ -102,10 +114,10 @@ cmd_qemu() {
             qemu-system-arm \
                 -M lm3s6965evb \
                 -nographic \
-                -kernel build/cortex_m3_hoeffding_tree.elf \
+                -kernel "${BUILD_SUBDIR}/cortex_m3_hoeffding_tree.elf" \
                 -serial "tcp:0.0.0.0:${target_port},server,nowait"
     else
-        log_info "Starting ARM Cortex-M3 QEMU on serial TCP port ${target_port}..."
+        log_info "Starting ARM Cortex-M3 QEMU (FIXED_POINT=${FIXED_POINT}) on serial TCP port ${target_port}..."
         qemu-system-arm \
             -M lm3s6965evb \
             -nographic \
@@ -127,7 +139,7 @@ cmd_bench() {
     fi
 
     if [ "${USE_DOCKER}" -eq 1 ]; then
-        log_info "Launching background QEMU container (${CONTAINER_NAME}) on port ${target_port}..."
+        log_info "Launching background QEMU container (${CONTAINER_NAME}, FIXED_POINT=${FIXED_POINT}) on port ${target_port}..."
         docker rm -f "${CONTAINER_NAME}" >/dev/null 2>&1 || true
         docker run -d --rm \
             --name "${CONTAINER_NAME}" \
@@ -138,7 +150,7 @@ cmd_bench() {
             qemu-system-arm \
                 -M lm3s6965evb \
                 -nographic \
-                -kernel build/cortex_m3_hoeffding_tree.elf \
+                -kernel "${BUILD_SUBDIR}/cortex_m3_hoeffding_tree.elf" \
                 -serial "tcp:0.0.0.0:${target_port},server,nowait" > "${BUILD_DIR}/qemu.log" 2>&1
 
         trap 'docker rm -f ${CONTAINER_NAME} >/dev/null 2>&1 || true' EXIT
@@ -151,10 +163,12 @@ cmd_bench() {
             --host 127.0.0.1 \
             --port "${target_port}" \
             --suite main \
-            --report "/project/emulation/cortex-m3/cortex_m3_emulation_report.md" \
+            --report "/project/emulation/cortex-m3/${REPORT_NAME}" \
+            --json "/project/emulation/cortex-m3/${JSON_NAME}" \
             ${extra_args[@]+"${extra_args[@]}"}
+        docker exec "${CONTAINER_NAME}" chmod 666 "/project/emulation/cortex-m3/${REPORT_NAME}" "/project/emulation/cortex-m3/${JSON_NAME}" 2>/dev/null || true
     else
-        log_info "Launching background QEMU instance on port ${target_port}..."
+        log_info "Launching background QEMU instance (FIXED_POINT=${FIXED_POINT}) on port ${target_port}..."
         qemu-system-arm \
             -M lm3s6965evb \
             -nographic \
@@ -176,16 +190,17 @@ cmd_bench() {
             --host 127.0.0.1 \
             --port "${target_port}" \
             --suite main \
-            --report "${SCRIPT_DIR}/cortex_m3_emulation_report.md" \
+            --report "${SCRIPT_DIR}/${REPORT_NAME}" \
+            --json "${SCRIPT_DIR}/${JSON_NAME}" \
             ${extra_args[@]+"${extra_args[@]}"}
     fi
 
-    log_success "Benchmark completed! Report saved in ${SCRIPT_DIR}/cortex_m3_emulation_report.md"
+    log_success "Benchmark completed! Report saved in ${SCRIPT_DIR}/${REPORT_NAME}"
 }
 
 cmd_clean() {
     log_info "Cleaning ARM Cortex-M3 build artifacts..."
-    rm -rf "${BUILD_DIR}"
+    rm -rf "${SCRIPT_DIR}/build" "${SCRIPT_DIR}/build_fixed"
     log_success "Clean complete."
 }
 
