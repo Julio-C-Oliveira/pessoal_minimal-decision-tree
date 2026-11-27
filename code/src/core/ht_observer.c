@@ -174,7 +174,23 @@ ht_float_t ht_gaussian_variance(const ht_gaussian_obs_t *obs) {
 
 ht_float_t ht_gaussian_stddev(const ht_gaussian_obs_t *obs) {
     ht_float_t var = ht_gaussian_variance(obs);
-    return (var > HT_CONST(0.0)) ? HT_SQRT(var) : HT_CONST(0.0);
+    if (var > HT_CONST(0.0)) {
+        return HT_SQRT(var);
+    }
+#ifdef HT_USE_FIXED_POINT
+    /* Sub-ULP m2 underflow guard: when samples genuinely vary (max_val > min_val)
+     * but delta^2 < 0.5 ULP in Q16.16 (e.g. narrow monotonic timestamps like Electricity
+     * 'date' with std ~ 0.0006), approximate stddev via uniform range (max-min)/sqrt(12)
+     * so ht_normal_cdf does not collapse into a spurious Dirac step function. */
+    if (obs && obs->count >= HT_CONST(2.0) &&
+        HT_ISFINITE(obs->min_val) && HT_ISFINITE(obs->max_val) &&
+        obs->max_val > obs->min_val) {
+        ht_float_t range = HT_SUB(obs->max_val, obs->min_val);
+        ht_float_t est = HT_MUL(range, HT_CONST(0.288675)); /* 1 / sqrt(12) */
+        return (est > HT_CONST(0.0)) ? est : HT_EPSILON;
+    }
+#endif
+    return HT_CONST(0.0);
 }
 
 ht_float_t ht_normal_cdf(ht_float_t x, ht_float_t mean, ht_float_t stddev) {
@@ -209,14 +225,9 @@ ht_float_t ht_gaussian_cond_proba(const ht_gaussian_obs_t *obs, ht_float_t val) 
         return HT_CONST(0.0);
     }
 
-    ht_float_t s2 = ht_gaussian_variance(obs);
-    if (s2 <= HT_CONST(0.0) || HT_ISNAN(s2)) {
-        return HT_CONST(0.0);
-    }
-
     ht_float_t diff = HT_SUB(val, obs->mean);
-    ht_float_t stddev = HT_SQRT(s2);
-    if (stddev <= HT_CONST(0.0)) {
+    ht_float_t stddev = ht_gaussian_stddev(obs);
+    if (stddev <= HT_CONST(0.0) || HT_ISNAN(stddev)) {
         return HT_CONST(0.0);
     }
     ht_float_t inv_norm = HT_DIV(HT_CONST(1.0), HT_MUL(stddev, HT_SQRT_TWO_PI));
@@ -231,16 +242,12 @@ ht_float_t ht_gaussian_cond_log_proba(const ht_gaussian_obs_t *obs, ht_float_t v
         return -HT_INFINITY;
     }
 
-    ht_float_t s2 = ht_gaussian_variance(obs);
-    if (s2 <= HT_CONST(0.0) || HT_ISNAN(s2)) {
+    ht_float_t stddev = ht_gaussian_stddev(obs);
+    if (stddev <= HT_CONST(0.0) || HT_ISNAN(stddev)) {
         return -HT_INFINITY;
     }
 
     ht_float_t diff = HT_SUB(val, obs->mean);
-    ht_float_t stddev = HT_SQRT(s2);
-    if (stddev <= HT_CONST(0.0)) {
-        return -HT_INFINITY;
-    }
     /* Factorized log(2*pi*s2) = ln(2*pi) + 2*ln(sigma) and z = diff/sigma to prevent Q16.16 overflow */
     ht_float_t log_two_pi_s2 = HT_ADD(HT_LN_2PI, HT_MUL(HT_CONST(2.0), HT_LOG(stddev)));
     ht_float_t z = HT_DIV(diff, stddev);
