@@ -225,6 +225,7 @@ ht_float_t ht_gaussian_cond_proba(const ht_gaussian_obs_t *obs, ht_float_t val) 
         return HT_CONST(0.0);
     }
 
+#ifdef HT_USE_FIXED_POINT
     ht_float_t diff = HT_SUB(val, obs->mean);
     ht_float_t stddev = ht_gaussian_stddev(obs);
     if (stddev <= HT_CONST(0.0) || HT_ISNAN(stddev)) {
@@ -235,6 +236,18 @@ ht_float_t ht_gaussian_cond_proba(const ht_gaussian_obs_t *obs, ht_float_t val) 
     ht_float_t exponent = HT_MUL(HT_CONST(-0.5), HT_MUL(z, z));
 
     return HT_MUL(inv_norm, HT_EXP(exponent));
+#else
+    ht_float_t s2 = ht_gaussian_variance(obs);
+    if (s2 <= HT_CONST(0.0) || HT_ISNAN(s2)) {
+        return HT_CONST(0.0);
+    }
+
+    ht_float_t diff = val - obs->mean;
+    ht_float_t denom = HT_SQRT(HT_TWO_PI * s2);
+    ht_float_t exponent = -(diff * diff) / ((ht_float_t)2.0 * s2);
+
+    return HT_EXP(exponent) / denom;
+#endif
 }
 
 ht_float_t ht_gaussian_cond_log_proba(const ht_gaussian_obs_t *obs, ht_float_t val) {
@@ -242,6 +255,7 @@ ht_float_t ht_gaussian_cond_log_proba(const ht_gaussian_obs_t *obs, ht_float_t v
         return -HT_INFINITY;
     }
 
+#ifdef HT_USE_FIXED_POINT
     ht_float_t stddev = ht_gaussian_stddev(obs);
     if (stddev <= HT_CONST(0.0) || HT_ISNAN(stddev)) {
         return -HT_INFINITY;
@@ -254,6 +268,18 @@ ht_float_t ht_gaussian_cond_log_proba(const ht_gaussian_obs_t *obs, ht_float_t v
     ht_float_t exponent_term = HT_MUL(HT_CONST(0.5), HT_MUL(z, z));
 
     return HT_SUB(HT_MUL(HT_CONST(-0.5), log_two_pi_s2), exponent_term);
+#else
+    ht_float_t s2 = ht_gaussian_variance(obs);
+    if (s2 <= HT_CONST(0.0) || HT_ISNAN(s2)) {
+        return -HT_INFINITY;
+    }
+
+    ht_float_t diff = val - obs->mean;
+    ht_float_t log_two_pi_s2 = HT_LOG(HT_TWO_PI) + HT_LOG(s2);
+    ht_float_t exponent_term = (diff * diff) / ((ht_float_t)2.0 * s2);
+
+    return (ht_float_t)-0.5 * log_two_pi_s2 - exponent_term;
+#endif
 }
 
 uint8_t ht_gaussian_split_suggestions(const ht_gaussian_obs_t obs[HT_MAX_CLASSES],
@@ -437,6 +463,7 @@ void ht_hist_update(ht_hist_obs_t *obs, uint8_t class_idx, ht_float_t val, ht_fl
             w1 = HT_ADD(w1, temp[min_idx + 1U].counts[c]);
         }
         ht_float_t w_comb = HT_ADD(w0, w1);
+#ifdef HT_USE_FIXED_POINT
         /* Overflow-safe weighted average: c0 + (w1 / (w0 + w1)) * (c1 - c0) */
         ht_float_t p_comb = temp[min_idx].center;
         if (w_comb > HT_EPSILON) {
@@ -444,6 +471,11 @@ void ht_hist_update(ht_hist_obs_t *obs, uint8_t class_idx, ht_float_t val, ht_fl
             p_comb = HT_ADD(temp[min_idx].center,
                             HT_MUL(ratio, HT_SUB(temp[min_idx + 1U].center, temp[min_idx].center)));
         }
+#else
+        ht_float_t p_comb = (w_comb > HT_EPSILON)
+            ? ((temp[min_idx].center * w0 + temp[min_idx + 1U].center * w1) / w_comb)
+            : temp[min_idx].center;
+#endif
 
         for (uint8_t i = 0; i < min_idx; ++i) {
             obs->bins[i] = temp[i];
@@ -976,10 +1008,8 @@ void ht_reg_numeric_update(ht_reg_numeric_obs_t *obs,
         ? ht_fixed_saturate64((int64_t)s0->x_mean + (((int64_t)s1->x_mean - (int64_t)s0->x_mean) * w1) / wsum)
         : s0->x_mean;
 #else
-    ht_float_t fused_count = HT_ADD(s0->y_stats.count, s1->y_stats.count);
-    ht_float_t fused_x = HT_ADD(s0->x_mean,
-                                HT_MUL(HT_DIV(s1->y_stats.count, fused_count),
-                                       HT_SUB(s1->x_mean, s0->x_mean)));
+    ht_float_t fused_count = s0->y_stats.count + s1->y_stats.count;
+    ht_float_t fused_x = (s0->y_stats.count * s0->x_mean + s1->y_stats.count * s1->x_mean) / fused_count;
 #endif
     ht_var_stat_t fused_y = ht_var_combine(&s0->y_stats, &s1->y_stats);
 
@@ -1201,12 +1231,18 @@ static void ht_hist_insert_bin(ht_hist_obs_t *dst,
             w1 = HT_ADD(w1, temp[min_idx + 1U].counts[c]);
         }
         ht_float_t w_comb = HT_ADD(w0, w1);
+#ifdef HT_USE_FIXED_POINT
         ht_float_t p_comb = temp[min_idx].center;
         if (w_comb > HT_EPSILON) {
             ht_float_t ratio = HT_DIV(w1, w_comb);
             p_comb = HT_ADD(temp[min_idx].center,
                             HT_MUL(ratio, HT_SUB(temp[min_idx + 1U].center, temp[min_idx].center)));
         }
+#else
+        ht_float_t p_comb = (w_comb > HT_EPSILON)
+            ? ((temp[min_idx].center * w0 + temp[min_idx + 1U].center * w1) / w_comb)
+            : temp[min_idx].center;
+#endif
 
         for (uint8_t i = 0; i < min_idx; ++i) {
             dst->bins[i] = temp[i];
@@ -1304,10 +1340,9 @@ static void ht_reg_numeric_insert_slot(ht_reg_numeric_obs_t *dst,
 #else
     ht_float_t w0 = temp[min_idx].y_stats.count;
     ht_float_t w1 = temp[min_idx + 1U].y_stats.count;
-    ht_float_t w_sum = HT_ADD(w0, w1);
-    ht_float_t fused_x = (w_sum > HT_CONST(0.0))
-        ? HT_ADD(temp[min_idx].x_mean,
-                 HT_MUL(HT_DIV(w1, w_sum), HT_SUB(temp[min_idx + 1U].x_mean, temp[min_idx].x_mean)))
+    ht_float_t w_sum = w0 + w1;
+    ht_float_t fused_x = (w_sum > (ht_float_t)0.0)
+        ? ((w0 * temp[min_idx].x_mean + w1 * temp[min_idx + 1U].x_mean) / w_sum)
         : temp[min_idx].x_mean;
 #endif
     ht_var_stat_t fused_y = ht_var_combine(&temp[min_idx].y_stats, &temp[min_idx + 1U].y_stats);
