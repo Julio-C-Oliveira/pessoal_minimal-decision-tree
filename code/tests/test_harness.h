@@ -65,21 +65,27 @@ extern bool g_current_test_failed;
     } \
 } while (0)
 
+#ifdef HT_USE_FIXED_POINT
+#define HT_FMT_FLOAT_VAL(v) ((double)(v) / 65536.0)
+#else
+#define HT_FMT_FLOAT_VAL(v) ((double)(v))
+#endif
+
 #define HT_ASSERT_FLOAT_NEAR(a, b, tol) do { \
     g_assertions_run++; \
     ht_float_t _fa = (ht_float_t)(a); \
     ht_float_t _fb = (ht_float_t)(b); \
     if (HT_ISNAN(_fa) || HT_ISNAN(_fb)) { \
         printf("\n    [FAIL] %s:%d: %s ~= %s (unexpected NaN: %g vs %g)\n   ", \
-               __FILE__, __LINE__, #a, #b, (double)_fa, (double)_fb); \
+               __FILE__, __LINE__, #a, #b, HT_FMT_FLOAT_VAL(_fa), HT_FMT_FLOAT_VAL(_fb)); \
         g_current_test_failed = true; \
         return; \
     } \
     if (_fa != _fb) { \
-        ht_float_t _diff = HT_FABS(_fa - _fb); \
+        ht_float_t _diff = HT_FABS(HT_SUB(_fa, _fb)); \
         if (_diff > (ht_float_t)(tol)) { \
             printf("\n    [FAIL] %s:%d: %s ~= %s (tol %e): got %g vs %g (diff %e)\n   ", \
-                   __FILE__, __LINE__, #a, #b, (double)(tol), (double)_fa, (double)_fb, (double)_diff); \
+                   __FILE__, __LINE__, #a, #b, HT_FMT_FLOAT_VAL(tol), HT_FMT_FLOAT_VAL(_fa), HT_FMT_FLOAT_VAL(_fb), HT_FMT_FLOAT_VAL(_diff)); \
             g_current_test_failed = true; \
             return; \
         } \
@@ -93,7 +99,7 @@ extern bool g_current_test_failed;
     ht_float_t _val = (ht_float_t)(a); \
     if (!HT_ISNAN(_val)) { \
         printf("\n    [FAIL] %s:%d: Expected %s to be NaN (got %g)\n   ", \
-               __FILE__, __LINE__, #a, (double)_val); \
+               __FILE__, __LINE__, #a, HT_FMT_FLOAT_VAL(_val)); \
         g_current_test_failed = true; \
         return; \
     } \
@@ -158,6 +164,7 @@ extern bool g_current_test_failed;
 
 /* Test suite declarations */
 void test_config_run(void);
+void test_fixed_run(void);
 void test_memory_run(void);
 void test_observer_run(void);
 void test_criterion_run(void);

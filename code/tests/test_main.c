@@ -77,45 +77,45 @@ static void test_config_types_and_sizes(void) {
 }
 
 static void test_math_macros_basic(void) {
-    HT_ASSERT_FLOAT_EQ(HT_SQRT((ht_float_t)4.0), (ht_float_t)2.0);
-    HT_ASSERT_FLOAT_EQ(HT_SQRT((ht_float_t)0.0), (ht_float_t)0.0);
-    HT_ASSERT_FLOAT_EQ(HT_LOG2((ht_float_t)8.0), (ht_float_t)3.0);
-    HT_ASSERT_FLOAT_EQ(HT_LOG2((ht_float_t)1.0), (ht_float_t)0.0);
-    HT_ASSERT_FLOAT_EQ(HT_EXP((ht_float_t)0.0), (ht_float_t)1.0);
-    HT_ASSERT_FLOAT_EQ(HT_FABS((ht_float_t)-42.5), (ht_float_t)42.5);
-    HT_ASSERT_FLOAT_EQ(HT_FABS((ht_float_t)42.5), (ht_float_t)42.5);
+    HT_ASSERT_FLOAT_EQ(HT_SQRT(HT_CONST(4.0)), HT_CONST(2.0));
+    HT_ASSERT_FLOAT_EQ(HT_SQRT(HT_CONST(0.0)), HT_CONST(0.0));
+    HT_ASSERT_FLOAT_EQ(HT_LOG2(HT_CONST(8.0)), HT_CONST(3.0));
+    HT_ASSERT_FLOAT_EQ(HT_LOG2(HT_CONST(1.0)), HT_CONST(0.0));
+    HT_ASSERT_FLOAT_EQ(HT_EXP(HT_CONST(0.0)), HT_CONST(1.0));
+    HT_ASSERT_FLOAT_EQ(HT_FABS(HT_CONST(-42.5)), HT_CONST(42.5));
+    HT_ASSERT_FLOAT_EQ(HT_FABS(HT_CONST(42.5)), HT_CONST(42.5));
 
     /* ln(e^1) = 1.0 */
-    ht_float_t e1 = HT_EXP((ht_float_t)1.0);
-    HT_ASSERT_FLOAT_EQ(HT_LOG(e1), (ht_float_t)1.0);
+    ht_float_t e1 = HT_EXP(HT_CONST(1.0));
+    HT_ASSERT_FLOAT_EQ(HT_LOG(e1), HT_CONST(1.0));
 
     /* Check fundamental constants */
-    HT_ASSERT_FLOAT_NEAR(HT_PI, (ht_float_t)3.141592653589793, 1e-6);
-    HT_ASSERT_FLOAT_NEAR(HT_SQRT2, (ht_float_t)1.414213562373095, 1e-6);
+    HT_ASSERT_FLOAT_NEAR(HT_PI, HT_CONST(3.141592653589793), HT_FLOAT_TOL);
+    HT_ASSERT_FLOAT_NEAR(HT_SQRT2, HT_CONST(1.414213562373095), HT_FLOAT_TOL);
 }
 
 static void test_math_macros_edge_cases(void) {
-    ht_float_t zero = (ht_float_t)0.0;
-    ht_float_t nan_val = zero / zero;
+    ht_float_t zero = HT_CONST(0.0);
+    ht_float_t nan_val = HT_DIV(zero, zero);
 
     HT_ASSERT_NAN(nan_val);
     HT_ASSERT(HT_ISNAN(nan_val));
-    HT_ASSERT(!HT_ISNAN((ht_float_t)1.0));
+    HT_ASSERT(!HT_ISNAN(HT_CONST(1.0)));
 
-    HT_ASSERT(HT_ISFINITE((ht_float_t)1.0));
+    HT_ASSERT(HT_ISFINITE(HT_CONST(1.0)));
     HT_ASSERT(!HT_ISFINITE(HT_INFINITY));
     HT_ASSERT(!HT_ISFINITE(-HT_INFINITY));
     HT_ASSERT(!HT_ISFINITE(nan_val));
 
-    HT_ASSERT_FLOAT_EQ(HT_ERF((ht_float_t)0.0), (ht_float_t)0.0);
-    HT_ASSERT_FLOAT_NEAR(HT_ERF((ht_float_t)1.0), (ht_float_t)0.8427007929, 1e-5);
+    HT_ASSERT_FLOAT_EQ(HT_ERF(HT_CONST(0.0)), HT_CONST(0.0));
+    HT_ASSERT_FLOAT_NEAR(HT_ERF(HT_CONST(1.0)), HT_CONST(0.8427007929497149), HT_CONST(1e-3));
 }
 
 static void test_value_union(void) {
     ht_value_t v;
 
-    v.num = (ht_float_t)123.456;
-    HT_ASSERT_FLOAT_NEAR(v.num, (ht_float_t)123.456, 1e-4);
+    v.num = HT_CONST(123.456);
+    HT_ASSERT_FLOAT_NEAR(v.num, HT_CONST(123.456), HT_CONST(1e-3));
 
     v.cat = 42;
     HT_ASSERT_EQ(v.cat, 42);
@@ -129,12 +129,12 @@ static void test_harness_assertions(void) {
     HT_ASSERT_MSG(true, "truth value");
     HT_ASSERT_EQ(100, 100);
     HT_ASSERT_NEQ(100, 200);
-    HT_ASSERT_FLOAT_EQ((ht_float_t)5.0, (ht_float_t)5.0);
-    HT_ASSERT_FLOAT_NEAR((ht_float_t)1.0, (ht_float_t)1.0001, (ht_float_t)1e-3);
+    HT_ASSERT_FLOAT_EQ(HT_CONST(5.0), HT_CONST(5.0));
+    HT_ASSERT_FLOAT_NEAR(HT_CONST(1.0), HT_CONST(1.0001), HT_CONST(1e-3));
 
-    ht_float_t nan_val = (ht_float_t)0.0 / (ht_float_t)0.0;
+    ht_float_t nan_val = HT_DIV(HT_CONST(0.0), HT_CONST(0.0));
     HT_ASSERT_NAN(nan_val);
-    HT_ASSERT_NOT_NAN((ht_float_t)3.14);
+    HT_ASSERT_NOT_NAN(HT_CONST(3.14));
 
     HT_ASSERT_NULL(NULL);
     int dummy = 42;
@@ -154,15 +154,20 @@ void test_config_run(void) {
 int main(void) {
     printf("==================================================\n");
     printf(" Hoeffding Tree Test Suite (VFDT / HAT in C11)\n");
-#ifndef HT_USE_DOUBLE
-    printf(" Precision Mode: float (32-bit single precision)\n");
-#else
+#ifdef HT_USE_FIXED_POINT
+    printf(" Precision Mode: Q16.16 fixed-point (32-bit zero-libm)\n");
+#elif defined(HT_USE_DOUBLE)
     printf(" Precision Mode: double (64-bit double precision)\n");
+#else
+    printf(" Precision Mode: float (32-bit single precision)\n");
 #endif
     printf("==================================================\n");
 
     /* Nível 1: Módulos e Tipos Básicos */
     test_config_run();
+
+    /* Nível 1 & 2: Motor Matemático Q16.16 e Operadores Abstratos */
+    test_fixed_run();
 
     /* Nível 1 & 2: Slab / Pool Allocator */
     test_memory_run();

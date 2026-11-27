@@ -10,8 +10,16 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <stdbool.h>
+#ifdef HT_USE_FIXED_POINT
+#include <limits.h>
+#else
 #include <math.h>
 #include <float.h>
+#endif
+
+#if defined(HT_USE_FIXED_POINT) && defined(HT_USE_DOUBLE)
+#error "HT_USE_FIXED_POINT and HT_USE_DOUBLE are mutually exclusive!"
+#endif
 
 /* ========================================================================== */
 /* Versioning (Semantic Versioning 2.0.0: MAJOR.MINOR.PATCH)                  */
@@ -37,38 +45,108 @@
  */
 const char *ht_version(void);
 
-#ifdef HT_USE_DOUBLE
+#ifdef HT_USE_FIXED_POINT
+
+typedef int32_t ht_float_t;
+
+#define HT_FIXED_SHIFT               16
+#define HT_FIXED_ONE                 ((ht_float_t)(1L << HT_FIXED_SHIFT))       /* 65536 */
+#define HT_FIXED_HALF                ((ht_float_t)(1L << (HT_FIXED_SHIFT - 1))) /* 32768 */
+#define HT_FIXED_RESCALE_THRESHOLD   ((ht_float_t)0x40000000L)                  /* 16384.0 in Q16.16 */
+#define HT_FIXED_M2_SHIFT            8                                          /* Q24.8 for ht_var_stat_t.m2 */
+#define HT_FIXED_M2_RESCALE_THR      ((ht_float_t)0x40000000L)                  /* 4194304.0 in Q24.8 */
+
+/* Compile-time literal conversion (folded at compile time, zero runtime float!) */
+#define HT_CONST(x)                  ((ht_float_t)((double)(x) >= 0.0 \
+                                      ? ((double)(x) * 65536.0 + 0.5) \
+                                      : ((double)(x) * 65536.0 - 0.5)))
+
+#include "ht_math_fixed.h"
+
+#define HT_FROM_INT(i)               ht_fixed_from_int((int32_t)(i))
+#define HT_FROM_UINT(u)              ht_fixed_from_uint((uint32_t)(u))
+#define HT_TO_INT(q)                 ht_fixed_to_int((q))
+
+#define HT_ADD(a, b)                 ht_fixed_add((a), (b))
+#define HT_SUB(a, b)                 ht_fixed_sub((a), (b))
+#define HT_MUL(a, b)                 ht_fixed_mul((a), (b))
+#define HT_DIV(a, b)                 ht_fixed_div((a), (b))
+
+#define HT_SQRT(x)                   ht_fixed_sqrt((x))
+#define HT_LOG(x)                    ht_fixed_log((x))
+#define HT_LOG2(x)                   ht_fixed_log2((x))
+#define HT_EXP(x)                    ht_fixed_exp((x))
+#define HT_ERF(x)                    ht_fixed_erf((x))
+#define HT_ERFC(x)                   ht_fixed_erfc((x))
+#define HT_FABS(x)                   ht_fixed_abs((x))
+
+#define HT_NAN_VAL                   INT32_MIN
+#define HT_INFINITY                  INT32_MAX
+#define HT_NEG_INFINITY              (-INT32_MAX)
+#define HT_ISNAN(x)                  ((x) == HT_NAN_VAL)
+#define HT_ISFINITE(x)               ((x) != HT_NAN_VAL && (x) != INT32_MAX && (x) != -INT32_MAX)
+#define HT_EPSILON                   ((ht_float_t)1)      /* 2^-16 ~= 1.5259e-5 */
+#define HT_FLOAT_TOL                 ((ht_float_t)66)     /* ~0.001 in Q16.16 */
+
+#elif defined(HT_USE_DOUBLE)
+
 typedef double ht_float_t;
-#define HT_SQRT(x)      sqrt(x)
-#define HT_LOG(x)       log(x)
-#define HT_LOG2(x)      log2(x)
-#define HT_EXP(x)       exp(x)
-#define HT_ERF(x)       erf(x)
-#define HT_ERFC(x)      erfc(x)
-#define HT_FABS(x)      fabs(x)
-#define HT_ISNAN(x)     isnan(x)
-#define HT_ISFINITE(x)  isfinite(x)
-#define HT_INFINITY     ((ht_float_t)INFINITY)
-#define HT_EPSILON      ((ht_float_t)1e-12)
-#define HT_FLOAT_TOL    ((ht_float_t)1e-12)
+#define HT_CONST(x)                  ((ht_float_t)(x))
+#define HT_FROM_INT(i)               ((ht_float_t)(i))
+#define HT_FROM_UINT(u)              ((ht_float_t)(u))
+#define HT_TO_INT(q)                 ((int32_t)(q))
+#define HT_ADD(a, b)                 ((a) + (b))
+#define HT_SUB(a, b)                 ((a) - (b))
+#define HT_MUL(a, b)                 ((a) * (b))
+#define HT_DIV(a, b)                 ((a) / (b))
+#define HT_SQRT(x)                   sqrt(x)
+#define HT_LOG(x)                    log(x)
+#define HT_LOG2(x)                   log2(x)
+#define HT_EXP(x)                    exp(x)
+#define HT_ERF(x)                    erf(x)
+#define HT_ERFC(x)                   erfc(x)
+#define HT_FABS(x)                   fabs(x)
+#define HT_NAN_VAL                   ((ht_float_t)NAN)
+#define HT_ISNAN(x)                  isnan(x)
+#define HT_ISFINITE(x)               isfinite(x)
+#define HT_INFINITY                  ((ht_float_t)INFINITY)
+#define HT_NEG_INFINITY              (-HT_INFINITY)
+#define HT_EPSILON                   ((ht_float_t)1e-12)
+#define HT_FLOAT_TOL                 ((ht_float_t)1e-12)
+
 #else
+
 typedef float ht_float_t;
-#define HT_SQRT(x)      sqrtf(x)
-#define HT_LOG(x)       logf(x)
-#define HT_LOG2(x)      log2f(x)
-#define HT_EXP(x)       expf(x)
-#define HT_ERF(x)       erff(x)
-#define HT_ERFC(x)      erfcf(x)
-#define HT_FABS(x)      fabsf(x)
-#define HT_ISNAN(x)     isnan(x)
-#define HT_ISFINITE(x)  isfinite(x)
-#define HT_INFINITY     ((ht_float_t)INFINITY)
-#define HT_EPSILON      ((ht_float_t)1e-7f)
-#define HT_FLOAT_TOL    ((ht_float_t)1e-5f)
+#define HT_CONST(x)                  ((ht_float_t)(x))
+#define HT_FROM_INT(i)               ((ht_float_t)(i))
+#define HT_FROM_UINT(u)              ((ht_float_t)(u))
+#define HT_TO_INT(q)                 ((int32_t)(q))
+#define HT_ADD(a, b)                 ((a) + (b))
+#define HT_SUB(a, b)                 ((a) - (b))
+#define HT_MUL(a, b)                 ((a) * (b))
+#define HT_DIV(a, b)                 ((a) / (b))
+#define HT_SQRT(x)                   sqrtf(x)
+#define HT_LOG(x)                    logf(x)
+#define HT_LOG2(x)                   log2f(x)
+#define HT_EXP(x)                    expf(x)
+#define HT_ERF(x)                    erff(x)
+#define HT_ERFC(x)                   erfcf(x)
+#define HT_FABS(x)                   fabsf(x)
+#define HT_NAN_VAL                   ((ht_float_t)NAN)
+#define HT_ISNAN(x)                  isnan(x)
+#define HT_ISFINITE(x)               isfinite(x)
+#define HT_INFINITY                  ((ht_float_t)INFINITY)
+#define HT_NEG_INFINITY              (-HT_INFINITY)
+#define HT_EPSILON                   ((ht_float_t)1e-7f)
+#define HT_FLOAT_TOL                 ((ht_float_t)1e-5f)
+
 #endif
 
-#define HT_PI           ((ht_float_t)3.14159265358979323846)
-#define HT_SQRT2        ((ht_float_t)1.41421356237309504880)
+#define HT_PI                        HT_CONST(3.14159265358979323846)
+#define HT_SQRT2                     HT_CONST(1.41421356237309504880)
+#define HT_LN2                       HT_CONST(0.69314718055994530942)
+#define HT_LN10                      HT_CONST(2.30258509299404568402)
+#define HT_LN_2PI                    HT_CONST(1.83787706640934548356)
 
 #ifndef HT_MAX_FEATURES
 #define HT_MAX_FEATURES      16U
