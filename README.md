@@ -24,7 +24,7 @@ A biblioteca unifica **4 variantes de árvores de decisão em streaming** dentro
 - **Atributos Mistos e Valores Ausentes (`NaN`):** Suporte nativo a colunas numéricas (`HT_FEAT_NUMERIC`) e categóricas (`HT_FEAT_CATEGORICAL`), roteando leituras ausentes (`NAN` ou categoria `< 0`) pelo filho mais populoso com custo zero de RAM.
 - **Reciclagem Determinística (*Slab/Pool Allocators*):** Indexação 100% baseada em `uint16_t` (sem ponteiros) e desativação automática de folhas menos promissoras (*Promise Deactivation*) quando o pool atinge o limite.
 - **Serialização Binária Direta (`ht_tree_save` / `ht_tree_load`):** Exporta checkpoints completos de treino ou imagens enxutas somente-inferência ($20\text{ B}$ por nó em `float32`) prontas para Flash/EEPROM.
-- **Precisão Configurável (`ht_float_t`):** `float` (32 bits) por padrão para FPU de microcontroladores ou `double` (64 bits) via `-DHT_USE_DOUBLE`.
+- **Precisão Configurável (`ht_float_t`):** 3 modos selecionáveis em compilação — **`float32`** (padrão, FPU hardware), **`double64`** (`-DHT_USE_DOUBLE`, paridade de referência) e **Ponto Fixo `Q16.16` Zero-Libm** (`-DHT_USE_FIXED_POINT`, aritmética 100% inteira sem `<math.h>`/`-lm` nem `soft-fp`, reduzindo `-25,7%` de Flash e acelerando em **`1,86×` a `4,48×`** no ARM Cortex-M3 sem FPU mantendo exatamente o mesmo footprint de RAM).
 
 ---
 
@@ -35,8 +35,11 @@ A biblioteca unifica **4 variantes de árvores de decisão em streaming** dentro
 O projeto utiliza exclusivamente a biblioteca padrão C11 e `<math.h>` (`-lm`):
 
 ```bash
-# Compila a biblioteca estática (code/build/libht.a) e roda todos os testes unitários e E2E
+# Compila a biblioteca estática (code/build/libht.a) e roda todos os testes unitários e E2E (float32)
 make all
+
+# Compila e executa os testes em Ponto Fixo Q16.16 Zero-Libm (sem -lm + auditoria nm)
+make test-fixed
 
 # Compila e executa os testes em precisão dupla (64-bit double)
 make clean && make test CFLAGS_EXTRA="-DHT_USE_DOUBLE"
@@ -54,9 +57,10 @@ make bench-federated
 make bench-main-federated
 make bench-fed-net
 
-# Executa a suíte de emulação ESP32 e ARM Cortex-M3 (QEMU)
+# Executa a suíte de emulação ESP32 e ARM Cortex-M3 (QEMU: float32 soft-fp e Q16.16 zero-libm)
 make bench-esp32
 bash emulation/cortex-m3/run_qemu.sh bench
+FIXED_POINT=1 bash emulation/cortex-m3/run_qemu.sh bench
 ```
 
 ### 2.2 Exemplo Básico em C11 (`VFDT`)
@@ -127,6 +131,7 @@ Para evitar dados defasados no `README.md`, os resultados detalhados de acuráci
 | **Escalonamento e Extrema Restrição de RAM** *(Tier 256 a Tier 4)* | [`benchmarks/`](benchmarks/README.md) | • [`memory_benchmark_report.md`](benchmarks/memory_benchmark_report.md) | • `compare_river.py`<br/>• `bench_c_runner.c` | `make bench-memory` |
 | **Micro-Pipelines de Pré-Processamento** *(`libht_prep`)* | [`benchmarks/`](benchmarks/README.md) | • [`prep_benchmark_report.md`](benchmarks/prep_benchmark_report.md) | • `compare_prep.py` | `make bench-prep` |
 | **Limites em Visão Computacional** *(MNIST Triplo)* | [`benchmarks/`](benchmarks/README.md) | • [`triple_benchmark_report.md`](benchmarks/triple_benchmark_report.md) | • `compare_triple.py`<br/>• `generate_mnist.py` | `make bench-triple` |
+| **Ponto Fixo `Q16.16` Zero-Libm** *(8 Datasets Host + Cortex-M3 sem FPU)* | [`main_benchmark/`](main_benchmark/fixed_point_benchmark_report.md)<br/>[`emulation/cortex-m3/`](emulation/cortex-m3/cortex_m3_fixed_point_report.md) | • [`fixed_point_benchmark_report.md`](main_benchmark/fixed_point_benchmark_report.md)<br/>• [`cortex_m3_fixed_point_report.md`](emulation/cortex-m3/cortex_m3_fixed_point_report.md) | • `fixed_point_benchmark.py`<br/>• `FIXED_POINT=1 run_qemu.sh` | `.venv/bin/python main_benchmark/fixed_point_benchmark.py`<br/>`FIXED_POINT=1 bash emulation/cortex-m3/run_qemu.sh bench` |
 | **Emulação Hardware-in-the-Loop em ESP32 & ARM Cortex-M3** *(QEMU)* | [`emulation/esp32/`](emulation/esp32/esp32_emulation_report.md)<br/>[`emulation/cortex-m3/`](emulation/cortex-m3/cortex_m3_emulation_report.md) | • [`esp32_emulation_report.md`](emulation/esp32/esp32_emulation_report.md)<br/>• [`cortex_m3_emulation_report.md`](emulation/cortex-m3/cortex_m3_emulation_report.md) | • `stream_runner.py`<br/>• `run_qemu.sh`<br/>• Firmwares ESP-IDF & Bare-Metal | `make bench-esp32`<br/>`bash emulation/cortex-m3/run_qemu.sh bench` |
 
 #### Descrição Detalhada das Suítes:
