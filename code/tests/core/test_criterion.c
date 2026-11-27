@@ -612,6 +612,96 @@ static void test_reg_criterion_vtable_and_null_edge_cases(void) {
     HT_ASSERT_EQ(second.merit, -HT_INFINITY);
 }
 
+static void test_evaluate_hist_observer_gini_and_infogain(void) {
+    ht_hist_obs_t obs;
+    ht_hist_init(&obs);
+
+    ht_float_t pre_dist[HT_MAX_CLASSES] = { HT_CONST(50.0), HT_CONST(50.0), 0, 0 };
+    const ht_criterion_vtable_t *ig = ht_criterion_get_vtable(HT_CRIT_INFO_GAIN);
+    const ht_criterion_vtable_t *gini = ht_criterion_get_vtable(HT_CRIT_GINI);
+    HT_ASSERT_NOT_NULL(ig);
+    HT_ASSERT_NOT_NULL(gini);
+
+    /* NULL / empty observer guards */
+    ht_split_candidate_t cand;
+    ht_evaluate_hist_observer(NULL, pre_dist, 2, 0, ig, HT_CONST(0.01), &cand);
+    HT_ASSERT_EQ(cand.merit, -HT_INFINITY);
+    ht_evaluate_hist_observer(&obs, pre_dist, 2, 0, ig, HT_CONST(0.01), &cand);
+    HT_ASSERT_EQ(cand.merit, -HT_INFINITY);
+    ht_evaluate_hist_observer(&obs, pre_dist, 2, 0, ig, HT_CONST(0.01), NULL);
+
+    /* Separable bimodal stream: class 0 around x=1..2, class 1 around x=8..9 */
+    for (int i = 0; i < 50; ++i) {
+        ht_hist_update(&obs, 0U, HT_ADD(HT_CONST(1.0), HT_MUL(HT_FROM_INT(i % 4), HT_CONST(0.25))), HT_CONST(1.0));
+        ht_hist_update(&obs, 1U, HT_ADD(HT_CONST(8.0), HT_MUL(HT_FROM_INT(i % 4), HT_CONST(0.25))), HT_CONST(1.0));
+    }
+
+    ht_evaluate_hist_observer(&obs, pre_dist, 2, 0, ig, HT_CONST(0.01), &cand);
+    HT_ASSERT_EQ(cand.feature_idx, 0U);
+    HT_ASSERT(cand.merit > HT_CONST(0.5));
+    HT_ASSERT(cand.split_val.threshold > HT_CONST(1.5) && cand.split_val.threshold < HT_CONST(8.5));
+
+    ht_split_candidate_t cand_g;
+    ht_evaluate_hist_observer(&obs, pre_dist, 2, 0, gini, HT_CONST(0.01), &cand_g);
+    HT_ASSERT_EQ(cand_g.feature_idx, 0U);
+    HT_ASSERT(cand_g.merit > HT_CONST(0.2));
+
+    /* Extended multi-feature candidate search using HT_OBS_HISTOGRAM */
+    static ht_memory_pool_t pool;
+    ht_memory_init(&pool);
+    uint16_t s_idx = ht_stats_alloc(&pool);
+    ht_leaf_stats_t *st = ht_stats_get(&pool, s_idx);
+    HT_ASSERT_NOT_NULL(st);
+    st->observers[0].hist = obs;
+    ht_hist_init(&st->observers[1].hist);
+    for (int i = 0; i < 50; ++i) {
+        ht_hist_update(&st->observers[1].hist, (uint8_t)(i % 2), HT_CONST(5.0), HT_CONST(1.0));
+    }
+    ht_feature_type_t ftypes[HT_MAX_FEATURES];
+    memset(ftypes, 0, sizeof(ftypes));
+    ftypes[0] = HT_FEAT_NUMERIC;
+    ftypes[1] = HT_FEAT_NUMERIC;
+    ht_split_candidate_t best, second;
+    ht_find_best_split_candidates_ext(st, pre_dist, ftypes, 2, 2, ig, HT_CONST(0.01), true,
+                                      HT_OBS_HISTOGRAM, &best, &second);
+    HT_ASSERT_EQ(best.feature_idx, 0U);
+    HT_ASSERT(best.merit > HT_CONST(0.5));
+    ht_stats_free(&pool, s_idx);
+}
+
+static void test_hoeffding_bound_ln_and_high_amplitude_vr64(void) {
+    /* Edge cases of ht_hoeffding_bound_ln */
+    HT_ASSERT_EQ(ht_hoeffding_bound_ln(HT_CONST(1.0), HT_CONST(10.0), HT_CONST(0.0)), HT_INFINITY);
+    HT_ASSERT_EQ(ht_hoeffding_bound_ln(HT_CONST(0.0), HT_CONST(10.0), HT_CONST(100.0)), HT_CONST(0.0));
+    HT_ASSERT_EQ(ht_hoeffding_bound_ln(HT_CONST(1.0), HT_CONST(0.0), HT_CONST(100.0)), HT_CONST(0.0));
+    ht_float_t eps_huge = ht_hoeffding_bound_ln(HT_CONST(5000.0), HT_CONST(30.0), HT_CONST(1.0));
+    HT_ASSERT(eps_huge > HT_CONST(0.0));
+
+    /* High-amplitude regression observer + Block-Rescaled pre_var (NYC Taxi regime) */
+    ht_reg_numeric_obs_t robs;
+    ht_reg_numeric_init(&robs);
+    ht_var_stat_t pre_var;
+    ht_var_init(&pre_var);
+
+    for (int i = 0; i < 400; ++i) {
+        ht_float_t x = (i < 200)
+            ? HT_ADD(HT_CONST(1.0), HT_MUL(HT_FROM_INT(i % 10), HT_CONST(0.2)))
+            : HT_ADD(HT_CONST(20.0), HT_MUL(HT_FROM_INT(i % 10), HT_CONST(0.2)));
+        ht_float_t y = (i < 200)
+            ? HT_ADD(HT_CONST(250.0), HT_FROM_INT(i % 40))
+            : HT_ADD(HT_CONST(2800.0), HT_FROM_INT(i % 60));
+        ht_reg_numeric_update(&robs, x, y, HT_CONST(1.0));
+        ht_var_update(&pre_var, y, HT_CONST(1.0));
+    }
+
+    ht_split_candidate_t cand;
+    ht_evaluate_reg_numeric_observer(&robs, &pre_var, 0U, HT_CONST(5.0), HT_CONST(0.01), &cand);
+    HT_ASSERT_EQ(cand.feature_idx, 0U);
+    HT_ASSERT(HT_ISFINITE(cand.merit));
+    HT_ASSERT(cand.merit > HT_CONST(100.0));
+    HT_ASSERT(cand.split_val.threshold > HT_CONST(2.0) && cand.split_val.threshold < HT_CONST(21.0));
+}
+
 /* ========================================================================= */
 /* --- Test Runner Entry Point --------------------------------------------- */
 /* ========================================================================= */
@@ -633,4 +723,6 @@ void test_criterion_run(void) {
     HT_RUN_TEST(test_evaluate_reg_numeric_and_categorical_observers);
     HT_RUN_TEST(test_find_best_reg_split_candidates_and_tie_breaking);
     HT_RUN_TEST(test_reg_criterion_vtable_and_null_edge_cases);
+    HT_RUN_TEST(test_evaluate_hist_observer_gini_and_infogain);
+    HT_RUN_TEST(test_hoeffding_bound_ln_and_high_amplitude_vr64);
 }

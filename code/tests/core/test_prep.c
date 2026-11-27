@@ -268,6 +268,102 @@ static void test_prep_pipeline_full_flow(void) {
     HT_ASSERT_EQ(test_out[2].cat, 0);
 }
 
+static void test_prep_edge_cases_nan_high_scale_and_quantizer_boundaries(void) {
+    /* 1. Scaler edge cases: NULL, invalid feature, NaN, constant variance, high-scale Q16.16 */
+    ht_scaler_t sc;
+    ht_scaler_init(&sc);
+    ht_scaler_set_mode(&sc, 0, HT_SCALER_STANDARD);
+    ht_scaler_set_mode(&sc, 1, HT_SCALER_MINMAX);
+
+    HT_ASSERT(HT_ISNAN(ht_scaler_transform_one(&sc, 0, HT_NAN_VAL)));
+    HT_ASSERT_FLOAT_EQ(ht_scaler_transform_one(&sc, 0, HT_CONST(5.0)), HT_CONST(0.0)); /* n < 2 */
+    HT_ASSERT_FLOAT_EQ(ht_scaler_transform_one(&sc, 1, HT_CONST(5.0)), HT_CONST(0.0)); /* min == max */
+    HT_ASSERT_FLOAT_EQ(ht_scaler_transform_one(&sc, 99, HT_CONST(7.0)), HT_CONST(7.0)); /* out-of-range */
+    ht_scaler_update_one(&sc, 0, HT_NAN_VAL, HT_CONST(1.0));
+
+    /* Constant values: variance == 0 */
+    for (int i = 0; i < 10; ++i) {
+        ht_scaler_update_one(&sc, 0, HT_CONST(42.0), HT_CONST(1.0));
+        ht_scaler_update_one(&sc, 1, HT_CONST(42.0), HT_CONST(1.0));
+    }
+    HT_ASSERT_FLOAT_EQ(ht_scaler_transform_one(&sc, 0, HT_CONST(42.0)), HT_CONST(0.0));
+    HT_ASSERT_FLOAT_EQ(ht_scaler_transform_one(&sc, 1, HT_CONST(42.0)), HT_CONST(0.0));
+
+    /* High-amplitude + high-weight updates triggering Q16.16 rescaling in scaler */
+    for (int i = 0; i < 200; ++i) {
+        ht_float_t v = ((i & 1) == 0) ? HT_CONST(100.0) : HT_CONST(900.0);
+        ht_scaler_update_one(&sc, 0, v, HT_CONST(100.0));
+    }
+    HT_ASSERT(HT_ISFINITE(ht_scaler_transform_one(&sc, 0, HT_CONST(500.0))));
+
+    /* 2. Hampel edge cases: NULL, NaN, out-of-range feature */
+    ht_filter_hampel_t hf;
+    ht_hampel_init(&hf);
+    ht_hampel_set_enabled(&hf, 0, true);
+    HT_ASSERT(HT_ISNAN(ht_hampel_filter_one(&hf, 0, HT_NAN_VAL)));
+    HT_ASSERT_FLOAT_EQ(ht_hampel_filter_one(&hf, 99, HT_CONST(3.0)), HT_CONST(3.0));
+
+    /* 3. Space-Saving encoder: K > HT_MAX_CATEGORIES clamping, rescaling & unseen category */
+    ht_encoder_freq_t enc;
+    ht_encoder_init(&enc);
+    ht_encoder_set_mode(&enc, 0, HT_ENC_TOP_K_CAT, 100U); /* clamps to HT_MAX_CATEGORIES */
+    ht_encoder_set_mode(&enc, 1, HT_ENC_FREQ_RATIO, 3U);
+    ht_encoder_update_one(&enc, 0, -1, HT_CONST(1.0)); /* missing cat ignored */
+    for (int i = 0; i < 200; ++i) {
+        ht_encoder_update_one(&enc, 0, 10, HT_CONST(100.0));
+        ht_encoder_update_one(&enc, 1, 20, HT_CONST(100.0));
+    }
+    ht_value_t eo0 = ht_encoder_transform_one(&enc, 0, 10);
+    ht_value_t eo_unseen = ht_encoder_transform_one(&enc, 0, 99999);
+    ht_value_t eo_freq = ht_encoder_transform_one(&enc, 1, 20);
+    ht_value_t eo_miss = ht_encoder_transform_one(&enc, 0, -1);
+    HT_ASSERT_EQ(eo0.cat, 0);
+    HT_ASSERT(eo_unseen.cat >= 0);
+    HT_ASSERT(eo_freq.num > HT_CONST(0.5));
+    HT_ASSERT_EQ(eo_miss.cat, -1);
+
+    /* 4. Quantizer boundary branches: empty, 1 centroid, below-min, above-max, exact match, left insert, NaN */
+    ht_quantizer_t q;
+    ht_quantizer_init(&q);
+    ht_quantizer_set_mode(&q, 0, HT_QUANT_CDF_UNIFORM, 4);
+    ht_quantizer_set_mode(&q, 1, HT_QUANT_KBINS_CAT, 4);
+    ht_quantizer_set_mode(&q, 2, HT_QUANT_KBINS_ORDINAL, 4);
+
+    /* Empty quantizer */
+    HT_ASSERT_FLOAT_EQ(ht_quantizer_transform_one(&q, 0, HT_CONST(5.0)).num, HT_CONST(0.5));
+    HT_ASSERT_EQ(ht_quantizer_transform_one(&q, 1, HT_CONST(5.0)).cat, 2);
+    HT_ASSERT(HT_ISNAN(ht_quantizer_transform_one(&q, 0, HT_NAN_VAL).num));
+    HT_ASSERT_EQ(ht_quantizer_transform_one(&q, 1, HT_NAN_VAL).cat, -1);
+    HT_ASSERT(HT_ISNAN(ht_quantizer_transform_one(&q, 2, HT_NAN_VAL).num));
+
+    /* Single centroid */
+    ht_quantizer_update_one(&q, 0, HT_CONST(10.0), HT_CONST(1.0));
+    ht_quantizer_update_one(&q, 0, HT_CONST(10.0), HT_CONST(2.0)); /* exact match */
+    HT_ASSERT_FLOAT_EQ(ht_quantizer_transform_one(&q, 0, HT_CONST(5.0)).num, HT_CONST(0.0));
+    HT_ASSERT_FLOAT_EQ(ht_quantizer_transform_one(&q, 0, HT_CONST(10.0)).num, HT_CONST(0.5));
+    HT_ASSERT_FLOAT_EQ(ht_quantizer_transform_one(&q, 0, HT_CONST(20.0)).num, HT_CONST(1.0));
+
+    /* Left insert + right insert + below-min + above-max + ordinal bins + quantile */
+    ht_quantizer_update_one(&q, 0, HT_CONST(2.0), HT_CONST(1.0));  /* left insert */
+    ht_quantizer_update_one(&q, 0, HT_CONST(20.0), HT_CONST(1.0)); /* right insert */
+    ht_quantizer_update_one(&q, 0, HT_NAN_VAL, HT_CONST(1.0));     /* NaN ignored */
+    HT_ASSERT_FLOAT_EQ(ht_quantizer_transform_one(&q, 0, HT_CONST(-10.0)).num, HT_CONST(0.0));
+    HT_ASSERT_FLOAT_EQ(ht_quantizer_transform_one(&q, 0, HT_CONST(100.0)).num, HT_CONST(1.0));
+    ht_float_t mid_cdf = ht_quantizer_transform_one(&q, 0, HT_CONST(6.0)).num;
+    HT_ASSERT(mid_cdf > HT_CONST(0.0) && mid_cdf < HT_CONST(1.0));
+
+    ht_float_t q_med = ht_quantizer_quantile(&q.feat[0], HT_CONST(0.5));
+    HT_ASSERT(q_med >= HT_CONST(2.0) && q_med <= HT_CONST(20.0));
+
+    for (int i = 0; i < 40; ++i) {
+        ht_quantizer_update_one(&q, 2, HT_FROM_INT(i), HT_CONST(1.0));
+    }
+    ht_float_t ord_lo = ht_quantizer_transform_one(&q, 2, HT_CONST(0.0)).num;
+    ht_float_t ord_hi = ht_quantizer_transform_one(&q, 2, HT_CONST(39.0)).num;
+    HT_ASSERT(ord_lo >= HT_CONST(0.0) && ord_hi <= HT_CONST(3.0));
+    HT_ASSERT(ord_hi > ord_lo);
+}
+
 void test_prep_run(void) {
     HT_TEST_SUITE_BEGIN("Nivel 1 & 2: Micro-Pipelines de Pre-Processamento (ht_prep)");
     HT_RUN_TEST(test_scaler_welford_standard);
@@ -276,4 +372,5 @@ void test_prep_run(void) {
     HT_RUN_TEST(test_encoder_space_saving);
     HT_RUN_TEST(test_quantizer_ben_haim_cdf_and_kbins);
     HT_RUN_TEST(test_prep_pipeline_full_flow);
+    HT_RUN_TEST(test_prep_edge_cases_nan_high_scale_and_quantizer_boundaries);
 }

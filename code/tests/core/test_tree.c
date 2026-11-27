@@ -1128,6 +1128,219 @@ static void test_tree_delta_pow10_sub_ulp_parity(void) {
     HT_ASSERT(tree.n_decision_nodes >= 1U);
 }
 
+static void test_tree_histogram_observer_with_nb_and_nba(void) {
+    ht_config_params_t params;
+    ht_default_params(&params, 2, 2);
+    params.numeric_obs_type = HT_OBS_HISTOGRAM;
+    params.leaf_prediction = HT_LEAF_NBA;
+    params.grace_period = 25U;
+    params.delta = HT_CONST(1e-2);
+
+    static ht_tree_t tree;
+    HT_ASSERT_EQ(ht_tree_init(&tree, &params), HT_OK);
+
+    ht_value_t x[HT_MAX_FEATURES];
+    memset(x, 0, sizeof(x));
+
+    for (int i = 0; i < 300; ++i) {
+        uint8_t y = (uint8_t)(i % 2);
+        x[0].num = (y == 0U)
+            ? HT_ADD(HT_CONST(1.0), HT_MUL(HT_FROM_INT(i % 5), HT_CONST(0.2)))
+            : HT_ADD(HT_CONST(10.0), HT_MUL(HT_FROM_INT(i % 5), HT_CONST(0.2)));
+        x[1].num = HT_FROM_INT(i % 7);
+        HT_ASSERT_EQ(ht_tree_learn_one(&tree, x, y, HT_CONST(1.0)), HT_OK);
+    }
+
+    HT_ASSERT(tree.n_decision_nodes >= 1U);
+
+    ht_float_t proba[HT_MAX_CLASSES];
+    x[0].num = HT_CONST(1.3);
+    x[1].num = HT_CONST(2.0);
+    HT_ASSERT_EQ(ht_tree_predict_proba(&tree, x, proba), HT_OK);
+    HT_ASSERT(proba[0] > HT_CONST(0.7));
+    HT_ASSERT_EQ(ht_tree_predict(&tree, x), 0U);
+
+    /* Switch to strict HT_LEAF_NB and predict with NaN on split feature */
+    tree.params.leaf_prediction = HT_LEAF_NB;
+    x[0].num = HT_NAN_VAL;
+    HT_ASSERT_EQ(ht_tree_predict_proba(&tree, x, proba), HT_OK);
+    HT_ASSERT(HT_ISFINITE(proba[0]) && HT_ISFINITE(proba[1]));
+}
+
+static void test_tree_set_adwin_pool_and_subtree_reset_edges(void) {
+    static ht_tree_t tree;
+    static ht_adwin_pool_t ad_pool;
+    HT_ASSERT_EQ(ht_adwin_pool_init(&ad_pool), HT_OK);
+
+    /* NULL / invalid guards */
+    HT_ASSERT_EQ(ht_tree_set_adwin_pool(NULL, &ad_pool), HT_ERR_INVALID_ARG);
+    ht_tree_set_defer_splits(NULL, true);
+    HT_ASSERT_EQ(ht_tree_reset_subtree_to_leaf(NULL, 0U), HT_ERR_INVALID_ARG);
+
+    ht_config_params_t params;
+    ht_default_params(&params, 2, 2);
+    params.grace_period = 20U;
+    params.delta = HT_CONST(1e-2);
+    HT_ASSERT_EQ(ht_tree_init(&tree, &params), HT_OK);
+
+    /* Attach and detach ADWIN pool dynamically via ht_tree_set_adwin_pool */
+    HT_ASSERT_EQ(ht_tree_set_adwin_pool(&tree, &ad_pool), HT_OK);
+    HT_ASSERT_EQ(tree.adwin_pool, &ad_pool);
+    HT_ASSERT_EQ(ht_tree_set_adwin_pool(&tree, NULL), HT_OK);
+    HT_ASSERT_NULL(tree.adwin_pool);
+    HT_ASSERT_EQ(ht_tree_set_adwin_pool(&tree, &ad_pool), HT_OK);
+
+    /* Grow a multi-level tree and exercise NaN routing across internal subtrees */
+    ht_value_t x[HT_MAX_FEATURES];
+    memset(x, 0, sizeof(x));
+    for (int i = 0; i < 400; ++i) {
+        uint8_t y = (uint8_t)((i % 4 < 2) ? 0 : 1);
+        x[0].num = (y == 0U) ? HT_FROM_INT(i % 3) : HT_FROM_INT(10 + (i % 3));
+        x[1].num = (i % 2 == 0) ? HT_CONST(0.5) : HT_CONST(8.5);
+        HT_ASSERT_EQ(ht_tree_learn_one(&tree, x, y, HT_CONST(1.0)), HT_OK);
+    }
+    HT_ASSERT(tree.n_decision_nodes >= 1U);
+
+    /* Route with NaN on feature 0 (exercises ht_node_total_weight on subtrees) */
+    x[0].num = HT_NAN_VAL;
+    uint16_t leaf = ht_tree_route(&tree, x, NULL, NULL, NULL);
+    HT_ASSERT_NEQ(leaf, HT_INVALID_IDX);
+
+    /* Invalid node index for reset */
+    HT_ASSERT_EQ(ht_tree_reset_subtree_to_leaf(&tree, HT_INVALID_IDX), HT_ERR_INVALID_ARG);
+    HT_ASSERT_EQ(ht_tree_reset_subtree_to_leaf(&tree, HT_MAX_NODES), HT_ERR_INVALID_ARG);
+
+    /* Reset root subtree in-place back to single clean active leaf */
+    HT_ASSERT_EQ(ht_tree_reset_subtree_to_leaf(&tree, tree.root_idx), HT_OK);
+    HT_ASSERT_EQ(tree.n_decision_nodes, 0U);
+    HT_ASSERT_EQ(tree.n_active_leaves, 1U);
+}
+
+static void test_tree_serialization_corrupt_and_cross_precision_flags(void) {
+    ht_config_params_t params;
+    ht_default_params(&params, 2, 2);
+    params.grace_period = 20U;
+    params.delta = HT_CONST(1e-2);
+
+    static ht_tree_t tree, loaded;
+    HT_ASSERT_EQ(ht_tree_init(&tree, &params), HT_OK);
+
+    ht_value_t x[HT_MAX_FEATURES];
+    memset(x, 0, sizeof(x));
+    for (int i = 0; i < 120; ++i) {
+        uint8_t y = (uint8_t)(i % 2);
+        x[0].num = (y == 0U) ? HT_CONST(1.0) : HT_CONST(9.0);
+        HT_ASSERT_EQ(ht_tree_learn_one(&tree, x, y, HT_CONST(1.0)), HT_OK);
+    }
+
+    static uint8_t buf[32768];
+    size_t written = 0;
+    HT_ASSERT_EQ(ht_tree_save(&tree, buf, sizeof(buf), &written, true), HT_OK);
+
+    /* NULL / tiny buffer errors */
+    size_t dummy_w = 0;
+    HT_ASSERT_EQ(ht_tree_save(NULL, buf, sizeof(buf), &dummy_w, false), HT_ERR_INVALID_ARG);
+    HT_ASSERT_EQ(ht_tree_save(&tree, buf, 4U, &dummy_w, false), HT_ERR_INVALID_ARG);
+    HT_ASSERT_EQ(ht_tree_load(NULL, buf, written), HT_ERR_INVALID_ARG);
+    HT_ASSERT_EQ(ht_tree_load(&loaded, NULL, written), HT_ERR_INVALID_ARG);
+    HT_ASSERT_EQ(ht_tree_load(&loaded, buf, sizeof(ht_serial_header_t) - 1U), HT_ERR_CORRUPT_IMAGE);
+
+    /* Bad magic */
+    uint8_t corrupt[32768];
+    memcpy(corrupt, buf, written);
+    corrupt[0] ^= 0xFFU;
+    HT_ASSERT_EQ(ht_tree_load(&loaded, corrupt, written), HT_ERR_CORRUPT_IMAGE);
+
+    /* Bad format version */
+    memcpy(corrupt, buf, written);
+    ht_serial_header_t hdr;
+    memcpy(&hdr, corrupt, sizeof(hdr));
+    hdr.version = 99U;
+    memcpy(corrupt, &hdr, sizeof(hdr));
+    HT_ASSERT_EQ(ht_tree_load(&loaded, corrupt, written), HT_ERR_CORRUPT_IMAGE);
+
+    /* Cross-precision flag mismatch (flip HT_SERIAL_FLAG_FIXED & HT_SERIAL_FLAG_DOUBLE) */
+    memcpy(corrupt, buf, written);
+    memcpy(&hdr, corrupt, sizeof(hdr));
+    hdr.flags ^= HT_SERIAL_FLAG_FIXED;
+    memcpy(corrupt, &hdr, sizeof(hdr));
+    HT_ASSERT_EQ(ht_tree_load(&loaded, corrupt, written), HT_ERR_CORRUPT_IMAGE);
+
+    memcpy(corrupt, buf, written);
+    memcpy(&hdr, corrupt, sizeof(hdr));
+    hdr.flags ^= HT_SERIAL_FLAG_DOUBLE;
+    memcpy(corrupt, &hdr, sizeof(hdr));
+    HT_ASSERT_EQ(ht_tree_load(&loaded, corrupt, written), HT_ERR_CORRUPT_IMAGE);
+
+    /* Truncated payload after valid header */
+    HT_ASSERT_EQ(ht_tree_load(&loaded, buf, sizeof(ht_serial_header_t) + 1U), HT_ERR_CORRUPT_IMAGE);
+
+    /* Valid buffer loads cleanly */
+    HT_ASSERT_EQ(ht_tree_load(&loaded, buf, written), HT_OK);
+}
+
+#ifndef HT_CLASSIF_ONLY
+static void test_tree_high_amplitude_regression_long_stream_splits(void) {
+    /* Reproduces NYC Taxi Q16.16 regime: high target amplitude (y in [200, 3800])
+     * and long stream triggering Block-Rescaling in ht_var_stat_t while verifying
+     * grace_period tracking still triggers multiple splits and finite predictions. */
+    ht_config_params_t params;
+    ht_default_reg_params(&params, 3);
+    params.grace_period = 100U;
+    ht_params_set_delta_pow10(&params, 4U);
+    params.leaf_prediction = HT_LEAF_ADAPTIVE;
+    params.leaf_sgd_normalize = true;
+    params.learning_rate = HT_CONST(0.01);
+
+    static ht_tree_t tree;
+    HT_ASSERT_EQ(ht_tree_init(&tree, &params), HT_OK);
+
+    ht_value_t x[HT_MAX_FEATURES];
+    memset(x, 0, sizeof(x));
+
+    uint32_t rng = 0xCAFEBABEU;
+    ht_float_t err_early = HT_CONST(0.0);
+    ht_float_t err_late = HT_CONST(0.0);
+    uint32_t n_early = 0U, n_late = 0U;
+
+    for (uint32_t i = 0; i < 6000U; ++i) {
+        rng = rng * 1664525U + 1013904223U;
+        uint32_t bucket = (rng >> 16) % 4U;
+        rng = rng * 1664525U + 1013904223U;
+        ht_float_t jitter = HT_FROM_INT((int32_t)((rng >> 16) % 50U));
+
+        ht_float_t x0 = HT_ADD(HT_FROM_UINT(bucket * 10U), HT_DIV(jitter, HT_CONST(25.0)));
+        ht_float_t x1 = HT_DIV(jitter, HT_CONST(10.0));
+        ht_float_t y;
+        if (bucket == 0U)      y = HT_ADD(HT_CONST(250.0), jitter);
+        else if (bucket == 1U) y = HT_ADD(HT_CONST(1100.0), jitter);
+        else if (bucket == 2U) y = HT_ADD(HT_CONST(2300.0), jitter);
+        else                   y = HT_ADD(HT_CONST(3500.0), jitter);
+
+        x[0].num = x0;
+        x[1].num = x1;
+        x[2].num = HT_FROM_UINT(i % 7U);
+
+        ht_float_t pred = ht_tree_predict_reg(&tree, x);
+        HT_ASSERT(HT_ISFINITE(pred));
+        ht_float_t abs_err = HT_FABS(HT_SUB(y, pred));
+        if (i < 200U) {
+            err_early = HT_ADD(err_early, HT_DIV(abs_err, HT_CONST(200.0)));
+            n_early++;
+        } else if (i >= 5600U) {
+            err_late = HT_ADD(err_late, HT_DIV(abs_err, HT_CONST(400.0)));
+            n_late++;
+        }
+
+        HT_ASSERT_EQ(ht_tree_learn_one_reg(&tree, x, y, HT_CONST(1.0)), HT_OK);
+    }
+
+    HT_ASSERT(n_early == 200U && n_late == 400U);
+    HT_ASSERT(tree.n_decision_nodes >= 2U);
+    HT_ASSERT(err_late < HT_DIV(err_early, HT_CONST(2.0)));
+}
+#endif
+
 /* ========================================================================= */
 /* --- Test Runner Entry Point --------------------------------------------- */
 /* ========================================================================= */
@@ -1172,4 +1385,10 @@ void test_tree_run(void) {
     /* Nível 1 & 2: Primitivas de Coordenação Externa (Fed-VFDT) & Sub-ULP Delta */
     HT_RUN_TEST(test_tree_defer_splits_apply_and_reset_subtree);
     HT_RUN_TEST(test_tree_delta_pow10_sub_ulp_parity);
+    HT_RUN_TEST(test_tree_histogram_observer_with_nb_and_nba);
+    HT_RUN_TEST(test_tree_set_adwin_pool_and_subtree_reset_edges);
+    HT_RUN_TEST(test_tree_serialization_corrupt_and_cross_precision_flags);
+#ifndef HT_CLASSIF_ONLY
+    HT_RUN_TEST(test_tree_high_amplitude_regression_long_stream_splits);
+#endif
 }

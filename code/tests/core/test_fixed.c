@@ -226,6 +226,33 @@ static void test_fixed_erf_and_erfc_accuracy(void) {
     }
 }
 
+static void test_fixed_extreme_overflow_and_boundary_branches(void) {
+    /* Extreme saturation, negative div/mul, exp/log/sqrt/erf corner cases */
+    HT_ASSERT_EQ(ht_fixed_add(HT_INFINITY, HT_CONST(1.0)), HT_INFINITY);
+    HT_ASSERT_EQ(ht_fixed_add(-HT_INFINITY, HT_CONST(-1.0)), -HT_INFINITY);
+    HT_ASSERT_EQ(ht_fixed_sub(-HT_INFINITY, HT_CONST(1.0)), -HT_INFINITY);
+    HT_ASSERT_EQ(ht_fixed_sub(HT_INFINITY, HT_CONST(-1.0)), HT_INFINITY);
+    HT_ASSERT_EQ(ht_fixed_mul(HT_CONST(-20000.0), HT_CONST(20000.0)), -HT_INFINITY);
+    HT_ASSERT_EQ(ht_fixed_mul(HT_CONST(20000.0), HT_CONST(20000.0)), HT_INFINITY);
+    HT_ASSERT_EQ(ht_fixed_div(HT_CONST(-10000.0), HT_CONST(0.001)), -HT_INFINITY);
+    HT_ASSERT_EQ(ht_fixed_div(HT_CONST(10000.0), HT_CONST(0.001)), HT_INFINITY);
+    HT_ASSERT_EQ(ht_fixed_halve(-HT_FIXED_ONE), -(HT_FIXED_ONE / 2));
+    HT_ASSERT(HT_ISNAN(ht_fixed_halve(HT_NAN_VAL)));
+    HT_ASSERT_EQ(ht_fixed_from_int(100000), HT_INFINITY);
+    HT_ASSERT_EQ(ht_fixed_from_int(-100000), -HT_INFINITY);
+    HT_ASSERT_EQ(ht_fixed_from_uint(100000U), HT_INFINITY);
+    HT_ASSERT_EQ(ht_fixed_to_int(HT_NAN_VAL), 0);
+
+    /* Exact negative integer log2/exp boundaries */
+    HT_ASSERT_EQ(HT_EXP(HT_CONST(-15.0)), 0);
+    HT_ASSERT_EQ(HT_EXP(HT_CONST(15.0)), HT_INFINITY);
+    HT_ASSERT_EQ(HT_EXP(HT_CONST(-11.0)), 1);
+    HT_ASSERT(HT_LOG(HT_CONST(0.0001)) < HT_CONST(-8.0));
+    HT_ASSERT(HT_SQRT(HT_INFINITY) > HT_CONST(180.0));
+    HT_ASSERT_EQ(HT_ERF(HT_CONST(3.99)), HT_FIXED_ONE);
+    HT_ASSERT_EQ(HT_ERF(HT_CONST(-3.99)), -HT_FIXED_ONE);
+}
+
 #endif /* HT_USE_FIXED_POINT */
 
 void test_fixed_run(void) {
@@ -237,6 +264,7 @@ void test_fixed_run(void) {
     HT_RUN_TEST(test_fixed_log2_and_log_accuracy);
     HT_RUN_TEST(test_fixed_exp_accuracy);
     HT_RUN_TEST(test_fixed_erf_and_erfc_accuracy);
+    HT_RUN_TEST(test_fixed_extreme_overflow_and_boundary_branches);
 #endif
 }
 
