@@ -575,7 +575,17 @@ ht_status_t ht_tree_evaluate_leaf_split(const ht_tree_t *tree,
             &second_best
         );
 
+#ifdef HT_USE_FIXED_POINT
+        /* When Block-Rescaling halves reg_stats.count on high-variance streams (e.g. NYC Taxi),
+         * use max(reg_stats.count, stats->last_split_attempt_at) so Hoeffding bound reflects
+         * at least the unrescaled grace-period sample weight. */
+        ht_float_t eff_reg_n = (stats->last_split_attempt_at > node->reg_stats.count)
+            ? stats->last_split_attempt_at
+            : node->reg_stats.count;
+        ht_float_t eps = ht_tree_compute_hoeffding_bound(&tree->params, HT_CONST(1.0), eff_reg_n);
+#else
         ht_float_t eps = ht_tree_compute_hoeffding_bound(&tree->params, HT_CONST(1.0), node->reg_stats.count);
+#endif
         *out_should_split = ht_should_split_reg(&best, &second_best, eps, tree->params.tau);
     } else {
         uint8_t active_classes = 0;
@@ -744,7 +754,11 @@ ht_status_t ht_tree_apply_split(ht_tree_t *tree,
         left->stats_idx = l_stats;
         ht_leaf_stats_t *ls = ht_stats_get(&tree->memory, l_stats);
         if (ls != NULL) {
+#ifdef HT_USE_FIXED_POINT
+            ls->last_split_attempt_at = is_reg ? HT_CONST(0.0) : left_w;
+#else
             ls->last_split_attempt_at = left_w;
+#endif
             if (is_reg) {
                 ls->fmse_mean = parent_fmse_mean;
                 ls->fmse_model = parent_fmse_model;
@@ -769,7 +783,11 @@ ht_status_t ht_tree_apply_split(ht_tree_t *tree,
         right->stats_idx = r_stats;
         ht_leaf_stats_t *rs = ht_stats_get(&tree->memory, r_stats);
         if (rs != NULL) {
+#ifdef HT_USE_FIXED_POINT
+            rs->last_split_attempt_at = is_reg ? HT_CONST(0.0) : right_w;
+#else
             rs->last_split_attempt_at = right_w;
+#endif
             if (is_reg) {
                 rs->fmse_mean = parent_fmse_mean;
                 rs->fmse_model = parent_fmse_model;
@@ -2178,6 +2196,18 @@ static ht_status_t ht_tree_learn_one_reg_subtree(ht_tree_t *tree,
 
         /* 6. Check grace period */
         if (!(tree->tree_flags & HT_TREE_FLAG_DEFER_SPLITS)) {
+#ifdef HT_USE_FIXED_POINT
+            /* Accumulate weight since last split attempt directly so Block-Rescaling on high-variance
+             * targets (which caps reg_stats.count when m2 nears Q26.6 ceiling) never stalls grace_period. */
+            stats->last_split_attempt_at = HT_ADD(stats->last_split_attempt_at, weight);
+            if (stats->last_split_attempt_at >= HT_FROM_UINT(tree->params.grace_period)) {
+                ht_tree_attempt_split_reg(tree, leaf_idx, depth);
+                /* Only reset if leaf did not split (still owns stats) */
+                if ((leaf->flags & HT_NODE_IS_LEAF) && leaf->stats_idx != HT_INVALID_IDX) {
+                    stats->last_split_attempt_at = HT_CONST(0.0);
+                }
+            }
+#else
             if (leaf->reg_stats.count < stats->last_split_attempt_at) {
                 stats->last_split_attempt_at = HT_CONST(0.0);
             }
@@ -2186,6 +2216,7 @@ static ht_status_t ht_tree_learn_one_reg_subtree(ht_tree_t *tree,
                 stats->last_split_attempt_at = leaf->reg_stats.count;
                 ht_tree_attempt_split_reg(tree, leaf_idx, depth);
             }
+#endif
         }
     } else {
         ht_var_update(&leaf->reg_stats, y, weight);

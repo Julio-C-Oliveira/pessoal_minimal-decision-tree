@@ -585,6 +585,112 @@ bool ht_should_split(const ht_split_candidate_t *best,
 /* ========================================================================= */
 
 #ifdef HT_USE_FIXED_POINT
+typedef struct {
+    int64_t count; /* Q16.16 */
+    int64_t mean;  /* Q16.16 */
+    int64_t m2;    /* Q26.6 (HT_FIXED_M2_SHIFT) */
+} ht_var64_t;
+
+static ht_var64_t ht_var64_from_stat(const ht_var_stat_t *s)
+{
+    ht_var64_t v;
+    v.count = (int64_t)s->count;
+    v.mean = (int64_t)s->mean;
+    v.m2 = (int64_t)s->m2;
+    return v;
+}
+
+static ht_var_stat_t ht_var64_to_stat(ht_var64_t v)
+{
+    ht_var_stat_t s;
+    while ((v.count >= (int64_t)HT_FIXED_RESCALE_THRESHOLD ||
+            v.m2 >= (int64_t)HT_FIXED_M2_RESCALE_THR) &&
+           v.count >= (4LL * HT_FIXED_ONE)) {
+        v.count = (int64_t)((uint64_t)v.count >> 1);
+        v.m2 = (v.m2 > 0) ? (int64_t)((uint64_t)v.m2 >> 1) : 0;
+    }
+    s.count = ht_fixed_saturate64(v.count);
+    s.mean = ht_fixed_saturate64(v.mean);
+    s.m2 = (v.m2 > 0) ? ht_fixed_saturate64(v.m2) : 0;
+    return s;
+}
+
+static ht_var64_t ht_var64_combine(ht_var64_t a, ht_var64_t b)
+{
+    if (a.count <= 0) return b;
+    if (b.count <= 0) return a;
+    ht_var64_t c;
+    c.count = a.count + b.count;
+    int64_t delta = b.mean - a.mean;
+    c.mean = a.mean + ((delta * b.count) / c.count);
+    int64_t ad = (delta < 0) ? -delta : delta;
+    const unsigned int rshift = (unsigned int)(2 * HT_FIXED_SHIFT - HT_FIXED_M2_SHIFT);
+    uint64_t dsq_m2 = ((uint64_t)ad * (uint64_t)ad + (1ULL << (rshift - 1U))) >> rshift;
+    uint64_t w_term = ((uint64_t)a.count * (uint64_t)b.count) / (uint64_t)c.count;
+    uint64_t cross_m2;
+    if (dsq_m2 <= (UINT64_MAX >> 16) && w_term <= (1ULL << 32)) {
+        cross_m2 = (dsq_m2 * w_term + 32768ULL) >> 16;
+    } else {
+        cross_m2 = (dsq_m2 >> 8) * (w_term >> 8);
+    }
+    c.m2 = a.m2 + b.m2 + (int64_t)cross_m2;
+    return c;
+}
+
+static int64_t ht_var64_value_m2(ht_var64_t v)
+{
+    if (v.count <= (int64_t)HT_FIXED_ONE || v.m2 <= 0) {
+        return 0;
+    }
+    uint64_t denom = (uint64_t)(v.count - (int64_t)HT_FIXED_ONE);
+    uint64_t m2u = (uint64_t)v.m2;
+    if (m2u <= (UINT64_MAX >> 16)) {
+        return (int64_t)(((m2u << 16) + (denom >> 1)) / denom);
+    }
+    return (int64_t)((m2u / denom) << 16);
+}
+
+static ht_float_t ht_compute_vr64(ht_var64_t pre,
+                                  ht_var64_t lhs,
+                                  ht_var64_t rhs,
+                                  ht_float_t min_samples_split,
+                                  ht_float_t min_branch_frac,
+                                  bool scale_large_var)
+{
+    int64_t n_sum = lhs.count + rhs.count;
+    if (pre.count <= (2LL * HT_FIXED_ONE) || n_sum <= 0 ||
+        lhs.count < (int64_t)min_samples_split || rhs.count < (int64_t)min_samples_split) {
+        return -HT_INFINITY;
+    }
+
+    int64_t frac_l = (int64_t)((((uint64_t)lhs.count << 16) + ((uint64_t)n_sum >> 1)) / (uint64_t)n_sum);
+    int64_t frac_r = (int64_t)((((uint64_t)rhs.count << 16) + ((uint64_t)n_sum >> 1)) / (uint64_t)n_sum);
+    if (frac_l < (int64_t)min_branch_frac || frac_r < (int64_t)min_branch_frac) {
+        return -HT_INFINITY;
+    }
+
+    int64_t var_pre_m2 = ht_var64_value_m2(pre);
+    int64_t var_l_m2 = ht_var64_value_m2(lhs);
+    int64_t var_r_m2 = ht_var64_value_m2(rhs);
+
+    int64_t post_m2 = ((lhs.count * var_l_m2) + (rhs.count * var_r_m2)) / n_sum;
+    int64_t vr_m2 = var_pre_m2 - post_m2;
+
+    const unsigned int lshift = (unsigned int)(HT_FIXED_SHIFT - HT_FIXED_M2_SHIFT);
+    if (scale_large_var && var_pre_m2 > (16384LL << HT_FIXED_M2_SHIFT)) {
+        int64_t scaled_m2 = (vr_m2 * (16384LL << HT_FIXED_M2_SHIFT)) / var_pre_m2;
+        int64_t scaled_q16 = (scaled_m2 >= 0)
+            ? (int64_t)((uint64_t)scaled_m2 << lshift)
+            : -(int64_t)((uint64_t)(-scaled_m2) << lshift);
+        return ht_fixed_saturate64(scaled_q16);
+    }
+
+    int64_t vr_q16 = (vr_m2 >= 0)
+        ? (int64_t)((uint64_t)vr_m2 << lshift)
+        : -(int64_t)((uint64_t)(-vr_m2) << lshift);
+    return ht_fixed_saturate64(vr_q16);
+}
+
 static ht_float_t ht_compute_vr_internal(const ht_var_stat_t *pre_var,
                                          const ht_var_stat_t *lhs_var,
                                          const ht_var_stat_t *rhs_var,
@@ -595,43 +701,12 @@ static ht_float_t ht_compute_vr_internal(const ht_var_stat_t *pre_var,
     if (pre_var == NULL || lhs_var == NULL || rhs_var == NULL) {
         return -HT_INFINITY;
     }
-
-    ht_float_t n_pre = pre_var->count;
-    ht_float_t n_l = lhs_var->count;
-    ht_float_t n_r = rhs_var->count;
-
-    if (n_pre <= HT_CONST(2.0) || n_l < min_samples_split || n_r < min_samples_split) {
-        return -HT_INFINITY;
-    }
-
-    ht_float_t frac_l = HT_DIV(n_l, n_pre);
-    ht_float_t frac_r = HT_DIV(n_r, n_pre);
-    if (frac_l < min_branch_frac || frac_r < min_branch_frac) {
-        return -HT_INFINITY;
-    }
-
-    int64_t var_pre_q8 = ht_var_value_q8(pre_var);
-    int64_t var_l_q8 = ht_var_value_q8(lhs_var);
-    int64_t var_r_q8 = ht_var_value_q8(rhs_var);
-
-    int64_t post_q8 = (((int64_t)n_l * var_l_q8) + ((int64_t)n_r * var_r_q8)) / (int64_t)n_pre;
-    int64_t vr_q8 = var_pre_q8 - post_q8;
-
-    const unsigned int lshift = (unsigned int)(HT_FIXED_SHIFT - HT_FIXED_M2_SHIFT);
-    if (scale_large_var && var_pre_q8 > (16384LL << HT_FIXED_M2_SHIFT)) {
-        /* Scale consistently across all splits of this leaf so merit never saturates Q16.16
-         * while preserving exact ordering and exact m2/m1 ratio for ht_should_split_reg. */
-        int64_t scaled_m2 = (vr_q8 * (16384LL << HT_FIXED_M2_SHIFT)) / var_pre_q8;
-        int64_t scaled_q16 = (scaled_m2 >= 0)
-            ? (int64_t)((uint64_t)scaled_m2 << lshift)
-            : -(int64_t)((uint64_t)(-scaled_m2) << lshift);
-        return ht_fixed_saturate64(scaled_q16);
-    }
-
-    int64_t vr_q16 = (vr_q8 >= 0)
-        ? (int64_t)((uint64_t)vr_q8 << lshift)
-        : -(int64_t)((uint64_t)(-vr_q8) << lshift);
-    return ht_fixed_saturate64(vr_q16);
+    return ht_compute_vr64(ht_var64_from_stat(pre_var),
+                           ht_var64_from_stat(lhs_var),
+                           ht_var64_from_stat(rhs_var),
+                           min_samples_split,
+                           min_branch_frac,
+                           scale_large_var);
 }
 #endif
 
@@ -699,14 +774,41 @@ void ht_evaluate_reg_numeric_observer(const ht_reg_numeric_obs_t *obs,
     }
 
 #ifdef HT_USE_FIXED_POINT
-    /* Precompute suffix combinations for scale-invariant rhs_var under Block-Rescaling */
-    ht_var_stat_t suffix[HT_REG_NUM_SLOTS];
-    suffix[m - 1] = obs->slots[m - 1].y_stats;
-    for (int32_t j = (int32_t)m - 2; j >= 0; --j) {
-        suffix[j] = ht_var_combine(&obs->slots[j].y_stats, &suffix[j + 1]);
+    /* Exact 64-bit prefix/suffix variance combination (zero Block-Rescaling distortion, zero stack array) */
+    ht_var64_t total64 = {0, 0, 0};
+    for (uint8_t j = 0; j < m; ++j) {
+        total64 = ht_var64_combine(total64, ht_var64_from_stat(&obs->slots[j].y_stats));
     }
-#endif
 
+    ht_var64_t lhs64 = {0, 0, 0};
+    for (uint8_t k = 0; k < m - 1; k++) {
+        lhs64 = ht_var64_combine(lhs64, ht_var64_from_stat(&obs->slots[k].y_stats));
+
+        /* Skip duplicate adjacent x_means */
+        if (obs->slots[k + 1].x_mean <= obs->slots[k].x_mean) {
+            continue;
+        }
+
+        ht_float_t threshold = HT_MUL(HT_ADD(obs->slots[k].x_mean, obs->slots[k + 1].x_mean), HT_CONST(0.5));
+
+        ht_var64_t rhs64 = {0, 0, 0};
+        for (uint8_t j = (uint8_t)(k + 1U); j < m; ++j) {
+            rhs64 = ht_var64_combine(rhs64, ht_var64_from_stat(&obs->slots[j].y_stats));
+        }
+
+        ht_float_t merit = ht_compute_vr64(total64, lhs64, rhs64,
+                                           min_samples_split, min_branch_frac, true);
+
+        if (merit > out_best->merit) {
+            out_best->merit = merit;
+            out_best->feature_idx = feature_idx;
+            out_best->split_val.threshold = threshold;
+            out_best->lhs_var = ht_var64_to_stat(lhs64);
+            out_best->rhs_var = ht_var64_to_stat(rhs64);
+            out_best->is_categorical = 0;
+        }
+    }
+#else
     ht_var_stat_t lhs_var;
     ht_var_init(&lhs_var);
 
@@ -723,17 +825,9 @@ void ht_evaluate_reg_numeric_observer(const ht_reg_numeric_obs_t *obs,
         }
 
         ht_float_t threshold = HT_MUL(HT_ADD(obs->slots[k].x_mean, obs->slots[k + 1].x_mean), HT_CONST(0.5));
-
-#ifdef HT_USE_FIXED_POINT
-        ht_var_stat_t rhs_var = suffix[k + 1];
-        const ht_var_stat_t *eff_pre = &suffix[0];
-        ht_float_t merit = ht_compute_vr_internal(eff_pre, &lhs_var, &rhs_var,
-                                                  min_samples_split, min_branch_frac, true);
-#else
         ht_var_stat_t rhs_var = ht_var_subtract(pre_var, &lhs_var);
         ht_float_t merit = ht_compute_variance_reduction(pre_var, &lhs_var, &rhs_var,
                                                          min_samples_split, min_branch_frac);
-#endif
 
         if (merit > out_best->merit) {
             out_best->merit = merit;
@@ -744,6 +838,7 @@ void ht_evaluate_reg_numeric_observer(const ht_reg_numeric_obs_t *obs,
             out_best->is_categorical = 0;
         }
     }
+#endif
 }
 
 void ht_evaluate_reg_categorical_observer(const ht_reg_categorical_obs_t *obs,
@@ -770,16 +865,17 @@ void ht_evaluate_reg_categorical_observer(const ht_reg_categorical_obs_t *obs,
 
         const ht_var_stat_t *lhs_var = &obs->cat_stats[cat_v];
 #ifdef HT_USE_FIXED_POINT
-        ht_var_stat_t rhs_var;
-        ht_var_init(&rhs_var);
+        ht_var64_t lhs64 = ht_var64_from_stat(lhs_var);
+        ht_var64_t rhs64 = {0, 0, 0};
         for (int32_t u = 0; u < (int32_t)HT_MAX_CATEGORIES; u++) {
             if (u != cat_v && obs->cat_stats[u].count > 0) {
-                rhs_var = ht_var_combine(&rhs_var, &obs->cat_stats[u]);
+                rhs64 = ht_var64_combine(rhs64, ht_var64_from_stat(&obs->cat_stats[u]));
             }
         }
-        ht_var_stat_t eff_pre = ht_var_combine(lhs_var, &rhs_var);
-        ht_float_t merit = ht_compute_vr_internal(&eff_pre, lhs_var, &rhs_var,
-                                                  min_samples_split, min_branch_frac, true);
+        ht_var64_t pre64 = ht_var64_combine(lhs64, rhs64);
+        ht_float_t merit = ht_compute_vr64(pre64, lhs64, rhs64,
+                                           min_samples_split, min_branch_frac, true);
+        ht_var_stat_t rhs_var = ht_var64_to_stat(rhs64);
 #else
         ht_var_stat_t rhs_var = ht_var_subtract(pre_var, lhs_var);
         ht_float_t merit = ht_compute_variance_reduction(pre_var, lhs_var, &rhs_var,
