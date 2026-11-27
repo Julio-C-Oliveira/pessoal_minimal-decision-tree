@@ -1005,6 +1005,9 @@ void ht_default_params(ht_config_params_t *params, uint8_t n_features, uint8_t n
 }
 
 void ht_default_hat_params(ht_config_params_t *params, uint8_t n_features, uint8_t n_classes) {
+    if (params == NULL) {
+        return;
+    }
     ht_default_params(params, n_features, n_classes);
     params->enable_hat = true;
     params->bootstrap_sampling = true;
@@ -1050,6 +1053,9 @@ void ht_default_reg_params(ht_config_params_t *params, uint8_t n_features) {
 }
 
 void ht_default_hat_reg_params(ht_config_params_t *params, uint8_t n_features) {
+    if (params == NULL) {
+        return;
+    }
     ht_default_reg_params(params, n_features);
     params->enable_hat = true;
     params->bootstrap_sampling = true;
