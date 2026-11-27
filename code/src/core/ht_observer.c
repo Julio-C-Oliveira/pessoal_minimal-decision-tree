@@ -121,8 +121,9 @@ void ht_gaussian_update(ht_gaussian_obs_t obs[HT_MAX_CLASSES],
         int64_t new_m2 = (int64_t)o->m2 + m2_inc;
 
         o->mean = ht_fixed_saturate64(new_mean);
-        if (new_count >= (int64_t)HT_FIXED_RESCALE_THRESHOLD ||
-            new_m2 >= (int64_t)HT_FIXED_RESCALE_THRESHOLD) {
+        if ((new_count >= (int64_t)HT_FIXED_RESCALE_THRESHOLD ||
+             new_m2 >= (int64_t)HT_FIXED_RESCALE_THRESHOLD) &&
+            new_count >= (4LL * HT_FIXED_ONE)) {
             o->count = ht_fixed_saturate64(new_count);
             o->m2 = ht_fixed_saturate64(new_m2);
             ht_gaussian_rescale_all(obs);
