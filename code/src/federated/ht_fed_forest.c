@@ -40,7 +40,7 @@ void ht_fed_forest_default_client_config(ht_fed_forest_client_cfg_t *cfg,
         ht_default_params(&cfg->tree_params, 4U, 2U);
     }
     cfg->voting = HT_VOTE_WEIGHTED;
-    cfg->error_decay = (ht_float_t)0.98;
+    cfg->error_decay = HT_CONST(0.98);
     cfg->client_id = client_id;
 }
 
@@ -55,14 +55,14 @@ ht_status_t ht_fed_forest_client_init(ht_fed_forest_client_t *client,
         return st;
     }
     client->voting = cfg->voting;
-    client->error_decay = (cfg->error_decay > (ht_float_t)0.0 && cfg->error_decay < (ht_float_t)1.0)
-        ? cfg->error_decay : (ht_float_t)0.98;
+    client->error_decay = (cfg->error_decay > HT_CONST(0.0) && cfg->error_decay < HT_CONST(1.0))
+        ? cfg->error_decay : HT_CONST(0.98);
     client->client_id = cfg->client_id;
     client->n_peers = 0U;
     client->round_id = 0U;
 
     ht_float_t init_err = (cfg->tree_params.task_type == HT_TASK_REGRESSION)
-        ? (ht_float_t)1.0 : (ht_float_t)0.25;
+        ? HT_CONST(1.0) : HT_CONST(0.25);
     for (uint16_t i = 0; i < 1U + HT_FED_FOREST_MAX_TREES; ++i) {
         client->member_faded_error[i] = init_err;
     }
@@ -101,7 +101,7 @@ ht_status_t ht_fed_forest_client_predict_proba(const ht_fed_forest_client_t *cli
             weights[p + 1U] = ht_voting_member_weight(client->voting, HT_TASK_CLASSIFICATION,
                                                       client->member_faded_error[p + 1U]);
         } else {
-            weights[p + 1U] = (ht_float_t)0.0;
+            weights[p + 1U] = HT_CONST(0.0);
         }
     }
 
@@ -116,7 +116,7 @@ uint8_t ht_fed_forest_client_predict(const ht_fed_forest_client_t *client,
         return 0U;
     }
     uint8_t best_c = 0U;
-    ht_float_t best_p = (ht_float_t)-1.0;
+    ht_float_t best_p = HT_CONST(-1.0);
     for (uint8_t c = 0; c < client->local_tree.params.n_classes; ++c) {
         if (probas[c] > best_p) {
             best_p = probas[c];
@@ -150,7 +150,7 @@ ht_status_t ht_fed_forest_client_learn_one(ht_fed_forest_client_t *client,
 ht_float_t ht_fed_forest_client_predict_reg(const ht_fed_forest_client_t *client,
                                             const ht_value_t x[HT_MAX_FEATURES]) {
     if (client == NULL || x == NULL) {
-        return (ht_float_t)0.0;
+        return HT_CONST(0.0);
     }
 
     uint16_t n_members = (uint16_t)(1U + client->n_peers);
@@ -288,8 +288,8 @@ ht_status_t ht_fed_forest_client_import_forest(ht_fed_forest_client_t *client,
             }
             client->peer_client_ids[loaded] = item.origin_client_id;
             /* Initialize peer faded error using server-reported value (clamped) */
-            ht_float_t err_init = (item.reported_error >= (ht_float_t)0.0)
-                ? item.reported_error : (ht_float_t)0.25;
+            ht_float_t err_init = (item.reported_error >= HT_CONST(0.0))
+                ? item.reported_error : HT_CONST(0.25);
             client->member_faded_error[loaded + 1U] = err_init;
             loaded++;
         }

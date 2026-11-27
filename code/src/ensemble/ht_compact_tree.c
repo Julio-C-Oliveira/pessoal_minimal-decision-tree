@@ -11,7 +11,7 @@ static void ht_summarize_tree_subtree(const ht_tree_t *src,
                                       ht_float_t out_class_counts[HT_MAX_CLASSES],
                                       ht_var_stat_t *out_reg_stats) {
     for (uint8_t c = 0; c < HT_MAX_CLASSES; ++c) {
-        out_class_counts[c] = (ht_float_t)0.0;
+        out_class_counts[c] = HT_CONST(0.0);
     }
     ht_var_init(out_reg_stats);
 
@@ -33,7 +33,7 @@ static void ht_summarize_tree_subtree(const ht_tree_t *src,
                 *out_reg_stats = ht_var_combine(out_reg_stats, &n->reg_stats);
             } else {
                 for (uint8_t c = 0; c < src->params.n_classes; ++c) {
-                    out_class_counts[c] += n->class_counts[c];
+                    out_class_counts[c] = HT_ADD(out_class_counts[c], n->class_counts[c]);
                 }
             }
         } else {
@@ -49,9 +49,9 @@ static void ht_summarize_tree_subtree(const ht_tree_t *src,
 
 static ht_float_t ht_compact_subtree_weight(const ht_compact_tree_t *ct, uint16_t node_idx) {
     if (node_idx == HT_INVALID_IDX || node_idx >= ct->num_nodes) {
-        return (ht_float_t)0.0;
+        return HT_CONST(0.0);
     }
-    ht_float_t total = (ht_float_t)0.0;
+    ht_float_t total = HT_CONST(0.0);
     uint16_t stack[64];
     uint16_t top = 0;
     stack[top++] = node_idx;
@@ -67,10 +67,10 @@ static ht_float_t ht_compact_subtree_weight(const ht_compact_tree_t *ct, uint16_
         }
         if (n->flags & HT_NODE_IS_LEAF) {
             if (ct->task_type == HT_TASK_REGRESSION) {
-                total += n->reg_stats.count;
+                total = HT_ADD(total, n->reg_stats.count);
             } else {
                 for (uint8_t c = 0; c < ct->n_classes; ++c) {
-                    total += n->class_counts[c];
+                    total = HT_ADD(total, n->class_counts[c]);
                 }
             }
         } else {
@@ -247,23 +247,23 @@ ht_status_t ht_compact_tree_predict_proba(const ht_compact_tree_t *ct,
     }
 
     const ht_node_t *leaf = &ct->nodes[leaf_idx];
-    ht_float_t total = (ht_float_t)0.0;
+    ht_float_t total = HT_CONST(0.0);
     for (uint8_t c = 0; c < ct->n_classes; ++c) {
-        total += leaf->class_counts[c];
+        total = HT_ADD(total, leaf->class_counts[c]);
     }
 
-    if (total <= (ht_float_t)0.0) {
-        ht_float_t uni = (ht_float_t)1.0 / (ht_float_t)ct->n_classes;
+    if (total <= HT_CONST(0.0)) {
+        ht_float_t uni = HT_DIV(HT_CONST(1.0), HT_FROM_UINT(ct->n_classes));
         for (uint8_t c = 0; c < ct->n_classes; ++c) {
             proba_out[c] = uni;
         }
     } else {
         for (uint8_t c = 0; c < ct->n_classes; ++c) {
-            proba_out[c] = leaf->class_counts[c] / total;
+            proba_out[c] = HT_DIV(leaf->class_counts[c], total);
         }
     }
     for (uint8_t c = ct->n_classes; c < HT_MAX_CLASSES; ++c) {
-        proba_out[c] = (ht_float_t)0.0;
+        proba_out[c] = HT_CONST(0.0);
     }
     return HT_OK;
 }
@@ -275,7 +275,7 @@ uint8_t ht_compact_tree_predict(const ht_compact_tree_t *ct,
         return 0U;
     }
     uint8_t best_c = 0U;
-    ht_float_t best_p = (ht_float_t)-1.0;
+    ht_float_t best_p = HT_CONST(-1.0);
     for (uint8_t c = 0; c < ct->n_classes; ++c) {
         if (probas[c] > best_p) {
             best_p = probas[c];
@@ -288,11 +288,11 @@ uint8_t ht_compact_tree_predict(const ht_compact_tree_t *ct,
 ht_float_t ht_compact_tree_predict_reg(const ht_compact_tree_t *ct,
                                        const ht_value_t x[HT_MAX_FEATURES]) {
     if (ct == NULL || x == NULL) {
-        return (ht_float_t)0.0;
+        return HT_CONST(0.0);
     }
     uint16_t leaf_idx = ht_compact_tree_route(ct, x);
     if (leaf_idx == HT_INVALID_IDX) {
-        return (ht_float_t)0.0;
+        return HT_CONST(0.0);
     }
     return ct->nodes[leaf_idx].reg_stats.mean;
 }
@@ -324,6 +324,8 @@ ht_status_t ht_compact_tree_save(const ht_compact_tree_t *ct,
     hdr.flags = 0U;
 #ifdef HT_USE_DOUBLE
     hdr.flags |= HT_COMPACT_FLAG_DOUBLE;
+#elif defined(HT_USE_FIXED_POINT)
+    hdr.flags |= HT_COMPACT_FLAG_FIXED;
 #endif
     if (ct->task_type == HT_TASK_REGRESSION) {
         hdr.flags |= HT_COMPACT_FLAG_REG;
@@ -371,6 +373,16 @@ ht_status_t ht_compact_tree_load(ht_compact_tree_t *ct,
         hdr.root_idx >= hdr.num_nodes ||
         hdr.n_features == 0U ||
         hdr.n_features > HT_MAX_FEATURES) {
+        return HT_ERR_CORRUPT_IMAGE;
+    }
+
+    uint16_t expected_fmt = 0U;
+#ifdef HT_USE_DOUBLE
+    expected_fmt = HT_COMPACT_FLAG_DOUBLE;
+#elif defined(HT_USE_FIXED_POINT)
+    expected_fmt = HT_COMPACT_FLAG_FIXED;
+#endif
+    if ((hdr.flags & (HT_COMPACT_FLAG_DOUBLE | HT_COMPACT_FLAG_FIXED)) != expected_fmt) {
         return HT_ERR_CORRUPT_IMAGE;
     }
 

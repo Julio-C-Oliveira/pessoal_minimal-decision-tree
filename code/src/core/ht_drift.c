@@ -1,16 +1,82 @@
 /**
  * @file ht_drift.c
  * @brief Implementation of the ADWIN Concept Drift Detector and Pool Allocator.
+ *
+ * Supports float32, double64, and Q16.16 zero-libm fixed-point arithmetic
+ * (with 64-bit uint32_t window sizing and Q30 harmonic mean to avoid overflow/underflow).
  */
 
 #include "ht_drift.h"
+
+#ifdef HT_USE_FIXED_POINT
+/* Divides a Q16.16 value by a positive uint32_t count without converting count to Q16.16 */
+static inline ht_float_t ht_adwin_div_u32(ht_float_t num_q16, uint32_t den) {
+    if (den == 0U || HT_ISNAN(num_q16)) {
+        return HT_NAN_VAL;
+    }
+    if (num_q16 == 0) {
+        return 0;
+    }
+    bool neg = (num_q16 < 0);
+    uint64_t un = neg ? (uint64_t)(-(int64_t)num_q16) : (uint64_t)num_q16;
+    uint64_t ud = (uint64_t)den;
+    uint64_t q = (un + (ud >> 1)) / ud;
+    if (q >= (uint64_t)INT32_MAX) {
+        return neg ? -INT32_MAX : INT32_MAX;
+    }
+    return neg ? -(ht_float_t)q : (ht_float_t)q;
+}
+
+/* Computes ((n1 * n2) / (n1 + n2)) * diff^2 in Q16.16 without overflow for large uint32_t n1, n2 */
+static inline ht_float_t ht_adwin_inc_var_u32(uint32_t n1, uint32_t n2, ht_float_t diff_q16) {
+    if (n1 == 0U || n2 == 0U || diff_q16 == 0) {
+        return 0;
+    }
+    uint64_t ad = (diff_q16 < 0) ? (uint64_t)(-(int64_t)diff_q16) : (uint64_t)diff_q16;
+    uint64_t d2_q16 = (ad * ad + 32768ULL) >> 16; /* Q16.16 */
+    uint64_t prod_n = (uint64_t)n1 * (uint64_t)n2;
+    uint64_t sum_n = (uint64_t)n1 + (uint64_t)n2;
+    /* Compute (d2_q16 * prod_n) / sum_n safely without 64-bit overflow */
+    uint64_t w_int = prod_n / sum_n;
+    uint64_t w_rem = prod_n % sum_n;
+    uint64_t res = 0ULL;
+    if (d2_q16 > 0ULL && w_int > ((uint64_t)INT32_MAX / d2_q16)) {
+        return INT32_MAX;
+    }
+    res = d2_q16 * w_int;
+    if (d2_q16 <= (UINT64_MAX / (sum_n + 1ULL))) {
+        res += (d2_q16 * w_rem + (sum_n >> 1)) / sum_n;
+    } else {
+        res += (d2_q16 / sum_n) * w_rem;
+    }
+    return (res >= (uint64_t)INT32_MAX) ? INT32_MAX : (ht_float_t)res;
+}
+
+/* Computes ln(n) in Q16.16 for any positive uint32_t n (even n >= 32768) */
+static inline ht_float_t ht_adwin_ln_u32(uint32_t n) {
+    if (n <= 1U) {
+        return 0;
+    }
+    int32_t shift_bits = 0;
+    uint32_t scaled = n;
+    while (scaled >= 32768U) {
+        scaled >>= 1;
+        shift_bits++;
+    }
+    ht_float_t ln_scaled = HT_LOG(HT_FROM_UINT(scaled));
+    if (shift_bits > 0) {
+        return HT_ADD(ln_scaled, HT_MUL(HT_FROM_INT(shift_bits), HT_LN2));
+    }
+    return ln_scaled;
+}
+#endif
 
 /* Populates default ADWIN configuration matching River defaults */
 void ht_adwin_default_config(ht_adwin_config_t *cfg) {
     if (cfg == NULL) {
         return;
     }
-    cfg->delta = (ht_float_t)0.002;
+    cfg->delta = HT_CONST(0.002);
     cfg->clock = 32U;
     cfg->min_window_length = 5U;
     cfg->grace_period = 10U;
@@ -29,7 +95,7 @@ ht_status_t ht_adwin_init(ht_adwin_t *adwin, const ht_adwin_config_t *cfg) {
         ht_adwin_default_config(&default_cfg);
         cfg = &default_cfg;
     } else {
-        if (cfg->delta <= (ht_float_t)0.0 || cfg->delta >= (ht_float_t)1.0 ||
+        if (cfg->delta <= HT_CONST(0.0) || cfg->delta >= HT_CONST(1.0) ||
             cfg->clock == 0U || cfg->min_window_length == 0U ||
             cfg->max_buckets == 0U || cfg->max_buckets > HT_ADWIN_MAX_BUCKETS) {
             return HT_ERR_INVALID_ARG;
@@ -61,8 +127,8 @@ void ht_adwin_reset(ht_adwin_t *adwin) {
     uint8_t max_buckets = adwin->max_buckets;
 
     memset(adwin->rows, 0, sizeof(adwin->rows));
-    adwin->total_sum = (ht_float_t)0.0;
-    adwin->total_variance = (ht_float_t)0.0;
+    adwin->total_sum = HT_CONST(0.0);
+    adwin->total_variance = HT_CONST(0.0);
     adwin->width = 0U;
     adwin->mint_time = 0U;
     adwin->n_detections = 0U;
@@ -84,29 +150,70 @@ ht_float_t ht_adwin_calculate_cut_epsilon(uint32_t n,
                                           ht_float_t delta,
                                           uint16_t min_w)
 {
-    if (n <= 1U || delta <= (ht_float_t)0.0) {
+    if (n <= 1U || delta <= HT_CONST(0.0)) {
         return HT_INFINITY;
-    }
-    ht_float_t fn = (ht_float_t)n;
-    ht_float_t ln_n = HT_LOG(fn);
-    if (ln_n <= (ht_float_t)0.0) {
-        return HT_INFINITY;
-    }
-    ht_float_t dd = HT_LOG(((ht_float_t)2.0 * ln_n) / delta);
-    if (dd <= (ht_float_t)0.0) {
-        return HT_INFINITY;
-    }
-    if (var < (ht_float_t)0.0) {
-        var = (ht_float_t)0.0;
     }
     if (n0 < min_w || n1 < min_w) {
         return HT_INFINITY;
     }
-    ht_float_t m = ((ht_float_t)1.0 / (ht_float_t)(n0 - min_w + 1U)) +
-                   ((ht_float_t)1.0 / (ht_float_t)(n1 - min_w + 1U));
-    ht_float_t epsilon = HT_SQRT((ht_float_t)2.0 * m * var * dd) +
-                         ((ht_float_t)2.0 / (ht_float_t)3.0) * dd * m;
+    if (var < HT_CONST(0.0)) {
+        var = HT_CONST(0.0);
+    }
+
+#ifdef HT_USE_FIXED_POINT
+    ht_float_t ln_n = ht_adwin_ln_u32(n);
+    if (ln_n <= 0) {
+        return HT_INFINITY;
+    }
+    /* dd = ln(2 * ln(n) / delta) = ln(2) + ln(ln(n)) - ln(delta) (overflow-free) */
+    ht_float_t dd = HT_SUB(HT_ADD(HT_LN2, HT_LOG(ln_n)), HT_LOG(delta));
+    if (dd <= 0 || !HT_ISFINITE(dd)) {
+        return HT_INFINITY;
+    }
+
+    uint64_t d0 = (uint64_t)(n0 - (uint32_t)min_w + 1U);
+    uint64_t d1 = (uint64_t)(n1 - (uint32_t)min_w + 1U);
+    /* m = 1/d0 + 1/d1 in Q30 to prevent underflow for large windows up to 81920+ */
+    uint64_t m_q30 = ((1ULL << 30) / d0) + ((1ULL << 30) / d1);
+
+    /* term1 = sqrt(2 * m * var * dd) */
+    uint64_t dd_q16 = (uint64_t)(uint32_t)dd;
+    uint64_t var_q16 = (uint64_t)(uint32_t)var;
+    /* m_dd_q30 = (m_q30 * dd_q16) >> 16 */
+    uint64_t m_dd_q30 = (m_q30 * dd_q16 + 32768ULL) >> 16;
+    /* rad_q16 = (2 * m_dd_q30 * var_q16) >> 30 */
+    uint64_t rad_q16;
+    if (var_q16 == 0ULL) {
+        rad_q16 = 0ULL;
+    } else if (m_dd_q30 <= (UINT64_MAX / (2ULL * var_q16 + 1ULL))) {
+        rad_q16 = (2ULL * m_dd_q30 * var_q16 + (1ULL << 29)) >> 30;
+    } else {
+        rad_q16 = 2ULL * ((m_dd_q30 >> 15) * (var_q16 >> 15));
+    }
+    ht_float_t term1 = (rad_q16 >= (uint64_t)INT32_MAX)
+        ? HT_SQRT(INT32_MAX) : HT_SQRT((ht_float_t)rad_q16);
+
+    /* term2 = (2/3) * dd * m in Q16.16: (2 * m_dd_q30) / (3 * 2^14) */
+    uint64_t term2_q16 = (2ULL * m_dd_q30 + (3ULL << 13)) / (3ULL << 14);
+    ht_float_t term2 = (term2_q16 >= (uint64_t)INT32_MAX) ? INT32_MAX : (ht_float_t)term2_q16;
+
+    return HT_ADD(term1, term2);
+#else
+    ht_float_t fn = HT_FROM_UINT(n);
+    ht_float_t ln_n = HT_LOG(fn);
+    if (ln_n <= HT_CONST(0.0)) {
+        return HT_INFINITY;
+    }
+    ht_float_t dd = HT_LOG(HT_DIV(HT_MUL(HT_CONST(2.0), ln_n), delta));
+    if (dd <= HT_CONST(0.0)) {
+        return HT_INFINITY;
+    }
+    ht_float_t m = HT_ADD(HT_DIV(HT_CONST(1.0), HT_FROM_UINT(n0 - min_w + 1U)),
+                          HT_DIV(HT_CONST(1.0), HT_FROM_UINT(n1 - min_w + 1U)));
+    ht_float_t epsilon = HT_ADD(HT_SQRT(HT_MUL(HT_MUL(HT_CONST(2.0), m), HT_MUL(var, dd))),
+                                HT_MUL(HT_DIV(HT_CONST(2.0), HT_CONST(3.0)), HT_MUL(dd, m)));
     return epsilon;
+#endif
 }
 
 /* Compresses buckets across exponential levels */
@@ -123,13 +230,21 @@ static void ht_adwin_compress_buckets(ht_adwin_t *adwin) {
 
                 uint32_t n1 = 1U << i;
                 uint32_t n2 = 1U << i;
-                ht_float_t u1 = b0_sum / (ht_float_t)n1;
-                ht_float_t u2 = b1_sum / (ht_float_t)n2;
-                ht_float_t diff = u1 - u2;
-                ht_float_t inc_var = ((ht_float_t)(n1 * n2) * (diff * diff)) / (ht_float_t)(n1 + n2);
+#ifdef HT_USE_FIXED_POINT
+                ht_float_t u1 = ht_adwin_div_u32(b0_sum, n1);
+                ht_float_t u2 = ht_adwin_div_u32(b1_sum, n2);
+                ht_float_t diff = HT_SUB(u1, u2);
+                ht_float_t inc_var = ht_adwin_inc_var_u32(n1, n2, diff);
+#else
+                ht_float_t u1 = HT_DIV(b0_sum, HT_FROM_UINT(n1));
+                ht_float_t u2 = HT_DIV(b1_sum, HT_FROM_UINT(n2));
+                ht_float_t diff = HT_SUB(u1, u2);
+                ht_float_t inc_var = HT_DIV(HT_MUL(HT_FROM_UINT(n1 * n2), HT_MUL(diff, diff)),
+                                            HT_FROM_UINT(n1 + n2));
+#endif
 
-                next_row->sum[next_row->count] = b0_sum + b1_sum;
-                next_row->variance[next_row->count] = b0_var + b1_var + inc_var;
+                next_row->sum[next_row->count] = HT_ADD(b0_sum, b1_sum);
+                next_row->variance[next_row->count] = HT_ADD(HT_ADD(b0_var, b1_var), inc_var);
                 next_row->count++;
 
                 if (i + 1U > adwin->last_bucket_row) {
@@ -148,18 +263,26 @@ static void ht_adwin_compress_buckets(ht_adwin_t *adwin) {
                 ht_float_t b_sum = row->sum[0];
                 ht_float_t b_var = row->variance[0];
                 adwin->width -= n_drop;
-                adwin->total_sum -= b_sum;
+                adwin->total_sum = HT_SUB(adwin->total_sum, b_sum);
                 if (adwin->width > 0U) {
-                    ht_float_t u_drop = b_sum / (ht_float_t)n_drop;
-                    ht_float_t diff = u_drop - (adwin->total_sum / (ht_float_t)adwin->width);
-                    ht_float_t inc_var = b_var + ((ht_float_t)n_drop * (ht_float_t)adwin->width * (diff * diff)) /
-                                                 (ht_float_t)(n_drop + adwin->width);
-                    adwin->total_variance -= inc_var;
-                    if (adwin->total_variance < (ht_float_t)0.0) {
-                        adwin->total_variance = (ht_float_t)0.0;
+#ifdef HT_USE_FIXED_POINT
+                    ht_float_t u_drop = ht_adwin_div_u32(b_sum, n_drop);
+                    ht_float_t u_rem = ht_adwin_div_u32(adwin->total_sum, adwin->width);
+                    ht_float_t diff = HT_SUB(u_drop, u_rem);
+                    ht_float_t inc_var = HT_ADD(b_var, ht_adwin_inc_var_u32(n_drop, adwin->width, diff));
+#else
+                    ht_float_t u_drop = HT_DIV(b_sum, HT_FROM_UINT(n_drop));
+                    ht_float_t diff = HT_SUB(u_drop, HT_DIV(adwin->total_sum, HT_FROM_UINT(adwin->width)));
+                    ht_float_t inc_var = HT_ADD(b_var,
+                        HT_DIV(HT_MUL(HT_MUL(HT_FROM_UINT(n_drop), HT_FROM_UINT(adwin->width)), HT_MUL(diff, diff)),
+                               HT_FROM_UINT(n_drop + adwin->width)));
+#endif
+                    adwin->total_variance = HT_SUB(adwin->total_variance, inc_var);
+                    if (adwin->total_variance < HT_CONST(0.0)) {
+                        adwin->total_variance = HT_CONST(0.0);
                     }
                 } else {
-                    adwin->total_variance = (ht_float_t)0.0;
+                    adwin->total_variance = HT_CONST(0.0);
                 }
 
                 /* Shift remaining buckets left by 1 */
@@ -191,19 +314,27 @@ static uint32_t ht_adwin_delete_element(ht_adwin_t *adwin) {
     uint32_t n1 = 1U << last_row;
 
     adwin->width -= n1;
-    adwin->total_sum -= b0_sum;
-    ht_float_t u1 = b0_sum / (ht_float_t)n1;
+    adwin->total_sum = HT_SUB(adwin->total_sum, b0_sum);
 
     if (adwin->width > 0U) {
-        ht_float_t diff = u1 - (adwin->total_sum / (ht_float_t)adwin->width);
-        ht_float_t inc_var = b0_var + ((ht_float_t)n1 * (ht_float_t)adwin->width * (diff * diff)) /
-                                      (ht_float_t)(n1 + adwin->width);
-        adwin->total_variance -= inc_var;
-        if (adwin->total_variance < (ht_float_t)0.0) {
-            adwin->total_variance = (ht_float_t)0.0;
+#ifdef HT_USE_FIXED_POINT
+        ht_float_t u1 = ht_adwin_div_u32(b0_sum, n1);
+        ht_float_t u_rem = ht_adwin_div_u32(adwin->total_sum, adwin->width);
+        ht_float_t diff = HT_SUB(u1, u_rem);
+        ht_float_t inc_var = HT_ADD(b0_var, ht_adwin_inc_var_u32(n1, adwin->width, diff));
+#else
+        ht_float_t u1 = HT_DIV(b0_sum, HT_FROM_UINT(n1));
+        ht_float_t diff = HT_SUB(u1, HT_DIV(adwin->total_sum, HT_FROM_UINT(adwin->width)));
+        ht_float_t inc_var = HT_ADD(b0_var,
+            HT_DIV(HT_MUL(HT_MUL(HT_FROM_UINT(n1), HT_FROM_UINT(adwin->width)), HT_MUL(diff, diff)),
+                   HT_FROM_UINT(n1 + adwin->width)));
+#endif
+        adwin->total_variance = HT_SUB(adwin->total_variance, inc_var);
+        if (adwin->total_variance < HT_CONST(0.0)) {
+            adwin->total_variance = HT_CONST(0.0);
         }
     } else {
-        adwin->total_variance = (ht_float_t)0.0;
+        adwin->total_variance = HT_CONST(0.0);
     }
 
     /* Shift remaining buckets in this row left by 1 */
@@ -223,24 +354,44 @@ static uint32_t ht_adwin_delete_element(ht_adwin_t *adwin) {
 
 /* Inserts a single observation into ADWIN */
 static void ht_adwin_insert_element(ht_adwin_t *adwin, ht_float_t value) {
+#ifdef HT_USE_FIXED_POINT
+    /* Prevent Q16.16 total_sum saturation by evicting oldest buckets (native sliding window) */
+    const int64_t sum_cap = (int64_t)HT_CONST(28672.0);
+    while (adwin->width > 0U) {
+        int64_t next_sum = (int64_t)adwin->total_sum + (int64_t)value;
+        int64_t next_abs = (next_sum < 0) ? -next_sum : next_sum;
+        if (next_abs < sum_cap) {
+            break;
+        }
+        if (ht_adwin_delete_element(adwin) == 0U) {
+            break;
+        }
+    }
+#endif
     adwin->width++;
     adwin->mint_time++;
 
     /* Insert new bucket in row 0 */
     ht_adwin_row_t *row0 = &adwin->rows[0];
     row0->sum[row0->count] = value;
-    row0->variance[row0->count] = (ht_float_t)0.0;
+    row0->variance[row0->count] = HT_CONST(0.0);
     row0->count++;
 
     if (adwin->width > 1U) {
-        ht_float_t prev_w = (ht_float_t)(adwin->width - 1U);
-        ht_float_t curr_w = (ht_float_t)adwin->width;
-        ht_float_t prev_mean = adwin->total_sum / prev_w;
-        ht_float_t diff = value - prev_mean;
-        ht_float_t inc_var = (prev_w * (diff * diff)) / curr_w;
-        adwin->total_variance += inc_var;
+#ifdef HT_USE_FIXED_POINT
+        ht_float_t prev_mean = ht_adwin_div_u32(adwin->total_sum, adwin->width - 1U);
+        ht_float_t diff = HT_SUB(value, prev_mean);
+        ht_float_t inc_var = ht_adwin_inc_var_u32(adwin->width - 1U, 1U, diff);
+#else
+        ht_float_t prev_w = HT_FROM_UINT(adwin->width - 1U);
+        ht_float_t curr_w = HT_FROM_UINT(adwin->width);
+        ht_float_t prev_mean = HT_DIV(adwin->total_sum, prev_w);
+        ht_float_t diff = HT_SUB(value, prev_mean);
+        ht_float_t inc_var = HT_DIV(HT_MUL(prev_w, HT_MUL(diff, diff)), curr_w);
+#endif
+        adwin->total_variance = HT_ADD(adwin->total_variance, inc_var);
     }
-    adwin->total_sum += value;
+    adwin->total_sum = HT_ADD(adwin->total_sum, value);
 
     ht_adwin_compress_buckets(adwin);
 }
@@ -261,7 +412,7 @@ bool ht_adwin_update(ht_adwin_t *adwin, ht_float_t value) {
             bool exit_check = false;
             uint32_t n0 = 0U;
             uint32_t n1 = adwin->width;
-            ht_float_t u0 = (ht_float_t)0.0;
+            ht_float_t u0 = HT_CONST(0.0);
             ht_float_t u1 = adwin->total_sum;
 
             int32_t row_idx = (int32_t)adwin->last_bucket_row;
@@ -271,14 +422,20 @@ bool ht_adwin_update(ht_adwin_t *adwin, ht_float_t value) {
                     uint32_t n2 = 1U << row_idx;
                     n0 += n2;
                     n1 -= n2;
-                    u0 += row->sum[k];
-                    u1 -= row->sum[k];
+                    u0 = HT_ADD(u0, row->sum[k]);
+                    u1 = HT_SUB(u1, row->sum[k]);
 
                     if (n0 >= adwin->min_window_length && n1 >= adwin->min_window_length) {
-                        ht_float_t mean0 = u0 / (ht_float_t)n0;
-                        ht_float_t mean1 = u1 / (ht_float_t)n1;
-                        ht_float_t absval = HT_FABS(mean0 - mean1);
-                        ht_float_t var_in_win = adwin->total_variance / (ht_float_t)adwin->width;
+#ifdef HT_USE_FIXED_POINT
+                        ht_float_t mean0 = ht_adwin_div_u32(u0, n0);
+                        ht_float_t mean1 = ht_adwin_div_u32(u1, n1);
+                        ht_float_t var_in_win = ht_adwin_div_u32(adwin->total_variance, adwin->width);
+#else
+                        ht_float_t mean0 = HT_DIV(u0, HT_FROM_UINT(n0));
+                        ht_float_t mean1 = HT_DIV(u1, HT_FROM_UINT(n1));
+                        ht_float_t var_in_win = HT_DIV(adwin->total_variance, HT_FROM_UINT(adwin->width));
+#endif
+                        ht_float_t absval = HT_FABS(HT_SUB(mean0, mean1));
                         ht_float_t epsilon = ht_adwin_calculate_cut_epsilon(
                             adwin->width, n0, n1, var_in_win, adwin->delta, adwin->min_window_length
                         );
@@ -307,23 +464,31 @@ bool ht_adwin_update(ht_adwin_t *adwin, ht_float_t value) {
 /* Getters */
 ht_float_t ht_adwin_get_estimation(const ht_adwin_t *adwin) {
     if (adwin == NULL || adwin->width == 0U) {
-        return (ht_float_t)0.0;
+        return HT_CONST(0.0);
     }
-    return adwin->total_sum / (ht_float_t)adwin->width;
+#ifdef HT_USE_FIXED_POINT
+    return ht_adwin_div_u32(adwin->total_sum, adwin->width);
+#else
+    return HT_DIV(adwin->total_sum, HT_FROM_UINT(adwin->width));
+#endif
 }
 
 ht_float_t ht_adwin_get_variance(const ht_adwin_t *adwin) {
     if (adwin == NULL) {
-        return (ht_float_t)0.0;
+        return HT_CONST(0.0);
     }
     return adwin->total_variance;
 }
 
 ht_float_t ht_adwin_get_variance_in_window(const ht_adwin_t *adwin) {
     if (adwin == NULL || adwin->width == 0U) {
-        return (ht_float_t)0.0;
+        return HT_CONST(0.0);
     }
-    return adwin->total_variance / (ht_float_t)adwin->width;
+#ifdef HT_USE_FIXED_POINT
+    return ht_adwin_div_u32(adwin->total_variance, adwin->width);
+#else
+    return HT_DIV(adwin->total_variance, HT_FROM_UINT(adwin->width));
+#endif
 }
 
 uint32_t ht_adwin_get_width(const ht_adwin_t *adwin) {
@@ -335,7 +500,7 @@ uint32_t ht_adwin_get_width(const ht_adwin_t *adwin) {
 
 ht_float_t ht_adwin_get_total(const ht_adwin_t *adwin) {
     if (adwin == NULL) {
-        return (ht_float_t)0.0;
+        return HT_CONST(0.0);
     }
     return adwin->total_sum;
 }
@@ -356,7 +521,6 @@ ht_status_t ht_adwin_pool_init(ht_adwin_pool_t *pool) {
 
     memset(pool, 0, sizeof(*pool));
     for (uint16_t i = 0; i < HT_MAX_ADWIN_DETECTORS; ++i) {
-        /* free list stack: pop from top gives index 0 first */
         pool->free_indices[i] = (uint16_t)(HT_MAX_ADWIN_DETECTORS - 1U - i);
     }
     pool->free_top = HT_MAX_ADWIN_DETECTORS;
@@ -390,7 +554,6 @@ ht_status_t ht_adwin_pool_free(ht_adwin_pool_t *pool, uint16_t idx) {
     uint16_t word_idx = idx / 32U;
     uint32_t bit_mask = 1U << (idx % 32U);
     if ((pool->in_use_mask[word_idx] & bit_mask) == 0U) {
-        /* Double-free protection */
         return HT_ERR_INVALID_ARG;
     }
 
@@ -437,19 +600,31 @@ ht_float_t ht_hat_calculate_switch_bound(ht_float_t e_old,
                                          uint32_t n_alt,
                                          ht_float_t alpha)
 {
-    if (n_old == 0U || n_alt == 0U || alpha <= (ht_float_t)0.0 || alpha >= (ht_float_t)1.0) {
+    if (n_old == 0U || n_alt == 0U || alpha <= HT_CONST(0.0) || alpha >= HT_CONST(1.0)) {
         return HT_INFINITY;
     }
 
-    ht_float_t var = e_old * ((ht_float_t)1.0 - e_old);
-    if (var < (ht_float_t)0.0) {
-        var = (ht_float_t)0.0;
+    ht_float_t var = HT_MUL(e_old, HT_SUB(HT_CONST(1.0), e_old));
+    if (var < HT_CONST(0.0)) {
+        var = HT_CONST(0.0);
     }
 
-    ht_float_t ln_term = HT_LOG(((ht_float_t)2.0) / alpha);
-    ht_float_t inv_n = ((ht_float_t)1.0 / (ht_float_t)n_alt) + ((ht_float_t)1.0 / (ht_float_t)n_old);
+#ifdef HT_USE_FIXED_POINT
+    ht_float_t ln_term = HT_SUB(HT_LN2, HT_LOG(alpha));
+    if (ln_term <= 0) {
+        return 0;
+    }
+    uint64_t inv_n_q30 = ((1ULL << 30) / (uint64_t)n_alt) + ((1ULL << 30) / (uint64_t)n_old);
+    uint64_t v_ln_q16 = ((uint64_t)(uint32_t)var * (uint64_t)(uint32_t)ln_term + 32768ULL) >> 16;
+    uint64_t rad_q16 = (2ULL * v_ln_q16 * inv_n_q30 + (1ULL << 29)) >> 30;
+    return (rad_q16 >= (uint64_t)INT32_MAX) ? HT_SQRT(INT32_MAX) : HT_SQRT((ht_float_t)rad_q16);
+#else
+    ht_float_t ln_term = HT_LOG(HT_DIV(HT_CONST(2.0), alpha));
+    ht_float_t inv_n = HT_ADD(HT_DIV(HT_CONST(1.0), HT_FROM_UINT(n_alt)),
+                              HT_DIV(HT_CONST(1.0), HT_FROM_UINT(n_old)));
 
-    return HT_SQRT((ht_float_t)2.0 * var * ln_term * inv_n);
+    return HT_SQRT(HT_MUL(HT_MUL(HT_CONST(2.0), var), HT_MUL(ln_term, inv_n)));
+#endif
 }
 
 ht_hat_action_t ht_hat_evaluate_alternate(ht_float_t e_old,
@@ -468,10 +643,10 @@ ht_hat_action_t ht_hat_evaluate_alternate(ht_float_t e_old,
         return HT_HAT_ACTION_NONE;
     }
 
-    if (bound < (e_old - e_alt)) {
+    if (bound < HT_SUB(e_old, e_alt)) {
         return HT_HAT_ACTION_SWITCH;
     }
-    if (bound < (e_alt - e_old)) {
+    if (bound < HT_SUB(e_alt, e_old)) {
         return HT_HAT_ACTION_PRUNE;
     }
 
@@ -488,21 +663,24 @@ bool ht_hat_check_error_drift(ht_adwin_t *adwin,
     }
 
     ht_float_t old_err = *mean_error;
-    bool drift = ht_adwin_update(adwin, (ht_float_t)detec_in);
+    ht_float_t det_val = HT_FROM_UINT(detec_in);
+    bool drift = ht_adwin_update(adwin, det_val);
 
     /* Update incremental mean: mean += (val - mean) / n */
     (*error_count)++;
-    *mean_error += ((ht_float_t)detec_in - *mean_error) / (ht_float_t)(*error_count);
+#ifdef HT_USE_FIXED_POINT
+    *mean_error = HT_ADD(*mean_error, ht_adwin_div_u32(HT_SUB(det_val, *mean_error), *error_count));
+#else
+    *mean_error = HT_ADD(*mean_error, HT_DIV(HT_SUB(det_val, *mean_error), HT_FROM_UINT(*error_count)));
+#endif
 
     if (drift) {
         if (*mean_error <= old_err) {
-            /* Error is decreasing or unchanged: false alarm for drift adaptation, reset estimator */
-            *mean_error = (ht_float_t)0.0;
+            *mean_error = HT_CONST(0.0);
             *error_count = 0U;
             return false;
         }
-        /* Error is strictly increasing: genuine drift detected */
-        *mean_error = (ht_float_t)0.0;
+        *mean_error = HT_CONST(0.0);
         *error_count = 0U;
         return true;
     }
@@ -521,11 +699,11 @@ void ht_hat_combine_leaf_predictions(const ht_float_t *leaf_probas,
     }
 
     for (uint8_t c = 0; c < HT_MAX_CLASSES; ++c) {
-        out_proba[c] = (ht_float_t)0.0;
+        out_proba[c] = HT_CONST(0.0);
     }
 
     if (leaf_probas == NULL || mean_errors == NULL || n_leaves == 0U) {
-        ht_float_t uniform = (ht_float_t)1.0 / (ht_float_t)n_classes;
+        ht_float_t uniform = HT_DIV(HT_CONST(1.0), HT_FROM_UINT(n_classes));
         for (uint8_t c = 0; c < n_classes; ++c) {
             out_proba[c] = uniform;
         }
@@ -533,16 +711,16 @@ void ht_hat_combine_leaf_predictions(const ht_float_t *leaf_probas,
     }
 
     if (n_leaves == 1U) {
-        ht_float_t sum = (ht_float_t)0.0;
+        ht_float_t sum = HT_CONST(0.0);
         for (uint8_t c = 0; c < n_classes; ++c) {
-            sum += leaf_probas[c];
+            sum = HT_ADD(sum, leaf_probas[c]);
         }
-        if (sum > (ht_float_t)0.0) {
+        if (sum > HT_CONST(0.0)) {
             for (uint8_t c = 0; c < n_classes; ++c) {
-                out_proba[c] = leaf_probas[c] / sum;
+                out_proba[c] = HT_DIV(leaf_probas[c], sum);
             }
         } else {
-            ht_float_t uniform = (ht_float_t)1.0 / (ht_float_t)n_classes;
+            ht_float_t uniform = HT_DIV(HT_CONST(1.0), HT_FROM_UINT(n_classes));
             for (uint8_t c = 0; c < n_classes; ++c) {
                 out_proba[c] = uniform;
             }
@@ -550,41 +728,93 @@ void ht_hat_combine_leaf_predictions(const ht_float_t *leaf_probas,
         return;
     }
 
-    ht_float_t total_weight = (ht_float_t)0.0;
+#ifdef HT_USE_FIXED_POINT
+    int64_t acc_proba[HT_MAX_CLASSES];
+    for (uint8_t c = 0; c < HT_MAX_CLASSES; ++c) {
+        acc_proba[c] = 0;
+    }
+    int64_t total_weight64 = 0;
+
     for (uint16_t i = 0; i < n_leaves; ++i) {
         ht_float_t err = mean_errors[i];
-        ht_float_t w;
-        if (err <= (ht_float_t)1e-6) {
-            w = (ht_float_t)1e12;
+        int64_t w64;
+        if (err <= HT_CONST(0.015625)) {
+            w64 = (int64_t)HT_CONST(4096.0);
         } else {
-            w = ((ht_float_t)1.0) / (err * err);
+            ht_float_t e2 = HT_MUL(err, err);
+            w64 = (e2 > 0) ? (int64_t)HT_DIV(HT_FIXED_ONE, e2) : (int64_t)HT_CONST(4096.0);
+            if (w64 > (int64_t)HT_CONST(4096.0)) {
+                w64 = (int64_t)HT_CONST(4096.0);
+            }
         }
 
         const ht_float_t *dist = &leaf_probas[(size_t)i * HT_MAX_CLASSES];
-        ht_float_t leaf_sum = (ht_float_t)0.0;
+        int64_t leaf_sum64 = 0;
         for (uint8_t c = 0; c < n_classes; ++c) {
-            leaf_sum += dist[c];
+            if (dist[c] > 0) {
+                leaf_sum64 += (int64_t)dist[c];
+            }
         }
 
-        if (leaf_sum > (ht_float_t)0.0) {
+        if (leaf_sum64 > 0) {
             for (uint8_t c = 0; c < n_classes; ++c) {
-                ht_float_t p_norm = dist[c] / leaf_sum;
-                out_proba[c] += w * p_norm;
-                total_weight += w * p_norm;
+                int64_t p_norm = (((int64_t)dist[c]) << 16) / leaf_sum64;
+                int64_t contrib = (w64 * p_norm + 32768LL) >> 16;
+                acc_proba[c] += contrib;
+                total_weight64 += contrib;
             }
         }
     }
 
-    if (total_weight > (ht_float_t)0.0) {
+    if (total_weight64 > 0) {
         for (uint8_t c = 0; c < n_classes; ++c) {
-            out_proba[c] /= total_weight;
+            uint64_t num = ((uint64_t)acc_proba[c] << 16) + ((uint64_t)total_weight64 >> 1);
+            out_proba[c] = ht_fixed_saturate64((int64_t)(num / (uint64_t)total_weight64));
         }
     } else {
-        ht_float_t uniform = (ht_float_t)1.0 / (ht_float_t)n_classes;
+        ht_float_t uniform = HT_DIV(HT_CONST(1.0), HT_FROM_UINT(n_classes));
         for (uint8_t c = 0; c < n_classes; ++c) {
             out_proba[c] = uniform;
         }
     }
+#else
+    ht_float_t total_weight = HT_CONST(0.0);
+    for (uint16_t i = 0; i < n_leaves; ++i) {
+        ht_float_t err = mean_errors[i];
+        ht_float_t w;
+        if (err <= HT_CONST(1e-6)) {
+            w = HT_CONST(1e12);
+        } else {
+            w = HT_DIV(HT_CONST(1.0), HT_MUL(err, err));
+        }
+
+        const ht_float_t *dist = &leaf_probas[(size_t)i * HT_MAX_CLASSES];
+        ht_float_t leaf_sum = HT_CONST(0.0);
+        for (uint8_t c = 0; c < n_classes; ++c) {
+            leaf_sum = HT_ADD(leaf_sum, dist[c]);
+        }
+
+        if (leaf_sum > HT_CONST(0.0)) {
+            for (uint8_t c = 0; c < n_classes; ++c) {
+                ht_float_t p_norm = HT_DIV(dist[c], leaf_sum);
+                ht_float_t contrib = HT_MUL(w, p_norm);
+                out_proba[c] = HT_ADD(out_proba[c], contrib);
+                total_weight = HT_ADD(total_weight, contrib);
+            }
+        }
+    }
+
+    if (total_weight > HT_CONST(0.0)) {
+        for (uint8_t c = 0; c < n_classes; ++c) {
+            out_proba[c] = HT_DIV(out_proba[c], total_weight);
+        }
+    } else {
+        ht_float_t uniform = HT_DIV(HT_CONST(1.0), HT_FROM_UINT(n_classes));
+        for (uint8_t c = 0; c < n_classes; ++c) {
+            out_proba[c] = uniform;
+        }
+    }
+#endif
 }
 
 bool ht_hat_check_reg_error_drift(ht_adwin_t *adwin,
@@ -603,24 +833,27 @@ bool ht_hat_check_reg_error_drift(ht_adwin_t *adwin,
     /* Update Welford accumulators for absolute error */
     (*error_count)++;
     uint32_t n = *error_count;
-    ht_float_t delta = abs_error - *mean_error;
-    *mean_error += delta / (ht_float_t)n;
-    ht_float_t delta2 = abs_error - *mean_error;
-    *error_m2 += delta * delta2;
+    ht_float_t delta = HT_SUB(abs_error, *mean_error);
+#ifdef HT_USE_FIXED_POINT
+    *mean_error = HT_ADD(*mean_error, ht_adwin_div_u32(delta, n));
+    ht_float_t delta2 = HT_SUB(abs_error, *mean_error);
+    *error_m2 = HT_ADD(*error_m2, HT_MUL(delta, delta2));
+#else
+    *mean_error = HT_ADD(*mean_error, HT_DIV(delta, HT_FROM_UINT(n)));
+    ht_float_t delta2 = HT_SUB(abs_error, *mean_error);
+    *error_m2 = HT_ADD(*error_m2, HT_MUL(delta, delta2));
+#endif
 
-    /* Unilateral error filter: if error is decreasing or unchanged, filter out change */
     if (error_change && (*mean_error <= old_error)) {
-        /* Reset error estimator */
-        *mean_error = (ht_float_t)0.0;
-        *error_m2 = (ht_float_t)0.0;
+        *mean_error = HT_CONST(0.0);
+        *error_m2 = HT_CONST(0.0);
         *error_count = 0U;
         return false;
     }
 
     if (error_change) {
-        /* Genuine drift: reset error estimator and signal drift */
-        *mean_error = (ht_float_t)0.0;
-        *error_m2 = (ht_float_t)0.0;
+        *mean_error = HT_CONST(0.0);
+        *error_m2 = HT_CONST(0.0);
         *error_count = 0U;
         return true;
     }
@@ -640,19 +873,29 @@ ht_hat_action_t ht_hat_evaluate_reg_alternate(ht_float_t e_old,
         return HT_HAT_ACTION_NONE;
     }
 
-    ht_float_t se2 = (var_alt / (ht_float_t)n_alt) + (var_old / (ht_float_t)n_old);
-    ht_float_t diff = e_alt - e_old;
+#ifdef HT_USE_FIXED_POINT
+    ht_float_t se2 = HT_ADD(ht_adwin_div_u32(var_alt, n_alt), ht_adwin_div_u32(var_old, n_old));
+#else
+    ht_float_t se2 = HT_ADD(HT_DIV(var_alt, HT_FROM_UINT(n_alt)),
+                            HT_DIV(var_old, HT_FROM_UINT(n_old)));
+#endif
+    ht_float_t diff = HT_SUB(e_alt, e_old);
     ht_float_t p_value;
 
-    if (se2 <= (ht_float_t)0.0) {
-        if (diff == (ht_float_t)0.0) {
+    if (se2 <= HT_CONST(0.0)) {
+        if (diff == HT_CONST(0.0)) {
             return HT_HAT_ACTION_NONE;
         }
-        p_value = (ht_float_t)0.0;
+        p_value = HT_CONST(0.0);
     } else {
-        ht_float_t z = diff / HT_SQRT(se2);
-        ht_float_t abs_z = HT_FABS(z);
-        p_value = HT_ERFC(abs_z / HT_SQRT2);
+        ht_float_t se = HT_SQRT(se2);
+        if (se <= HT_CONST(0.0)) {
+            p_value = HT_CONST(0.0);
+        } else {
+            ht_float_t z = HT_DIV(diff, se);
+            ht_float_t abs_z = HT_FABS(z);
+            p_value = HT_ERFC(HT_DIV(abs_z, HT_SQRT2));
+        }
     }
 
     if (p_value <= alpha) {

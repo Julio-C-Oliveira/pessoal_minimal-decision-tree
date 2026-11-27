@@ -86,9 +86,9 @@ static ht_float_t ht_fed_leaf_weight(const ht_tree_t *tree, const ht_node_t *nod
     if (tree->params.task_type == HT_TASK_REGRESSION) {
         return node->reg_stats.count;
     }
-    ht_float_t w = (ht_float_t)0.0;
+    ht_float_t w = HT_CONST(0.0);
     for (uint8_t c = 0; c < tree->params.n_classes; ++c) {
-        w += node->class_counts[c];
+        w = HT_ADD(w, node->class_counts[c]);
     }
     return w;
 }
@@ -136,19 +136,39 @@ static void ht_fed_merge_leaf_stats_block(ht_leaf_stats_t *dst,
             }
         }
         /* Sample-weighted FedAvg of linear SGD weights & intercept */
-        ht_float_t total_w = dst_sgd_w + src_sgd_w;
-        if (total_w > (ht_float_t)0.0 && src_sgd_w > (ht_float_t)0.0) {
-            ht_float_t a = dst_sgd_w / total_w;
-            ht_float_t b = src_sgd_w / total_w;
-            dst->reg_intercept = a * dst->reg_intercept + b * src->reg_intercept;
-            dst->fmse_mean = a * dst->fmse_mean + b * src->fmse_mean;
-            dst->fmse_model = a * dst->fmse_model + b * src->fmse_model;
+#ifdef HT_USE_FIXED_POINT
+        int64_t total_w = (int64_t)dst_sgd_w + (int64_t)src_sgd_w;
+        if (total_w > 0 && src_sgd_w > HT_CONST(0.0)) {
+            int64_t a_q16 = ((int64_t)dst_sgd_w << 16) / total_w;
+            int64_t b_q16 = ((int64_t)src_sgd_w << 16) / total_w;
+            dst->reg_intercept = ht_fixed_saturate64(
+                (a_q16 * (int64_t)dst->reg_intercept + b_q16 * (int64_t)src->reg_intercept) >> 16);
+            dst->fmse_mean = ht_fixed_saturate64(
+                (a_q16 * (int64_t)dst->fmse_mean + b_q16 * (int64_t)src->fmse_mean) >> 16);
+            dst->fmse_model = ht_fixed_saturate64(
+                (a_q16 * (int64_t)dst->fmse_model + b_q16 * (int64_t)src->fmse_model) >> 16);
             ht_float_t *dw = ht_leaf_reg_weights(dst, params->n_features);
             const ht_float_t *sw = ht_leaf_reg_weights_const(src, params->n_features);
             for (uint8_t f = 0; f < params->n_features; ++f) {
-                dw[f] = a * dw[f] + b * sw[f];
+                dw[f] = ht_fixed_saturate64(
+                    (a_q16 * (int64_t)dw[f] + b_q16 * (int64_t)sw[f]) >> 16);
             }
         }
+#else
+        ht_float_t total_w = HT_ADD(dst_sgd_w, src_sgd_w);
+        if (total_w > HT_CONST(0.0) && src_sgd_w > HT_CONST(0.0)) {
+            ht_float_t a = HT_DIV(dst_sgd_w, total_w);
+            ht_float_t b = HT_DIV(src_sgd_w, total_w);
+            dst->reg_intercept = HT_ADD(HT_MUL(a, dst->reg_intercept), HT_MUL(b, src->reg_intercept));
+            dst->fmse_mean = HT_ADD(HT_MUL(a, dst->fmse_mean), HT_MUL(b, src->fmse_mean));
+            dst->fmse_model = HT_ADD(HT_MUL(a, dst->fmse_model), HT_MUL(b, src->fmse_model));
+            ht_float_t *dw = ht_leaf_reg_weights(dst, params->n_features);
+            const ht_float_t *sw = ht_leaf_reg_weights_const(src, params->n_features);
+            for (uint8_t f = 0; f < params->n_features; ++f) {
+                dw[f] = HT_ADD(HT_MUL(a, dw[f]), HT_MUL(b, sw[f]));
+            }
+        }
+#endif
     } else {
         for (uint8_t f = 0; f < params->n_features; ++f) {
             if (params->feature_types[f] == HT_FEAT_NUMERIC) {
@@ -163,8 +183,8 @@ static void ht_fed_merge_leaf_stats_block(ht_leaf_stats_t *dst,
                 ht_categorical_merge(&dst->observers[f].cat, &src->observers[f].cat, params->n_classes);
             }
         }
-        dst->mc_correct_weight += src->mc_correct_weight;
-        dst->nb_correct_weight += src->nb_correct_weight;
+        dst->mc_correct_weight = HT_ADD(dst->mc_correct_weight, src->mc_correct_weight);
+        dst->nb_correct_weight = HT_ADD(dst->nb_correct_weight, src->nb_correct_weight);
     }
 }
 
@@ -238,7 +258,7 @@ ht_status_t ht_fed_vfdt_client_learn_one(ht_fed_vfdt_client_t *client,
 ht_float_t ht_fed_vfdt_client_predict_reg(const ht_fed_vfdt_client_t *client,
                                           const ht_value_t x[HT_MAX_FEATURES]) {
     if (client == NULL) {
-        return (ht_float_t)0.0;
+        return HT_CONST(0.0);
     }
     return ht_tree_predict_reg(&client->tree, x);
 }
@@ -289,7 +309,7 @@ ht_status_t ht_fed_vfdt_client_export_update(ht_fed_vfdt_client_t *client,
                 continue;
             }
             ht_float_t w = ht_fed_leaf_weight(&client->tree, node);
-            if (w <= (ht_float_t)0.0) {
+            if (w <= HT_CONST(0.0)) {
                 continue;
             }
             uint16_t depth = ht_fed_compute_node_depth(&client->tree, i);
@@ -661,7 +681,7 @@ ht_status_t ht_fed_vfdt_server_ingest(ht_fed_vfdt_server_t *server,
                 continue;
             }
 
-            ht_float_t client_local_w = (ht_float_t)0.0;
+            ht_float_t client_local_w = HT_CONST(0.0);
             if (is_reg) {
                 ht_var_stat_t delta_reg = ht_var_subtract(&item.reg_stats, &gnode->reg_stats);
                 client_local_w = delta_reg.count;
@@ -669,10 +689,11 @@ ht_status_t ht_fed_vfdt_server_ingest(ht_fed_vfdt_server_t *server,
                     ht_var_combine(&server->merge_leaf_delta[s_idx].reg_stats, &delta_reg);
             } else {
                 for (uint8_t c = 0; c < server->cfg.tree_params.n_classes; ++c) {
-                    ht_float_t d = item.class_counts[c] - gnode->class_counts[c];
-                    if (d > (ht_float_t)0.0) {
-                        server->merge_leaf_delta[s_idx].class_counts[c] += d;
-                        client_local_w += d;
+                    ht_float_t d = HT_SUB(item.class_counts[c], gnode->class_counts[c]);
+                    if (d > HT_CONST(0.0)) {
+                        server->merge_leaf_delta[s_idx].class_counts[c] =
+                            HT_ADD(server->merge_leaf_delta[s_idx].class_counts[c], d);
+                        client_local_w = HT_ADD(client_local_w, d);
                     }
                 }
             }
@@ -682,7 +703,7 @@ ht_status_t ht_fed_vfdt_server_ingest(ht_fed_vfdt_server_t *server,
                                           &server->cfg.tree_params,
                                           server->merge_sgd_weight_sum[s_idx],
                                           client_local_w);
-            server->merge_sgd_weight_sum[s_idx] += client_local_w;
+            server->merge_sgd_weight_sum[s_idx] = HT_ADD(server->merge_sgd_weight_sum[s_idx], client_local_w);
         }
 
         server->n_round_clients++;
@@ -745,15 +766,23 @@ static ht_status_t ht_fed_vfdt_end_round_coordinated(ht_fed_vfdt_server_t *serve
 
         uint16_t   feat_votes[HT_MAX_FEATURES];
         ht_float_t feat_merit_sum[HT_MAX_FEATURES];
+#ifdef HT_USE_FIXED_POINT
+        int64_t    feat_wmerit_sum[HT_MAX_FEATURES];
+#else
         ht_float_t feat_wmerit_sum[HT_MAX_FEATURES];
+#endif
         ht_float_t feat_max_merit[HT_MAX_FEATURES];
         uint16_t   feat_best_prop[HT_MAX_FEATURES];
 
         for (uint8_t f = 0; f < HT_MAX_FEATURES; ++f) {
             feat_votes[f] = 0U;
-            feat_merit_sum[f] = (ht_float_t)0.0;
-            feat_wmerit_sum[f] = (ht_float_t)0.0;
-            feat_max_merit[f] = -HT_INFINITY;
+            feat_merit_sum[f] = HT_CONST(0.0);
+#ifdef HT_USE_FIXED_POINT
+            feat_wmerit_sum[f] = 0;
+#else
+            feat_wmerit_sum[f] = HT_CONST(0.0);
+#endif
+            feat_max_merit[f] = HT_NEG_INFINITY;
             feat_best_prop[f] = HT_INVALID_IDX;
         }
 
@@ -776,13 +805,17 @@ static ht_status_t ht_fed_vfdt_end_round_coordinated(ht_fed_vfdt_server_t *serve
             eligible_props++;
 
             uint8_t f = p->best.feature_idx;
-            ht_float_t w = (p->total_weight > (ht_float_t)0.0) ? p->total_weight : (ht_float_t)1.0;
+            ht_float_t w = (p->total_weight > HT_CONST(0.0)) ? p->total_weight : HT_CONST(1.0);
             ht_float_t m = p->best.merit;
-            ht_float_t m_pos = (m > (ht_float_t)0.0) ? m : (ht_float_t)0.0;
+            ht_float_t m_pos = (m > HT_CONST(0.0)) ? m : HT_CONST(0.0);
 
             feat_votes[f]++;
-            feat_merit_sum[f] += m_pos;
-            feat_wmerit_sum[f] += w * m_pos;
+            feat_merit_sum[f] = HT_ADD(feat_merit_sum[f], m_pos);
+#ifdef HT_USE_FIXED_POINT
+            feat_wmerit_sum[f] += (int64_t)w * (int64_t)m_pos;
+#else
+            feat_wmerit_sum[f] = HT_ADD(feat_wmerit_sum[f], HT_MUL(w, m_pos));
+#endif
             if (feat_best_prop[f] == HT_INVALID_IDX || m > feat_max_merit[f]) {
                 feat_max_merit[f] = m;
                 feat_best_prop[f] = i;
@@ -795,8 +828,11 @@ static ht_status_t ht_fed_vfdt_end_round_coordinated(ht_fed_vfdt_server_t *serve
 
         uint8_t winner_f = HT_NO_FEATURE;
         uint16_t best_votes = 0U;
-        ht_float_t best_primary = -HT_INFINITY;
-        ht_float_t best_tie = -HT_INFINITY;
+        ht_float_t best_primary = HT_NEG_INFINITY;
+#ifdef HT_USE_FIXED_POINT
+        int64_t best_wmerit = INT64_MIN;
+#endif
+        ht_float_t best_tie = HT_NEG_INFINITY;
 
         for (uint8_t f = 0; f < server->cfg.tree_params.n_features; ++f) {
             if (feat_votes[f] == 0U) {
@@ -827,6 +863,15 @@ static ht_status_t ht_fed_vfdt_end_round_coordinated(ht_fed_vfdt_server_t *serve
                 }
             } else if (server->cfg.consensus == HT_FED_CONSENSUS_WEIGHTED_MERIT) {
                 /* Hybrid WEIGHTED-MERIT: highest sum(w_k * G_k(f)) */
+#ifdef HT_USE_FIXED_POINT
+                if (feat_wmerit_sum[f] > best_wmerit ||
+                    (feat_wmerit_sum[f] == best_wmerit && feat_max_merit[f] > best_tie)) {
+                    best_wmerit = feat_wmerit_sum[f];
+                    best_tie = feat_max_merit[f];
+                    best_votes = feat_votes[f];
+                    winner_f = f;
+                }
+#else
                 if (feat_wmerit_sum[f] > best_primary ||
                     (feat_wmerit_sum[f] == best_primary && feat_max_merit[f] > best_tie)) {
                     best_primary = feat_wmerit_sum[f];
@@ -834,6 +879,7 @@ static ht_status_t ht_fed_vfdt_end_round_coordinated(ht_fed_vfdt_server_t *serve
                     best_votes = feat_votes[f];
                     winner_f = f;
                 }
+#endif
             } else {
                 /* Paper-faithful MAJORITY-VOTE (Plurality): most votes, tie-break by highest individual merit */
                 if (feat_votes[f] > best_votes ||
@@ -857,8 +903,13 @@ static ht_status_t ht_fed_vfdt_end_round_coordinated(ht_fed_vfdt_server_t *serve
         global_cand.is_categorical =
             (server->cfg.tree_params.feature_types[winner_f] == HT_FEAT_CATEGORICAL) ? 1U : 0U;
 
-        ht_float_t thresh_num = (ht_float_t)0.0;
-        ht_float_t thresh_den = (ht_float_t)0.0;
+#ifdef HT_USE_FIXED_POINT
+        int64_t thresh_num = 0;
+        int64_t thresh_den = 0;
+#else
+        ht_float_t thresh_num = HT_CONST(0.0);
+        ht_float_t thresh_den = HT_CONST(0.0);
+#endif
         ht_float_t cat_votes[HT_MAX_CATEGORIES];
         memset(cat_votes, 0, sizeof(cat_votes));
 
@@ -871,15 +922,20 @@ static ht_status_t ht_fed_vfdt_end_round_coordinated(ht_fed_vfdt_server_t *serve
                 continue;
             }
 
-            ht_float_t w = (p->total_weight > (ht_float_t)0.0) ? p->total_weight : (ht_float_t)1.0;
+            ht_float_t w = (p->total_weight > HT_CONST(0.0)) ? p->total_weight : HT_CONST(1.0);
             if (global_cand.is_categorical) {
                 int32_t cv = p->best.split_val.cat_val;
                 if (cv >= 0 && cv < (int32_t)HT_MAX_CATEGORIES) {
-                    cat_votes[cv] += w;
+                    cat_votes[cv] = HT_ADD(cat_votes[cv], w);
                 }
             } else {
-                thresh_num += w * p->best.split_val.threshold;
-                thresh_den += w;
+#ifdef HT_USE_FIXED_POINT
+                thresh_num += (int64_t)w * (int64_t)p->best.split_val.threshold;
+                thresh_den += (int64_t)w;
+#else
+                thresh_num = HT_ADD(thresh_num, HT_MUL(w, p->best.split_val.threshold));
+                thresh_den = HT_ADD(thresh_den, w);
+#endif
             }
 
             if (is_reg) {
@@ -887,8 +943,8 @@ static ht_status_t ht_fed_vfdt_end_round_coordinated(ht_fed_vfdt_server_t *serve
                 global_cand.rhs_var = ht_var_combine(&global_cand.rhs_var, &p->best.rhs_var);
             } else {
                 for (uint8_t c = 0; c < server->cfg.tree_params.n_classes; ++c) {
-                    global_cand.lhs_dist[c] += p->best.lhs_dist[c];
-                    global_cand.rhs_dist[c] += p->best.rhs_dist[c];
+                    global_cand.lhs_dist[c] = HT_ADD(global_cand.lhs_dist[c], p->best.lhs_dist[c]);
+                    global_cand.rhs_dist[c] = HT_ADD(global_cand.rhs_dist[c], p->best.rhs_dist[c]);
                 }
             }
         }
@@ -902,7 +958,7 @@ static ht_status_t ht_fed_vfdt_end_round_coordinated(ht_fed_vfdt_server_t *serve
             /* Sample-weighted mean threshold / weighted mode category */
             if (global_cand.is_categorical) {
                 int32_t best_cat = best_p->best.split_val.cat_val;
-                ht_float_t best_cw = (ht_float_t)-1.0;
+                ht_float_t best_cw = HT_CONST(-1.0);
                 for (int32_t cv = 0; cv < (int32_t)HT_MAX_CATEGORIES; ++cv) {
                     if (cat_votes[cv] > best_cw) {
                         best_cw = cat_votes[cv];
@@ -911,11 +967,21 @@ static ht_status_t ht_fed_vfdt_end_round_coordinated(ht_fed_vfdt_server_t *serve
                 }
                 global_cand.split_val.cat_val = best_cat;
             } else {
-                global_cand.split_val.threshold = (thresh_den > (ht_float_t)0.0)
-                    ? (thresh_num / thresh_den) : best_p->best.split_val.threshold;
+#ifdef HT_USE_FIXED_POINT
+                global_cand.split_val.threshold = (thresh_den > 0)
+                    ? ht_fixed_saturate64(thresh_num / thresh_den) : best_p->best.split_val.threshold;
+#else
+                global_cand.split_val.threshold = (thresh_den > HT_CONST(0.0))
+                    ? HT_DIV(thresh_num, thresh_den) : best_p->best.split_val.threshold;
+#endif
             }
-            global_cand.merit = (thresh_den > (ht_float_t)0.0)
-                ? (feat_wmerit_sum[winner_f] / thresh_den) : best_p->best.merit;
+#ifdef HT_USE_FIXED_POINT
+            global_cand.merit = (thresh_den > 0)
+                ? ht_fixed_saturate64(feat_wmerit_sum[winner_f] / thresh_den) : best_p->best.merit;
+#else
+            global_cand.merit = (thresh_den > HT_CONST(0.0))
+                ? HT_DIV(feat_wmerit_sum[winner_f], thresh_den) : best_p->best.merit;
+#endif
         }
 
         ready_splits[n_ready_splits].leaf_idx = leaf_idx;
@@ -1001,21 +1067,21 @@ static ht_status_t ht_fed_vfdt_end_round_stats_merge(ht_fed_vfdt_server_t *serve
         /* Temporarily combine post-split seed with this round's merged local deltas */
         ht_float_t saved_cc[HT_MAX_CLASSES];
         ht_var_stat_t saved_reg = node->reg_stats;
-        ht_float_t delta_w = (ht_float_t)0.0;
+        ht_float_t delta_w = HT_CONST(0.0);
 
         if (is_reg) {
             delta_w = server->merge_leaf_delta[s_idx].reg_stats.count;
-            if (delta_w < (ht_float_t)server->cfg.tree_params.grace_period) {
+            if (delta_w < HT_FROM_UINT(server->cfg.tree_params.grace_period)) {
                 continue;
             }
             node->reg_stats = ht_var_combine(&saved_reg, &server->merge_leaf_delta[s_idx].reg_stats);
         } else {
             for (uint8_t c = 0; c < server->cfg.tree_params.n_classes; ++c) {
                 saved_cc[c] = node->class_counts[c];
-                delta_w += server->merge_leaf_delta[s_idx].class_counts[c];
-                node->class_counts[c] = saved_cc[c] + server->merge_leaf_delta[s_idx].class_counts[c];
+                delta_w = HT_ADD(delta_w, server->merge_leaf_delta[s_idx].class_counts[c]);
+                node->class_counts[c] = HT_ADD(saved_cc[c], server->merge_leaf_delta[s_idx].class_counts[c]);
             }
-            if (delta_w < (ht_float_t)server->cfg.tree_params.grace_period) {
+            if (delta_w < HT_FROM_UINT(server->cfg.tree_params.grace_period)) {
                 for (uint8_t c = 0; c < server->cfg.tree_params.n_classes; ++c) {
                     node->class_counts[c] = saved_cc[c];
                 }
