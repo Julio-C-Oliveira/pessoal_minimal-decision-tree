@@ -2,6 +2,9 @@
 
 Introduzido na versão **`v0.5.0`** (Fase 11), o módulo federado do **kansho** permite que dispositivos embarcados (*edge / IoT*) aprendam colaborativamente sem transmitir dados brutos na rede e mantendo **zero alocação dinâmica (`malloc`/`free`) em runtime**. Todo o estado do cliente e do servidor reside em structs estáticas compactas e troca quadros binários autocontidos através do protocolo **`HFED`**.
 
+> [!NOTE]
+> **Base Científica e Créditos:** O **Modo 2A (`Fed-VFDT` Coordenado)** implementa e adapta para microcontroladores C11 o algoritmo **Fed-VFDT** proposto por **Paula Raissa Silva, João Vinagre e João Gama** (*IEEE ICTAI 2025*, DOI [`10.1109/ICTAI66417.2025.00094`](https://doi.org/10.1109/ICTAI66417.2025.00094), código de referência [`paularaissa/project-vfdt`](https://github.com/paularaissa/project-vfdt)), incorporando também o conceito de regressão coordenada do **FHT-R** (*Daniela Menezes, Douglas Vidal, André Riker e Glauco Gonçalves, SBrT 2026*). O **Modo 1 (`Fed-Forest`)**, o **Modo 2B (`Stats-Merge`)**, o protocolo binário **`HFED` + CRC32**, o versionamento com `split_log` / `FULL_SNAPSHOT` e o reset coordenado por *concept drift* são extensões originais do **kansho**. Veja a delimitação detalhada na [Seção 6](#6-créditos-originalidade-e-referências-bibliográficas) e em **[Origem, Linhagem e Originalidade](Origem-River-Scikit-Learn-e-Originalidade.md)**.
+
 ---
 
 ## 1. Os Dois Paradigmas Federados
@@ -10,9 +13,9 @@ A arquitetura oferece dois modos complementares configuráveis via headers públ
 
 | Paradigma | Mecanismo Central | Uplink do Cliente | Downlink do Servidor | Banda Média / Rodada | Ideal Para |
 | :--- | :--- | :--- | :--- | :---: | :--- |
-| **Modo 1 — `Fed-Forest`**<br/>([`ht_fed_forest.h`](../code/include/federated/ht_fed_forest.h)) | Cada cliente treina 1 árvore local completa (`ht_tree_t`) e compartilha sua topologia compactada via BFS (`ht_compact_tree_t`, ~1,34 KB em 64 nós). | Árvore compacta somente-inferência + erro prequential. | Comitê de até $M$ árvores pares selecionadas via `ALL`, `TOP_M` ou `ROUND_ROBIN`. | ~738 B – 3,9 KB | Regressão contínua Non-IID, clientes assíncronos e votação adaptativa ($M \le 8$). |
-| **Modo 2A — `Fed-VFDT` Coordenado**<br/>([`ht_fed_vfdt.h`](../code/include/federated/ht_fed_vfdt.h)) | Árvore global única sincronizada por versão (`HT_TREE_FLAG_DEFER_SPLITS`). Clientes avaliam o *Hoeffding Bound* localmente e votam por consenso (`QUORUM`, `MAJORITY`, `MERIT` ou `WEIGHTED_MERIT`). | Propostas compactas de split (`ht_fed_split_proposal_t`) + alerta opcional de drift. | Comandos incrementais de split/reset (`split_log`) ou `FULL_SNAPSHOT`. | **114 B – 564 B** | Links ultrarestritos (LoRaWAN, BLE, NB-IoT, UART) alinhados ao paper *Fed-VFDT* (IEEE ICTAI 2025). |
-| **Modo 2B — `Fed-VFDT Stats-Merge`**<br/>([`ht_fed_vfdt.h`](../code/include/federated/ht_fed_vfdt.h)) | Fusão paralela exata sem perda das estatísticas suficientes nas folhas (Chan/Welford, matrizes categóricas, histogramas Ben-Haim, slots de regressão + FedAvg de pesos SGD) sem contagem dupla. | Pacote binário com estatísticas das folhas ativas. | Árvore global evolui com o *Hoeffding Bound* global e transmite deltas via `split_log`. | ~2,0 KB – 53 KB | Cenários **Non-IID extremos** (clientes vendo apenas 1–2 classes ou faixas estreitas de $y$). |
+| **Modo 1 — `Fed-Forest`** *(Autoral)*<br/>([`ht_fed_forest.h`](../code/include/federated/ht_fed_forest.h)) | Cada cliente treina 1 árvore local completa (`ht_tree_t`) e compartilha sua topologia compactada via BFS (`ht_compact_tree_t`, ~1,34 KB em 64 nós). | Árvore compacta somente-inferência + erro prequential. | Comitê de até $M$ árvores pares selecionadas via `ALL`, `TOP_M` ou `ROUND_ROBIN`. | ~738 B – 3,9 KB | Regressão contínua Non-IID, clientes assíncronos e votação adaptativa ($M \le 8$). |
+| **Modo 2A — `Fed-VFDT` Coordenado** *(Baseado em Silva, Vinagre & Gama, ICTAI 2025)*<br/>([`ht_fed_vfdt.h`](../code/include/federated/ht_fed_vfdt.h)) | Árvore global única sincronizada por versão (`HT_TREE_FLAG_DEFER_SPLITS`). Clientes avaliam o *Hoeffding Bound* localmente e votam por consenso (`QUORUM`, `MAJORITY`, `MERIT` ou `WEIGHTED_MERIT`). | Propostas compactas de split (`ht_fed_split_proposal_t`) + alerta opcional de drift. | Comandos incrementais de split/reset (`split_log`) ou `FULL_SNAPSHOT`. | **114 B – 564 B** | Links ultrarestritos (LoRaWAN, BLE, NB-IoT, UART) com paridade conceitual ao *Fed-VFDT* (`paularaissa/project-vfdt`). |
+| **Modo 2B — `Fed-VFDT Stats-Merge`** *(Autoral)*<br/>([`ht_fed_vfdt.h`](../code/include/federated/ht_fed_vfdt.h)) | Fusão paralela exata sem perda das estatísticas suficientes nas folhas (Chan/Welford, matrizes categóricas, histogramas Ben-Haim, slots de regressão + FedAvg de pesos SGD) sem contagem dupla. | Pacote binário com estatísticas das folhas ativas. | Árvore global evolui com o *Hoeffding Bound* global e transmite deltas via `split_log`. | ~2,0 KB – 53 KB | Cenários **Non-IID extremos** (clientes vendo apenas 1–2 classes ou faixas estreitas de $y$). |
 
 ---
 
@@ -219,4 +222,46 @@ Compilação cruzada validada na entrega `11.11` com zero warnings em **`.data =
 | **ARM Cortex-M3** (`arm-none-eabi-gcc 14.2.1`, Thumb-2) | **11.342 B (11,08 KB)** | **40.614 B (39,66 KB)** |
 | **ESP32 Xtensa LX6** (`xtensa-esp32-elf-gcc 12.2.0`) | **12.119 B (11,83 KB)** | **41.582 B (40,61 KB)** |
 
-Para a especificação matemática completa e a auditoria de paridade contra o paper *Fed-VFDT* (`paularaissa/project-vfdt`), consulte [`docs/13_federated_learning.md`](../docs/13_federated_learning.md).
+---
+
+## 6. Créditos, Originalidade e Referências Bibliográficas
+
+### 6.1 Trabalhos Científicos e Código de Referência
+1. **Fed-VFDT (Base Principal — Modo 2A Coordenado em Classificação):**
+   - **Autores:** Paula Raissa Silva, João Vinagre e João Gama (INESC TEC / Universidade do Porto)
+   - **Título:** *Fed-VFDT: Federated Very Fast Decision Trees with Coordinated Splitting Over Data Streams*
+   - **Publicação:** *2025 IEEE 37th International Conference on Tools with Artificial Intelligence (ICTAI)*, pp. 653–660
+   - **DOI:** [`10.1109/ICTAI66417.2025.00094`](https://doi.org/10.1109/ICTAI66417.2025.00094)
+   - **Repositório Oficial:** [`paularaissa/project-vfdt`](https://github.com/paularaissa/project-vfdt) (`client_app/fht.py`, `client_app/client_app.py`, `server_app/server_app.py`, `server_app/my_server.py`)
+2. **FHT-R (Referência Complementar — Extensão Coordenada para Regressão):**
+   - **Autores:** Daniela Menezes, Douglas Vidal, André Riker e Glauco Gonçalves
+   - **Título:** *FHT-R: Federated Online Regression with Coordinated Hoeffding Trees for Air Quality Prediction*
+   - **Publicação:** *XLIV Simpósio Brasileiro de Telecomunicações e Processamento de Sinais (SBrT 2026)*
+
+### 6.2 Delimitação de Autoria (O que Veio do `Fed-VFDT` vs. Extensões do `kansho`)
+- **Baseado em Silva, Vinagre & Gama (`paularaissa/project-vfdt`) e `FHT-R`:**
+  - Coordenação de splits sem envio de dados brutos (splits locais diferidos + propostas avaliadas pelo *Hoeffding Bound*), estratégias de consenso no servidor (`QUORUM` por atributo com `sum(merit)`, `MAJORITY` por pluralidade e `BEST-MERIT` `max(G_k)`), seleção de threshold `HT_FED_THRESH_MAX_MERIT`, filtro `require_locally_ready = true`, broadcast de threshold global único com injeção de `children_stats`, escala `client_grace = G / K` e aplicação do paradigma à regressão online (*FHT-R*).
+- **Original / Reprojetado no `kansho` para Microcontroladores C11:**
+  - Implementação 100% estática zero-`malloc` em C11 puro (sem Flower, Python, JSON ou Pickle), operação não-bloqueante (sem `_frozen` nem `_instance_buffer`), endereçamento `uint16_t` com `topology_version` + log circular `split_log[64]` + fallback automático `FULL_SNAPSHOT`, **Modo 1 (`Fed-Forest`)** com compactação BFS e votação ponderada, **Modo 2B (`STATS_MERGE`)** com fusão paralela exata sem contagem dupla + FedAvg SGD, protocolo binário **`HFED` (`32 B`) + CRC32** e **reset coordenado por concept drift** (`HT_FED_CMD_RESET_SUBTREE`).
+
+Para a matriz comparativa linha a linha entre `paularaissa/project-vfdt` e o `kansho`, consulte **[Origem, Linhagem e Originalidade](Origem-River-Scikit-Learn-e-Originalidade.md#4-o-que-foi-extraído-do-fed-vfdt-paularaissaproject-vfdt-e-do-fht-r)** e [`docs/13_federated_learning.md`](../docs/13_federated_learning.md).
+
+### 6.3 Citações em BibTeX
+
+```bibtex
+@inproceedings{silva2025fedvfdt,
+  author    = {Silva, Paula Raissa and Vinagre, Jo{\~a}o and Gama, Jo{\~a}o},
+  title     = {Fed-VFDT: Federated Very Fast Decision Trees with Coordinated Splitting Over Data Streams},
+  booktitle = {2025 IEEE 37th International Conference on Tools with Artificial Intelligence (ICTAI)},
+  pages     = {653--660},
+  year      = {2025},
+  doi       = {10.1109/ICTAI66417.2025.00094}
+}
+
+@inproceedings{menezes2026fhtr,
+  author    = {Menezes, Daniela and Vidal, Douglas and Riker, Andr{\'e} and Gon{\c{c}}alves, Glauco},
+  title     = {FHT-R: Federated Online Regression with Coordinated Hoeffding Trees for Air Quality Prediction},
+  booktitle = {XLIV Simp{\'o}sio Brasileiro de Telecomunica{\c{c}}{\~o}es e Processamento de Sinais (SBrT 2026)},
+  year      = {2026}
+}
+```

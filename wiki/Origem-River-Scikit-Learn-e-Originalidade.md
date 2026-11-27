@@ -1,10 +1,14 @@
-# Linhagem Arquitetural: O que Veio do River, do Scikit-Learn e o que é Original
+# Linhagem Arquitetural: River, Scikit-Learn, Fed-VFDT / FHT-R e Originalidade
 
-Esta página detalha a genealogia técnica e as decisões de engenharia do **kansho**. O projeto não é uma simples tradução linha por linha de uma biblioteca existente nem uma reimplementação do zero: trata-se da **síntese arquitetural** entre os algoritmos de aprendizado em fluxo (*stream learning*) do **River**, os padrões de localidade de cache e otimização numérica em baixo nível do **Scikit-Learn**, e um conjunto substancial de **inovações originais** projetadas para viabilizar inferência e treinamento incremental em microcontroladores bare-metal com **$\le 1\text{ MB}$ de RAM** e **zero alocação dinâmica (`malloc`/`free`)**.
+Esta página detalha a genealogia técnica, os créditos acadêmicos e as decisões de engenharia do **kansho**. O projeto não é uma simples tradução linha por linha de uma biblioteca existente nem uma reimplementação isolada do zero: trata-se da **síntese arquitetural** entre:
+1. Os algoritmos de aprendizado em fluxo (*stream learning*) do **River** (`online-ml/river`);
+2. Os padrões de localidade de cache e otimização numérica em baixo nível do **Scikit-Learn** (`sklearn/tree`);
+3. O protocolo de **split federado coordenado** do **Fed-VFDT** (*Paula Raissa Silva, João Vinagre & João Gama, IEEE ICTAI 2025*, repositório [`paularaissa/project-vfdt`](https://github.com/paularaissa/project-vfdt)) e sua extensão para regressão **FHT-R** (*Daniela Menezes, Douglas Vidal, André Riker & Glauco Gonçalves, SBrT 2026*);
+4. Um conjunto substancial de **inovações originais em C11 puro** projetadas para viabilizar inferência, treino incremental e aprendizado federado em microcontroladores bare-metal com **$\le 1\text{ MB}$ de RAM** e **zero alocação dinâmica (`malloc`/`free`)**.
 
 ---
 
-## 1. Visão Geral da Tríplice Herança
+## 1. Visão Geral da Quádrupla Linhagem
 
 ```mermaid
 flowchart TD
@@ -22,6 +26,13 @@ flowchart TD
         S4["Inspiração de Transformadores:<br/>Conceitos de QuantileTransformer,<br/>KBinsDiscretizer e RobustScaler (MAD)"]
     end
 
+    subgraph FEDVFDT["Fed-VFDT (IEEE ICTAI 2025) & FHT-R — paularaissa/project-vfdt"]
+        F1["Coordenação sem Dados Brutos:<br/>Splits locais diferidos + envio de propostas<br/>apenas quando prontos no Hoeffding Bound"]
+        F2["Estratégias de Consenso no Servidor:<br/>QUORUM por atributo, MAJORITY pluralidade,<br/>BEST-MERIT max(G_k)"]
+        F3["Sincronia de Split Global:<br/>Threshold exato do maior mérito (MAX_MERIT)<br/>+ broadcast e injeção de children_stats"]
+        F4["Regressão Federada Coordenada:<br/>FHT-R (Menezes et al., SBrT 2026)"]
+    end
+
     subgraph ORIGINAL["Inovações Originais (kansho em C11)"]
         O1["Zero Alocação Dinâmica em Runtime:<br/>0,0 KB de malloc/free, Pools estáticos O(1)"]
         O2["Separação Topologia Leve vs Estado Pesado:<br/>ht_node_t (20 B) vs ht_leaf_stats_t (1,3 KB)<br/>com reciclagem imediata no split"]
@@ -30,12 +41,14 @@ flowchart TD
         O5["Precisão Configurável ht_float_t:<br/>float 32-bit (MCU FPU) vs double 64-bit"]
         O6["Fusão Física Classificação/Regressão:<br/>Unificação de espaço via union de custo zero"]
         O7["ADWIN2 e HAT Iterativos Estáticos:<br/>Pool contíguo de buckets, poda sem recursão"]
-        O8["Micro-Pipelines Zero-Malloc (libht_prep):<br/>Filtro Hampel MAD (outliers em sensores),<br/>Space-Saving (Heavy Hitters alta cardinalidade),<br/>Ben-Haim & Tom-Tov (CDF/bins sem heap),<br/>Z-Score Híbrido com Credibilidade nas folhas"]
+        O8["Micro-Pipelines Zero-Malloc (libht_prep):<br/>Hampel MAD, Space-Saving, Ben-Haim & Tom-Tov,<br/>Z-Score Híbrido com Credibilidade nas folhas"]
+        O9["Camada Federada Embarcada C11 (v0.5.0):<br/>Fed-Forest (BFS + votação), Stats-Merge stateless,<br/>Protocolo HFED 32 B + CRC32, split_log[64] /<br/>FULL_SNAPSHOT (stragglers) e Drift Reset"]
     end
 
     RIVER --> |"Teoria e Fluxo Estatístico"| MDT["kansho (C11 Puro)"]
     SKLEARN --> |"Design de Dados e Otimização Numérica"| MDT
-    ORIGINAL --> |"Arquitetura Embarcada e Determinismo"| MDT
+    FEDVFDT --> |"Protocolo Fed-VFDT Coordenado"| MDT
+    ORIGINAL --> |"Arquitetura Embarcada e Extensões Federadas"| MDT
 ```
 
 ---
@@ -112,19 +125,67 @@ O [`scikit-learn`](https://github.com/scikit-learn/scikit-learn) (`sklearn/tree`
 
 ---
 
-## 4. O que é Original no kansho
+## 4. O que foi Extraído do Fed-VFDT (`paularaissa/project-vfdt`) e do FHT-R
 
-Embora o River forneça a teoria de streaming e o Scikit-Learn inspire a engenharia de dados, **nenhuma das duas bibliotecas é capaz de rodar em microcontroladores bare-metal ou RTOS com $\le 1\text{ MB}$ de RAM**:
-- O River depende de centenas de objetos dinâmicos Python, dicionários esparsos (`defaultdict`), chamadas contínuas ao Garbage Collector e alocação dinâmica intensiva no heap.
+Para o aprendizado federado da **`v0.5.0`** (Modo 2A — `HT_FED_VFDT_COORDINATED`), adotamos como referência científica e algorítmica direta o algoritmo **Fed-VFDT** e o repositório oficial de seus autores, estendendo o paradigma também à regressão contínua com inspiração no **FHT-R**:
+
+### 4.1 Créditos e Referências Originais
+1. **Fed-VFDT (Classificação Federada Coordenada — Base Principal):**
+   - **Autores:** Paula Raissa Silva, João Vinagre e João Gama (INESC TEC / Universidade do Porto)
+   - **Título:** *Fed-VFDT: Federated Very Fast Decision Trees with Coordinated Splitting Over Data Streams*
+   - **Publicação:** *2025 IEEE 37th International Conference on Tools with Artificial Intelligence (ICTAI)*, pp. 653–660
+   - **DOI:** [`10.1109/ICTAI66417.2025.00094`](https://doi.org/10.1109/ICTAI66417.2025.00094)
+   - **Código Oficial Auditado:** [`paularaissa/project-vfdt`](https://github.com/paularaissa/project-vfdt) (`client_app/fht.py`, `client_app/client_app.py`, `server_app/server_app.py`, `server_app/my_server.py` — protótipo em Python sobre Flower + River).
+2. **FHT-R (Regressão Federada Coordenada — Referência Complementar):**
+   - **Autores:** Daniela Menezes, Douglas Vidal, André Riker e Glauco Gonçalves
+   - **Título:** *FHT-R: Federated Online Regression with Coordinated Hoeffding Trees for Air Quality Prediction*
+   - **Publicação:** *XLIV Simpósio Brasileiro de Telecomunicações e Processamento de Sinais (SBrT 2026)*.
+
+### 4.2 Mecanismos Extraídos Diretamente do Artigo e do Código `paularaissa/project-vfdt`
+- **Coordenação de Splits sem Dados Brutos:** Clientes suspendem divisões autônomas locais (`HT_TREE_FLAG_DEFER_SPLITS`), avaliam o *Hoeffding Bound* localmente e transmitem apenas propostas compactas de split ao servidor (`client_app/fht.py` L75–125 $\leftrightarrow$ `ht_fed_vfdt_client_export_update` em [`ht_fed_vfdt.c`](../code/src/federated/ht_fed_vfdt.c)).
+- **As Três Estratégias Oficiais de Consenso no Servidor (`server_app/server_app.py` L361–455):**
+  - **`QUORUM` por Atributo (`HT_FED_CONSENSUS_QUORUM`):** exige suporte mínimo por atributo (`feat_votes[f] >= min_quorum`) e elege a feature com maior soma de méritos (`sum(merit)`).
+  - **`MAJORITY-VOTE` (`HT_FED_CONSENSUS_MAJORITY`):** elege o atributo vencedor por pluralidade de votos, com desempate por maior mérito acumulado.
+  - **`BEST-MERIT` (`HT_FED_CONSENSUS_MERIT`):** seleciona a proposta individual com maior mérito `max(G_k)` entre as propostas elegíveis (`>= min_quorum`).
+- **Seleção do Limiar Numérico Vencedor (`HT_FED_THRESH_MAX_MERIT`):** Adota como padrão o `threshold` exato da proposta individual com maior mérito dentro do grupo vencedor (`server_app.py` L377, L409, L452).
+- **Filtro de Prontidão Estatística (`require_locally_ready = true`):** Apenas propostas que satisfizeram localmente o critério do *Hoeffding Bound* participam da votação no servidor.
+- **Broadcast de Threshold Global Único e Inicialização dos Filhos (`children_stats`):** Todos os clientes aplicam o mesmo `(feature, threshold/cat)` broadcastado pelo servidor, inicializando os novos filhos com as distribuições agregadas (`lhs`/`rhs`) e ajustando `last_split_attempt_at = total_weight` (`client_app/fht.py` L150–250 $\leftrightarrow$ `ht_tree_apply_split`).
+- **Escala do Período de Carência Local (`local_grace = G / K`):** Regra de dimensionamento do `grace_period` por cliente em `server_app.py` L495, preservada no protocolo experimental do `kansho`.
+- **Coordenação em Regressão Contínua (`FHT-R`, SBrT 2026):** Extensão da ideia de split coordenado para árvores de regressão incremental (`VFDT-R` / `FIMT-DD`).
+
+### 4.3 Matriz Comparativa da Camada Federada: `paularaissa/project-vfdt` vs. `kansho`
+
+| Componente / Mecanismo Federado | `paularaissa/project-vfdt` (Python / Flower / River) | `kansho` (`code/src/federated/` em C11) | Classificação de Origem |
+| :--- | :--- | :--- | :--- |
+| **Splits locais diferidos + envio de propostas** | `fht.py` L75–125 (avaliação local + envio de `split_info`) | `HT_TREE_FLAG_DEFER_SPLITS` (**0 B extras** em `ht_tree_t`) + `ht_fed_split_proposal_t` | **Extraído (Fed-VFDT)** |
+| **Consenso `QUORUM`, `MAJORITY` e `BEST-MERIT`** | `server_app.py` L361–455 (`quorum` por feature, `majority-vote`, `best-merit`) | `HT_FED_CONSENSUS_QUORUM`, `MAJORITY`, `MERIT` (paridade validada em testes) | **Extraído (Fed-VFDT)** |
+| **Seleção de threshold `MAX_MERIT` + `locally_ready`** | Threshold do maior mérito (`server_app.py` L377/409/452) + só propostas prontas | `HT_FED_THRESH_MAX_MERIT` (padrão) e `require_locally_ready = true` (padrão) | **Extraído (Fed-VFDT)** |
+| **Broadcast global + injeção de `children_stats`** | `apply_aggregated_split` (`fht.py` L150–250) com `lhs`/`rhs` e `last_split_attempt_at` | `ht_tree_apply_split` inicializando `lhs`/`rhs` e `last_split_attempt_at` | **Extraído (Fed-VFDT)** |
+| **Regressão online federada coordenada** | Não implementada no `project-vfdt` (apenas classificação) | Coordenado sobre `VFDT-R` / `FIMT-DD` (inspirado em **FHT-R**, SBrT 2026) | **Extraído (conceito FHT-R) + Autoral (C11)** |
+| **Congelamento de cliente (`_frozen`) e buffer** | Congela o fluxo (`_frozen = True`) e acumula em `_instance_buffer` dinâmico (`fht.py` L58) | **Não-bloqueante zero-`malloc`:** fluxo contínuo sem fila dinâmica, filtrando no servidor por `require_locally_ready` | **Adaptado p/ MCU** |
+| **Endereçamento de nós e tolerância a *stragglers*** | `path = ["left","right",...]` + `uuid4()` sem versionamento (`fht.py` L170 quebra se perder split) | `uint16_t node_idx` (2 B), `topology_version`, log circular `split_log[64]` e fallback automático **`FULL_SNAPSHOT`** | **Adaptado p/ MCU + Autoral** |
+| **Modos extras de consenso e ritmo de splits** | Fixo em `1` split/rodada e threshold `max(merit)` | Adiciona `HT_FED_CONSENSUS_WEIGHTED_MERIT`, `HT_FED_THRESH_WEIGHTED_MEAN` e `max_splits_per_round` (`0` ou `1`) | **Adaptado p/ MCU + Autoral** |
+| **Runtime, Memória e Serialização** | Python + Flower + River + JSON/Pickle/Base64 (dezenas de MB de heap/GC) | **C11 puro zero-`malloc`**, `.bss` estática (`<= 66,3 KB` Coord. / `<= 81 KB` Fed-Forest), 11 KB Flash 32-bit | **100% Original (`kansho`)** |
+| **Modo 2B — `Fed-VFDT STATS_MERGE`** | Inexistente no paper/código | Fusão paralela exata *stateless* (Chan/Welford, categóricos, Ben-Haim, slots de regressão + FedAvg SGD) sem contagem dupla — resolve Non-IID extremo (100% puro) | **100% Original (`kansho`)** |
+| **Modo 1 — `Fed-Forest` (`ht_fed_forest`)** | Inexistente no paper/código | Compactação iterativa BFS (`ht_compact_tree_t`, ~1,34 KB/árvore), seleção `ALL`/`TOP_M`/`ROUND_ROBIN` + votação ponderada (`ht_voting`) | **100% Original (`kansho`)** |
+| **Protocolo Binário `HFED` + CRC32 + TCP POSIX** | Dependente de gRPC/Flower em Python | Framing agnóstico de **`32 B`** (`HT_FED_MAGIC = "HFED"`) + CRC32 IEEE 802.3 (tabela nibble `64 B`) validado em sockets TCP POSIX multi-processo (`benchmarks/fed_net/`) | **100% Original (`kansho`)** |
+| **Reset Coordenado por Concept Drift** | Inexistente no paper/código | `ht_fed_vfdt_client_flag_drift` + votação por `min_drift_quorum` + comando `HT_FED_CMD_RESET_SUBTREE` no `split_log` | **100% Original (`kansho`)** |
+
+---
+
+## 5. O que é Original no kansho
+
+Embora o River forneça a teoria de streaming, o Scikit-Learn inspire a engenharia de dados e o **Fed-VFDT (`paularaissa/project-vfdt`)** forneça o protocolo de split federado coordenado, **nenhuma dessas bibliotecas consegue rodar em microcontroladores bare-metal ou RTOS com $\le 1\text{ MB}$ de RAM**:
+- O River e o protótipo `project-vfdt` (Flower + River) dependem de runtime Python, centenas de objetos dinâmicos, dicionários esparsos, serialização JSON/Pickle e Garbage Collector no heap.
 - O Scikit-Learn consome dezenas de megabytes de RAM em buffers de ordenação $O(N)$ (`DensePartitioner`), compila em Cython com dependências pesadas do NumPy e foi arquitetado exclusivamente para treinamento offline em lote.
 
 As inovações originais do **kansho** resolvem esse abismo de arquitetura:
 
-### 4.1 Zero Alocação Dinâmica em Runtime (0,0 KB de Heap)
+### 5.1 Zero Alocação Dinâmica em Runtime (0,0 KB de Heap)
 - É **estritamente proibido** o uso de `malloc`, `calloc`, `realloc` ou `free` durante o aprendizado (`ht_learn_one`), inferência (`ht_predict`) ou atualização de drift (`ht_adwin_update`).
 - Toda a memória necessária para a árvore, nós, observadores, detectores ADWIN2 e árvores alternativas é pré-alocada em **Slab / Pool Allocators estáticos** gerenciados por `ht_memory.c`. O consumo de RAM é $100\%$ determinístico e imune a fragmentação de heap.
 
-### 4.2 Desacoplamento Físico: Topologia Leve (`ht_node_t`) vs Estado Pesado (`ht_leaf_stats_t`) com Reciclagem Imediata
+### 5.2 Desacoplamento Físico: Topologia Leve (`ht_node_t`) vs Estado Pesado (`ht_leaf_stats_t`) com Reciclagem Imediata
 No River, uma folha mantém seus observadores permanentemente associados. No Scikit-Learn, cada nó da struct `Node` (96 bytes) carrega buffers fixos para a vida toda.
 - **Nossa Inovação:** Separamos o nó em duas entidades físicas completamente distintas:
   1. `ht_node_t` (**Topologia - Leve**): Ocupa apenas **$20\text{ Bytes}$** (em `float32`). Contém os índices compactados, flags e uma união assimétrica para contadores de classe/regressão (folhas) ou regra de corte binário e filhos (nós internos). Permanece em memória após o split.
@@ -151,7 +212,7 @@ sequenceDiagram
     Note over Tree: Folhas filhas alugam novos stats reciclados
 ```
 
-### 4.3 Indexação Compacta em 16-bit (`uint16_t`) e Relocabilidade Binária
+### 5.3 Indexação Compacta em 16-bit (`uint16_t`) e Relocabilidade Binária
 - Em arquiteturas de 32 e 64 bits, ponteiros C ocupam 4 ou 8 bytes por referência.
 - Substituímos todos os ponteiros entre nós (`left_child`, `right_child`, `stats_idx`) por inteiros de 16 bits (`uint16_t` com sentinela `HT_INVALID_IDX = 0xFFFF`).
 - **Ganhos:**
@@ -159,7 +220,7 @@ sequenceDiagram
   - Capacidade de endereçar até $65.534$ nós.
   - **Relocabilidade binária direta:** O modelo pode ser gravado diretamente em Flash, EEPROM ou cartão SD via `ht_tree_save` (`fwrite` contíguo) e carregado via `ht_tree_load` em qualquer outro dispositivo ou endereço de memória sem necessidade de *pointer swizzling* ou reconstrução de grafos.
 
-### 4.4 Dimensionamento Estritamente Estático por Macros de Compilação
+### 5.4 Dimensionamento Estritamente Estático por Macros de Compilação
 - Ao contrário do River e Scikit-Learn, que exigem alocadores dinâmicos para dimensionar matrizes em runtime, o kansho define todas as capacidades máximas em tempo de compilação (`ht_config.h` ou flags `-D` no Makefile):
   `HT_MAX_NODES`, `HT_MAX_ACTIVE_LEAVES`, `HT_MAX_FEATURES`, `HT_MAX_CLASSES`, `HT_MAX_CATEGORIES`.
 - Isso elimina campos de controle dinâmico na struct `ht_tree_t` e permite ajustar o modelo fisicamente para qualquer microcontrolador:
@@ -167,67 +228,67 @@ sequenceDiagram
   - **Tier 32 (~40 KB de RAM):** Microcontroladores intermediários (ARM Cortex-M4F com 64 KB de RAM).
   - **Tier 8 (~11 KB de RAM):** Microcontroladores ultracompactos (Blue Pill STM32F103, Arduino Nano 33 BLE com apenas 20 KB de SRAM).
 
-### 4.5 Precisão Configurável via Tipo Unificado (`ht_float_t`)
+### 5.5 Precisão Configurável via Tipo Unificado (`ht_float_t`)
 - Macro de abstração unificada `ht_float_t`:
   - **Padrão em `float` (32-bit):** Corta o consumo de RAM de todos os pools pela metade e aproveita a FPU single-precision de microcontroladores (ARM Cortex-M4F/M7, ESP32, RP2350).
   - **Flag `-DHT_USE_DOUBLE` (64-bit):** Converte instantaneamente todos os cálculos para `double` para testes de paridade exata bit a bit com os testes em Python do River.
 
-### 4.6 Unificação Física de Classificação e Regressão via `union` C11
+### 5.6 Unificação Física de Classificação e Regressão via `union` C11
 - Em bibliotecas Python convencionais, classificação (`HoeffdingTreeClassifier`) e regressão (`HoeffdingTreeRegressor`) vivem em arquivos e estruturas separadas.
 - No kansho, unificamos tarefas de Classificação Multiclasse e Regressão Contínua (`VFDT-R` / `FIMT-DD` e `HAT-R`) na mesma estrutura `ht_tree_t` e `ht_node_t` usando *unions* anônimas do C11:
   - `class_counts[HT_MAX_CLASSES]` compartilha fisicamente os mesmos bytes de `reg_stats` (variância do alvo calculada por Welford).
   - Os observadores de atributos compartilham o mesmo buffer para densidade Gaussiana (classificação) e quantização em 5 slots com mesclagem de Chan (regressão).
   - **Custo adicional em RAM da unificação:** **0 bytes**.
 
-### 4.7 Detector ADWIN2 Determinístico em Array Estático de Baldes
+### 5.7 Detector ADWIN2 Determinístico em Array Estático de Baldes
 - A implementação original do ADWIN2 no River utiliza uma lista duplamente encadeada de baldes (*buckets*) alocados no heap, chamando `malloc`/`free` a cada adição de elemento ou compressão de janela.
 - Criamos uma versão determinística em C11 (`ht_adwin_t` em `ht_drift.c`):
   - Baldes organizados em um array estático contíguo (`ht_bucket_t buckets[HT_ADWIN_MAX_BUCKETS]`).
   - Compressão e mesclagem de baldes em tempo $O(\log W)$ usando índices inteiros.
   - Alocador global estático de instâncias ADWIN2 (`adwin_pool`), eliminando fragmentação ao instanciar detectores para nós da árvore adaptativa (`HAT`).
 
-### 4.8 Algoritmo de Poda e Substituição de Subárvores no HAT sem Recursão
+### 5.8 Algoritmo de Poda e Substituição de Subárvores no HAT sem Recursão
 - No River, a substituição de uma subárvore obsoleta quando ocorre *concept drift* delega a liberação da árvore descartada ao coletor de lixo do Python.
 - Em C11 bare-metal, desenvolvemos um algoritmo iterativo de liberação de subárvores (`ht_tree_prune_subtree_iterative`):
   - Utiliza uma pilha/fila estática interna dimensionada para a profundidade máxima da árvore.
   - Percorre e devolve todos os nós e estatísticas da subárvore obsoleta para seus respectivos pools em tempo $O(K)$, sem executar nenhuma chamada recursiva na stack do microcontrolador.
 
-### 4.9 Observador de Regressão Contínua com Fórmulas Paralelas de Chan
+### 5.9 Observador de Regressão Contínua com Fórmulas Paralelas de Chan
 - Para regressão contínua em streaming (`VFDT-R` / `FIMT-DD`), adaptamos a quantização incremental em 5 slots ordenados e implementamos as fórmulas exatas de combinação e subtração paralela de variâncias de **Chan, Golub & LeVeque (1983)** (`ht_var_combine` e `ht_var_subtract` em `ht_observer.c`).
 - Isso viabiliza o cálculo de redução de variância (*SDR - Standard Deviation Reduction*) em $O(1)$ de RAM sem exigir buffers de histórico ou re-escaneamento de amostras.
 
-### 4.10 Independência Absoluta de Terceiros e C11 Puro
+### 5.10 Independência Absoluta de Terceiros e C11 Puro
 - Zero dependência de runtimes C++, bibliotecas BLAS/LAPACK, frameworks externos ou chamadas de sistema POSIX.
 - Código restrito a 5 cabeçalhos padrão da ISO C11: `<stdint.h>`, `<stddef.h>`, `<stdbool.h>`, `<math.h>`, `<string.h>`.
 - Total portabilidade para compiladores cruzados como `arm-none-eabi-gcc`, `xtensa-esp32-elf-gcc`, `riscv-none-embed-gcc`, Clang e MSVC.
 
-### 4.11 Micro-Pipelines de Pré-Processamento Zero-Malloc (`libht_prep` e `ht_prep_pipeline_t`)
+### 5.11 Micro-Pipelines de Pré-Processamento Zero-Malloc (`libht_prep` e `ht_prep_pipeline_t`)
 No River, pipelines de streaming (`pipe = scaler | model`) instanciam múltiplos objetos encadeados no heap de Python gerenciados pelo Garbage Collector. No Scikit-Learn, transformadores alocam matrizes intermediárias completas em cada chamada a `fit_transform()`.
 - **Inovação no kansho:** Desenvolvemos a biblioteca embarcada `libht_prep` ([`code/include/core/ht_prep.h`](../code/include/core/ht_prep.h)), um micro-pipeline contíguo de pré-processamento alocado inteiramente na memória estática (`.bss`) ou stack via struct `ht_prep_pipeline_t`:
   - **Pegada Física Estática Ultracompacta:** Ocupa apenas **$\approx 4{,}6\text{ KB}$ em `float32`** ($\approx 8{,}4\text{ KB}$ em `double64`), mesmo configurado com todos os 4 estágios ativos para até 16 atributos.
   - **Anexação Transparente à Árvore:** Pode ser acoplado à árvore via `ht_tree_set_prep_pipeline(&tree, &pipe)`. Com isso, tanto `ht_tree_learn_one` quanto `ht_tree_predict` realizam o pré-processamento dos atributos de forma nativa e transparente antes de alimentar o roteamento ou os observadores de divisão, com **zero chamadas a `malloc`** e **zero cópias extras de dados**.
 
-### 4.12 Filtro Mediano Móvel de Hampel com MAD para Sensores Físicos (`ht_filter_hampel_t`)
+### 5.12 Filtro Mediano Móvel de Hampel com MAD para Sensores Físicos (`ht_filter_hampel_t`)
 Em ambientes embarcados (sensores industriais, ADCs de microcontroladores e telemetria automotiva), leituras espúrias, ruídos transientes e espículas temporárias frequentemente corrompem observadores de split e desestabilizam regressores.
 - **Nossa Inovação:** Implementação de um identificador de Hampel totalmente estático sobre buffer circular de tamanho ímpar $W = 7$ amostras por atributo:
   - **Cálculo da Mediana e MAD em Stack:** Utiliza *insertion sort* em array temporário na pilha ($7$ elementos, ordenação em $\le 21$ comparações em $O(W \log W)$), eliminando qualquer buffer dinâmico.
   - **Ponto de Ruptura de $50\%$:** O Desvio Absoluto Mediano ($\operatorname{MAD}$) multiplicado pelo fator assintótico $1{,}4826 \approx \frac{1}{\Phi^{-1}(0{,}75)}$ garante que até metade da janela possa estar contaminada por ruído severo sem corromper a estimativa da dispersão.
   - **Substituição In-Place Anticascata:** Quando $|x_t - \tilde{x}_t| > 3{,}0 \cdot \max(\operatorname{MAD}_t, 10^{-6})$, o valor espúrio é substituído pela mediana local $\tilde{x}_t$ tanto na emissão quanto no buffer circular, expurgando o efeito propagador do ruído nas predições seguintes.
 
-### 4.13 Codificador Categórico para Alta Cardinalidade Space-Saving (`ht_encoder_freq_t`)
+### 5.13 Codificador Categórico para Alta Cardinalidade Space-Saving (`ht_encoder_freq_t`)
 Atributos nominais de alta cardinalidade (ex: identificadores de dispositivos, códigos de erro, IPs ou strings categóricas infinitas) são proibitivos em microcontroladores, pois observadores categóricos padrão exigem matrizes $C \times V$ que esgotariam a SRAM.
 - **Nossa Inovação:** Adaptamos o algoritmo de *Heavy Hitters* **Space-Saving** de **Metwally, Agrawal & El Abbadi (2005)** para uma tabela estática de $K = 16$ slots (`ht_encoder_freq_t`):
   - **Garantia Teórica de Erro Mínimo:** A contagem acumulada dos elementos mais frequentes possui erro máximo rigorosamente limitado por $\frac{N_{\text{total}}}{K}$.
   - **Modo Razão de Frequência Contínua (`HT_ENC_FREQ_RATIO`):** Converte a categoria de entrada em sua frequência empírica $f(k) = \frac{\text{count}_k}{N_{\text{total}}} \in [0, 1]$, permitindo que a Hoeffding Tree trate atributos nominais de cardinalidade arbitrária como variáveis contínuas suaves.
   - **Modo Top-$K$ com Bucket Sentinela (`HT_ENC_TOP_K_CAT`):** Mapeia os $K_{\text{target}}-1$ itens dominantes para rótulos compactos ($0 \dots K-2$) e reúne toda a cauda residual no bucket sentinela *"Outros"* ($K-1$), garantindo compatibilidade estrita com `HT_MAX_CATEGORIES = 5`.
 
-### 4.14 Discretização Não-Paramétrica e Observador de Histograma de Ben-Haim & Tom-Tov (`ht_quantizer_t` e `ht_hist_obs_t`)
+### 5.14 Discretização Não-Paramétrica e Observador de Histograma de Ben-Haim & Tom-Tov (`ht_quantizer_t` e `ht_hist_obs_t`)
 O observador numérico tradicional baseado na aproximação Gaussiana de Welford assume que cada atributo contínuo se comporta de forma unimodal $P(x \mid y) \sim \mathcal{N}(\mu, \sigma^2)$. Em distribuições multimodais, assimétricas ou com caudas pesadas, pontos de corte ótimos são facilmente mascarados.
 - **Nossa Inovação:** Implementamos o algoritmo de histograma dinâmico streaming de **Ben-Haim & Tom-Tov (2010)** em duas frentes complementares:
   1. **Quantizador Não-Paramétrico no Micro-Pipeline (`ht_quantizer_t`):** Mantém até $B = 16$ centróides ordenados com fusão gulosa em $O(B)$ e estima a densidade acumulada contínua $\hat{F}(x) \in [0, 1]$ via interpolação linear trapezoidal. Suporta transformação uniforme (estilo *QuantileTransformer*) e discretização equi-provável em $K$ bins (estilo *KBinsDiscretizer*).
   2. **Observador de Histograma nas Folhas (`ht_hist_obs_t`):** Projetado com precisão cirúrgica de memória para caber **rigorosamente dentro da union existente `ht_feature_obs_t` de 80 bytes em `float32`** (4 bins $\times$ 20 bytes). Isso viabiliza divisões não-paramétricas multi-classe diretamente na Hoeffding Tree com **zero acréscimo de memória** no estado de aprendizado (`sizeof(ht_leaf_stats_t) = 1.360\text{ B}` inalterado).
 
-### 4.15 Normalização Online Híbrida com Credibilidade nas Folhas SGD (Regressão Contínua)
+### 5.15 Normalização Online Híbrida com Credibilidade nas Folhas SGD (Regressão Contínua)
 Em regressão em streaming com regressores lineares nas folhas (`HT_LEAF_MODEL` e `HT_LEAF_ADAPTIVE`), variáveis em escalas heterogêneas (ex: temperaturas em $[0, 1]$ versus horas em $[0, 23]$ e vazões em $[0, 1000]$) degradam a taxa de convergência da Descida de Gradiente Estocástico (SGD).
 - **O Dilema da Herança Pós-Split:** Quando uma folha mãe sofre split, os filhos herdam seus pesos lineares $\mathbf{w}$ para evitar descontinuidade de predição. Se a normalização fosse calculada exclusivamente com amostras da folha recém-nascida ($N=0$), a primeira amostra geraria um salto abrupto de escala, corrompendo imediatamente os pesos herdados da mãe.
 - **Nossa Inovação:** Desenvolvemos uma normalização Z-score híbrida em duas camadas com fusão de credibilidade:
@@ -237,15 +298,15 @@ Em regressão em streaming com regressores lineares nas folhas (`HT_LEAF_MODEL` 
     $$\alpha = \frac{N_{\text{slots}}}{N_{\text{slots}} + \kappa}, \qquad \mu_f = \alpha \mu_{\text{slots}} + (1 - \alpha) \mu_{\text{tree}}, \qquad \sigma_f^2 = \alpha \sigma_{\text{slots}}^2 + (1 - \alpha) \sigma_{\text{tree}}^2$$
   - **Resultado:** No instante do split ($N_{\text{slots}} = 0$), $\alpha = 0$, garantindo continuidade matemática perfeita de escala com a mãe. Conforme a folha amadurece ($N_{\text{slots}} \gg \kappa$), o Z-score especializa-se gradualmente no hiperplano local da folha. **Custo adicional em RAM no pool de folhas: exatamente 0 bytes.**
 
-### 4.16 Aprendizado Federado Embarcado Zero-Malloc (`Fed-Forest`, `Fed-VFDT` & `HFED` — `v0.5.0`)
-Enquanto implementações federadas clássicas como o protótipo acadêmico **Fed-VFDT** (*Silva, Vinagre & Gama, IEEE ICTAI 2025*, `paularaissa/project-vfdt`) dependem de Flower, Python, River, serialização JSON/Pickle/Base64, caminhos textuais de nós (`uuid4`) e congelamento de fluxo (`_frozen`), o **kansho** traz uma arquitetura federada integralmente estática em C11 (`< 78 KB` SRAM por cliente):
+### 5.16 Aprendizado Federado Embarcado Zero-Malloc (`Fed-Forest`, `Stats-Merge` & `HFED` — `v0.5.0`)
+Complementando o modo coordenado baseado em **Fed-VFDT** (detalhado na [Seção 4](#4-o-que-foi-extraído-do-fed-vfdt-paularaissaproject-vfdt-e-do-fht-r)), o **kansho** introduz extensões 100% autorais em C11 estático (`<= 81,0 KB` cliente em `Fed-Forest` e `<= 66,3 KB` em `Fed-VFDT Coordenado`, incluindo buffer TX/RX):
 - **Modo 1 (`Fed-Forest` — `ht_fed_forest.{h,c}`):** Cada MCU treina 1 árvore local completa e troca com o servidor árvores somente-inferência compactadas via BFS iterativa (`ht_compact_tree_t`, $\approx 1{,}34\text{ KB}$ para 64 nós), realizando votação adaptativa ponderada pelo inverso do erro prequential (`ht_voting.{h,c}`).
-- **Modo 2 (`Fed-VFDT` — `ht_fed_vfdt.{h,c}`):** Mantém uma árvore global única com `HT_TREE_FLAG_DEFER_SPLITS` (**0 bytes extras** em `ht_tree_t`), suportando tanto o modo coordenado fiel ao paper (`QUORUM`, `MAJORITY`, `BEST-MERIT` em 114–564 B/rodada) quanto a extensão **autoral `STATS_MERGE`** (fusão paralela exata sem contagem dupla via Chan/Welford, matrizes categóricas e FedAvg para SGD), que resolve cenários Non-IID extremos com clientes 100% puros.
-- **Protocolo Binário `HFED` e Recuperação de *Stragglers* (`ht_fed_proto.{h,c}`):** Framing binário agnóstico de transporte de **32 bytes** com CRC32 IEEE 802.3 (tabela nibble de 64 B), endereçamento `uint16_t`, versionamento `topology_version`, log circular `split_log[64]` para *catch-up* incremental com fallback automático para `FULL_SNAPSHOT`, e reset coordenado por *concept drift*.
+- **Modo 2B (`Fed-VFDT STATS_MERGE` — `ht_fed_vfdt.{h,c}`):** Fusão paralela exata *stateless* das estatísticas suficientes nas folhas (Chan/Welford, matrizes categóricas, histogramas Ben-Haim, slots de regressão e FedAvg ponderado para SGD linear) sem contagem dupla — resolvendo cenários Non-IID extremos (clientes 100% puros vendo apenas 1 classe).
+- **Protocolo Binário `HFED`, Recuperação de *Stragglers* e Drift Reset (`ht_fed_proto.{h,c}`):** Framing binário agnóstico de transporte de **32 bytes** com CRC32 IEEE 802.3 (tabela nibble de 64 B), endereçamento `uint16_t`, versionamento `topology_version`, log circular `split_log[64]` para *catch-up* incremental com fallback automático para `FULL_SNAPSHOT`, e reset coordenado por *concept drift* (`HT_FED_CMD_RESET_SUBTREE`).
 
 ---
 
-## 5. Matriz Comparativa Tripla: River vs Scikit-Learn vs kansho
+## 6. Matriz Comparativa Geral: River vs Scikit-Learn vs kansho
 
 | Característica / Métrica | River (`online-ml/river`) | Scikit-Learn (`sklearn.tree`) | kansho (C11) | Origem / Inspiração |
 | :--- | :--- | :--- | :--- | :--- |
@@ -273,7 +334,7 @@ Enquanto implementações federadas clássicas como o protótipo acadêmico **Fe
 
 ---
 
-## 6. Diagrama de Ciclo de Vida da Memória
+## 7. Diagrama de Ciclo de Vida da Memória
 
 O diagrama abaixo ilustra graficamente a principal inovação de engenharia que permitiu ao **kansho** rodar em $\le 1\text{ MB}$ de RAM: a reciclagem imediata do estado pesado de aprendizado (`ht_leaf_stats_t`) e o crescimento contínuo da árvore topológica (`ht_node_t`):
 
@@ -308,10 +369,34 @@ flowchart TD
 
 ---
 
-## 7. Licenciamento e Conformidade de Direitos Autorais
+## 8. Licenciamento, Créditos e Referências Acadêmicas
 
 O **kansho** é distribuído sob a licença de código aberto **[Mozilla Public License 2.0 (MPL 2.0)](../LICENSE)** (`SPDX-License-Identifier: MPL-2.0`).
 
-Em total conformidade com as boas práticas de engenharia de software e os termos legais das bibliotecas que serviram de estudo e inspiração, o arquivo de licença deste repositório preserva e reconhece integralmente os avisos de direitos autorais originais dos projetos de referência:
+### 8.1 Direitos Autorais de Bibliotecas de Referência
+Em total conformidade com as boas práticas de engenharia de software e os termos legais das bibliotecas estudadas e espelhadas em `references/`, o arquivo [`LICENSE`](../LICENSE) preserva e reconhece integralmente os avisos de direitos autorais originais:
 - **River:** [BSD 3-Clause License](../references/river_tree/LICENSE), Copyright (c) 2020-presente, online-ml developers.
 - **Scikit-Learn:** [BSD 3-Clause License](../references/sklearn_tree/COPYING), Copyright (c) 2007-presente, scikit-learn developers.
+
+### 8.2 Créditos Acadêmicos e Referências da Camada Federada
+O módulo de aprendizado federado coordenado (`HT_FED_VFDT_COORDINATED`) baseia-se diretamente nos trabalhos abaixo, aos quais creditamos integralmente a formulação original do protocolo de coordenação de splits e das regras de consenso:
+- **Fed-VFDT:** Paula Raissa Silva, João Vinagre e João Gama (INESC TEC / Universidade do Porto), *"Fed-VFDT: Federated Very Fast Decision Trees with Coordinated Splitting Over Data Streams"*, *2025 IEEE 37th International Conference on Tools with Artificial Intelligence (ICTAI)*, pp. 653–660, DOI [`10.1109/ICTAI66417.2025.00094`](https://doi.org/10.1109/ICTAI66417.2025.00094) — repositório oficial [`paularaissa/project-vfdt`](https://github.com/paularaissa/project-vfdt).
+- **FHT-R:** Daniela Menezes, Douglas Vidal, André Riker e Glauco Gonçalves, *"FHT-R: Federated Online Regression with Coordinated Hoeffding Trees for Air Quality Prediction"*, *XLIV Simpósio Brasileiro de Telecomunicações e Processamento de Sinais (SBrT 2026)*.
+
+```bibtex
+@inproceedings{silva2025fedvfdt,
+  author    = {Silva, Paula Raissa and Vinagre, Jo{\~a}o and Gama, Jo{\~a}o},
+  title     = {Fed-VFDT: Federated Very Fast Decision Trees with Coordinated Splitting Over Data Streams},
+  booktitle = {2025 IEEE 37th International Conference on Tools with Artificial Intelligence (ICTAI)},
+  pages     = {653--660},
+  year      = {2025},
+  doi       = {10.1109/ICTAI66417.2025.00094}
+}
+
+@inproceedings{menezes2026fhtr,
+  author    = {Menezes, Daniela and Vidal, Douglas and Riker, Andr{\'e} and Gon{\c{c}}alves, Glauco},
+  title     = {FHT-R: Federated Online Regression with Coordinated Hoeffding Trees for Air Quality Prediction},
+  booktitle = {XLIV Simp{\'o}sio Brasileiro de Telecomunica{\c{c}}{\~o}es e Processamento de Sinais (SBrT 2026)},
+  year      = {2026}
+}
+```
