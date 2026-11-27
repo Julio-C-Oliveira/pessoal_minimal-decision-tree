@@ -525,11 +525,17 @@ ht_float_t ht_hist_cond_proba(const ht_hist_obs_t *obs, uint8_t class_idx, ht_fl
     ht_float_t min_p = obs->bins[0].center;
     ht_float_t max_p = obs->bins[n_bins - 1U].center;
     ht_float_t span = HT_SUB(max_p, min_p);
-    if (span <= HT_EPSILON) {
+#ifdef HT_USE_FIXED_POINT
+    ht_float_t span_eps = HT_EPSILON;
+    ht_float_t min_d = HT_CONST(1e-4);
+#else
+    ht_float_t span_eps = (ht_float_t)1e-9;
+    ht_float_t min_d = (ht_float_t)1e-6;
+#endif
+    if (span <= span_eps) {
         return HT_DIV(obs->bins[0].counts[class_idx], total_c);
     }
 
-    ht_float_t min_d = HT_CONST(1e-4);
     if (val <= min_p) {
         ht_float_t d = HT_SUB(obs->bins[1].center, obs->bins[0].center);
         return HT_DIV(HT_DIV(obs->bins[0].counts[class_idx], total_c), (d > min_d) ? d : HT_CONST(1.0));
@@ -548,7 +554,7 @@ ht_float_t ht_hist_cond_proba(const ht_hist_obs_t *obs, uint8_t class_idx, ht_fl
     }
 
     ht_float_t d_seg = HT_SUB(obs->bins[seg + 1U].center, obs->bins[seg].center);
-    if (d_seg <= HT_EPSILON) d_seg = min_d;
+    if (d_seg <= span_eps) d_seg = min_d;
     ht_float_t alpha = HT_DIV(HT_SUB(val, obs->bins[seg].center), d_seg);
     ht_float_t dens0 = HT_DIV(HT_DIV(obs->bins[seg].counts[class_idx], total_c), d_seg);
     ht_float_t dens1 = HT_DIV(HT_DIV(obs->bins[seg + 1U].counts[class_idx], total_c), d_seg);
