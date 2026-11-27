@@ -100,17 +100,29 @@ Sempre que implementar uma nova parte, escreva testes cobrindo obrigatoriamente:
 
 ## 3. Validação Obrigatória, Loop de Correção e Commits Atômicos
 
-Após implementar qualquer parte e seus testes de Nível 1, 2 e 3, execute sempre os dois modos de compilação:
+Após implementar qualquer parte e seus testes de Nível 1, 2 e 3, execute obrigatoriamente as 3 precisões (`float32`, `double64` e `Q16.16` com auditoria zero-`libm`):
 
 ```bash
 make clean && make test
 make clean && make test CFLAGS_EXTRA="-DHT_USE_DOUBLE"
+make test-fixed
+```
+
+Antes de abrir PRs, finalizar fases ou propor bump SemVer, execute a suíte completa de hardening:
+
+```bash
+make test-all
+# Equivale a:
+#   make test-matrix    (7 perfis: float32, double64, Q16.16, CLASSIF_ONLY f32/Q16, MCU Tier 4 f32/Q16)
+#   make test-sanitize  (ASan + UBSan nas 3 precisões)
+#   make test-parity    (paridade cross-precision sintética + slices reais + bench-fed-net TCP POSIX)
+#   make coverage       (gcov gate: >=92% linhas, >=80% branches, >=85% linhas por módulo em f32 e Q16.16)
 ```
 
 - **Zero Warnings:** Nenhum warning é permitido (`-Wall -Wextra -Werror -pedantic`).
-- **Paridade de Precisão:** Todos os testes (função, integração e fluxo total) devem passar tanto em `float` (32-bit) quanto em `double` (64-bit).
+- **Paridade de Precisão:** Todos os testes (função, integração e fluxo total) devem passar em `float` (32-bit), `double` (64-bit) e `Q16.16` (inteiro ponto-fixo zero-`libm`).
 - **Gate de Commit e Loop de Correção:**
-  - O commit **só pode ser realizado após** a implementação passar em todos os testes em ambos os modos.
+  - O commit **só pode ser realizado após** a implementação passar em todos os testes nas 3 precisões.
   - Se algum teste falhar ou houver warnings/erros de compilação, é **terminantemente proibido commitar**.
   - O agente deve diagnosticar a causa raiz, aplicar as correções necessárias no código ou nos testes e rodar a suíte de testes novamente em loop (`corrigir -> compilar -> testar`).
   - Somente após a validação completa ser aprovada com 100% de sucesso o commit atômico será realizado (`feat(<escopo>): ...` e `test(<escopo>): ...`).
