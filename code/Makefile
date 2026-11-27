@@ -29,7 +29,7 @@ TEST_RUNNER = $(BUILD_DIR)/test_runner
 
 VERSION ?= $(shell cat ../VERSION 2>/dev/null || cat VERSION 2>/dev/null || echo "0.1.0")
 
-.PHONY: all lib lib-fixed test test-fixed clean bench bench-triple bench-drift bench-regression bench-memory bench-main bench-main-federated bench-prep bench-esp32 bench-tune bench-federated bench-fed-net directories version
+.PHONY: all lib lib-fixed test test-fixed test-matrix test-sanitize test-parity coverage test-all clean bench bench-triple bench-drift bench-regression bench-memory bench-main bench-main-federated bench-prep bench-esp32 bench-tune bench-federated bench-fed-net directories version
 
 version:
 	@echo "kansho (libht) version $(VERSION)"
@@ -79,6 +79,48 @@ test-fixed:
 	else \
 		echo "OK: Zero libm / soft-fp symbols in $(BUILD_DIR)/libht.a"; \
 	fi
+
+MCU_TIER4_DEFS = -DHT_MAX_NODES=64 -DHT_MAX_ACTIVE_LEAVES=4 -DHT_MAX_FEATURES=8 -DHT_MAX_CLASSES=4
+SAN_FLAGS = -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer
+
+test-matrix:
+	@echo "=== [Matrix 1/7] float32 (default) ==="
+	@$(MAKE) clean && $(MAKE) test
+	@echo "=== [Matrix 2/7] double64 ==="
+	@$(MAKE) clean && $(MAKE) test CFLAGS_EXTRA="-DHT_USE_DOUBLE"
+	@echo "=== [Matrix 3/7] Q16.16 (zero-libm) ==="
+	@$(MAKE) test-fixed
+	@echo "=== [Matrix 4/7] CLASSIF_ONLY float32 ==="
+	@$(MAKE) clean && $(MAKE) test CFLAGS_EXTRA="-DHT_CLASSIF_ONLY"
+	@echo "=== [Matrix 5/7] CLASSIF_ONLY Q16.16 (zero-libm) ==="
+	@$(MAKE) test-fixed CFLAGS_EXTRA="-DHT_CLASSIF_ONLY"
+	@echo "=== [Matrix 6/7] MCU Tier 4 float32 ==="
+	@$(MAKE) clean && $(MAKE) test CFLAGS_EXTRA="$(MCU_TIER4_DEFS)"
+	@echo "=== [Matrix 7/7] MCU Tier 4 Q16.16 (zero-libm) ==="
+	@$(MAKE) test-fixed CFLAGS_EXTRA="$(MCU_TIER4_DEFS)"
+	@$(MAKE) clean
+	@echo "=== ALL 7 COMPILATION MATRIX PROFILES PASSED ==="
+
+test-sanitize:
+	@echo "=== [ASan+UBSan 1/3] float32 ==="
+	@$(MAKE) clean && UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1 $(MAKE) test CFLAGS_EXTRA="$(SAN_FLAGS)"
+	@echo "=== [ASan+UBSan 2/3] double64 ==="
+	@$(MAKE) clean && UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1 $(MAKE) test CFLAGS_EXTRA="-DHT_USE_DOUBLE $(SAN_FLAGS)"
+	@echo "=== [ASan+UBSan 3/3] Q16.16 ==="
+	@$(MAKE) clean && UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1 $(MAKE) test CFLAGS_EXTRA="-DHT_USE_FIXED_POINT $(SAN_FLAGS)"
+	@$(MAKE) clean
+	@echo "=== ALL 3 SANITIZER PROFILES PASSED (0 UB / 0 ASan ERRORS) ==="
+
+test-parity:
+	@echo "=== Running Cross-Precision Parity & Runner Smoke Gate ==="
+	@python3 tests/run_parity_and_smoke.py --cc "$(CC)"
+
+coverage:
+	@echo "=== Running gcov Line & Branch Coverage Gate ==="
+	@python3 tests/run_coverage.py --cc "$(CC)"
+
+test-all: test-matrix test-sanitize test-parity coverage
+	@echo "=== ALL KANSHO TEST GATES PASSED (MATRIX + SANITIZERS + PARITY + COVERAGE) ==="
 
 BENCH_SRC = ../benchmarks/bench_c_runner.c
 BENCH_RUNNER = $(BUILD_DIR)/bench_c_runner
