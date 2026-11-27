@@ -37,22 +37,26 @@ static void test_e2e_sample_vector_ingestion(void) {
     ht_value_t x[HT_MAX_FEATURES];
     ht_feature_type_t types[HT_MAX_FEATURES];
 
-    /* Configure mixed schema: numeric (0..9), categorical (10..13), missing (14..15) */
-    for (uint8_t i = 0; i < 10; ++i) {
+    const uint8_t n_missing = 2;
+    const uint8_t n_cat = (HT_MAX_FEATURES >= 16) ? 4 : 2;
+    const uint8_t n_num = (uint8_t)(HT_MAX_FEATURES - n_cat - n_missing);
+
+    /* Configure mixed schema: numeric, categorical, and 2 missing tail features */
+    for (uint8_t i = 0; i < n_num; ++i) {
         types[i] = HT_FEAT_NUMERIC;
         x[i].num = HT_SUB(HT_MUL(HT_FROM_UINT(i), HT_CONST(1.5)), HT_CONST(5.0));
     }
-    for (uint8_t i = 10; i < 14; ++i) {
+    for (uint8_t i = n_num; i < (uint8_t)(n_num + n_cat); ++i) {
         types[i] = HT_FEAT_CATEGORICAL;
-        x[i].cat = (int32_t)(i - 10);
+        x[i].cat = (int32_t)(i - n_num);
     }
 
     /* Missing values */
-    types[14] = HT_FEAT_NUMERIC;
-    x[14].num = HT_NAN_VAL; /* NaN */
+    types[HT_MAX_FEATURES - 2] = HT_FEAT_NUMERIC;
+    x[HT_MAX_FEATURES - 2].num = HT_NAN_VAL; /* NaN */
 
-    types[15] = HT_FEAT_CATEGORICAL;
-    x[15].cat = -1; /* Missing categorical */
+    types[HT_MAX_FEATURES - 1] = HT_FEAT_CATEGORICAL;
+    x[HT_MAX_FEATURES - 1].cat = -1; /* Missing categorical */
 
     /* Process all features in stream sample */
     uint8_t valid_numeric_count = 0;
@@ -77,9 +81,9 @@ static void test_e2e_sample_vector_ingestion(void) {
         }
     }
 
-    HT_ASSERT_EQ(valid_numeric_count, 10);
-    HT_ASSERT_EQ(valid_categorical_count, 4);
-    HT_ASSERT_EQ(missing_count, 2);
+    HT_ASSERT_EQ(valid_numeric_count, n_num);
+    HT_ASSERT_EQ(valid_categorical_count, n_cat);
+    HT_ASSERT_EQ(missing_count, n_missing);
 }
 
 static void test_e2e_math_numerical_pipeline(void) {
@@ -194,8 +198,15 @@ static void test_e2e_memory_split_simulation(void) {
     leaf_queue[queue_tail++] = left_child;
     leaf_queue[queue_tail++] = right_child;
 
-    /* Split 30 more times (total 31 splits, 63 nodes, 32 active leaves) */
-    for (uint32_t s = 0; s < 30; ++s) {
+    /* Split up to 30 more times, bounded by compile-time MCU leaf/node limits */
+    uint32_t max_splits = 30U;
+    if (HT_MAX_ACTIVE_LEAVES > 2U && (uint32_t)(HT_MAX_ACTIVE_LEAVES - 2U) < max_splits) {
+        max_splits = (uint32_t)(HT_MAX_ACTIVE_LEAVES - 2U);
+    }
+    if (HT_MAX_NODES > 3U && (uint32_t)((HT_MAX_NODES - 3U) / 2U) < max_splits) {
+        max_splits = (uint32_t)((HT_MAX_NODES - 3U) / 2U);
+    }
+    for (uint32_t s = 0; s < max_splits; ++s) {
         uint16_t current_leaf = leaf_queue[queue_head++];
         ht_node_t *lnode = ht_node_get(&s_e2e_pool, current_leaf);
         HT_ASSERT_NOT_NULL(lnode);
@@ -271,13 +282,15 @@ static void test_e2e_stream_observer_pipeline(void) {
     HT_ASSERT_NOT_NULL(stats);
 
     /* Mixed schema definition:
-     * Features 0..11: Numeric (Gaussian observers)
-     * Features 12..15: Categorical (Nominal observers)
+     * Features 0..n_numeric-1: Numeric (Gaussian observers)
+     * Features n_numeric..n_features-1: Categorical (Nominal observers)
      * Classes: 3 classes (0, 1, 2)
      */
     const uint8_t n_classes = 3;
-    const uint8_t n_features = HT_MAX_FEATURES; /* 16 */
-    const uint8_t n_numeric = 12;
+    const uint8_t n_features = HT_MAX_FEATURES;
+    const uint8_t n_numeric = (uint8_t)((HT_MAX_FEATURES * 3U) / 4U);
+    const uint8_t nan_num_feat = (uint8_t)(n_numeric - 1U);
+    const uint8_t miss_cat_feat = (uint8_t)(n_features - 1U);
 
     /* Synthetic stream generator: 600 samples (200 per class) with distinct distributions */
     for (uint32_t i = 0; i < 600; ++i) {
@@ -298,8 +311,8 @@ static void test_e2e_stream_observer_pipeline(void) {
             /* Pseudo-random variation within [-3, 3] based on sample index */
             ht_float_t offset = HT_FROM_INT((int32_t)((i * 37 + f * 13) % 7) - 3);
 
-            /* Inject missing value (NaN) periodically on feature 11 to test robustness */
-            if (f == 11 && (i % 25 == 0)) {
+            /* Inject missing value (NaN) periodically on last numeric feature */
+            if (f == nan_num_feat && (i % 25 == 0)) {
                 x[f].num = HT_NAN_VAL;
             } else {
                 x[f].num = HT_ADD(base, offset);
@@ -311,8 +324,8 @@ static void test_e2e_stream_observer_pipeline(void) {
 
         /* Categorical features */
         for (uint8_t f = n_numeric; f < n_features; ++f) {
-            /* Inject invalid/missing category periodically on feature 15 (29 is coprime with 3) */
-            if (f == 15 && (i % 29 == 0)) {
+            /* Inject invalid/missing category periodically on last feature (29 is coprime with 3) */
+            if (f == miss_cat_feat && (i % 29 == 0)) {
                 x[f].cat = -1;
             } else {
                 /* Classes have preferred categories */
@@ -334,7 +347,7 @@ static void test_e2e_stream_observer_pipeline(void) {
     for (uint8_t f = 0; f < n_numeric; ++f) {
         for (uint8_t c = 0; c < n_classes; ++c) {
             ht_gaussian_obs_t *g = &stats->observers[f].num[c];
-            if (f == 11) {
+            if (f == nan_num_feat) {
                 /* Samples with NaN were safely skipped */
                 HT_ASSERT(g->count < HT_CONST(200.0) && g->count >= HT_CONST(190.0));
             } else {
@@ -388,7 +401,7 @@ static void test_e2e_stream_observer_pipeline(void) {
             for (uint8_t v = 0; v < HT_MAX_CATEGORIES; ++v) {
                 class_cat_total = HT_ADD(class_cat_total, cat->counts[c][v]);
             }
-            if (f == 15) {
+            if (f == miss_cat_feat) {
                 HT_ASSERT(class_cat_total <= HT_CONST(200.0) && class_cat_total >= HT_CONST(190.0));
             } else {
                 HT_ASSERT_FLOAT_EQ(class_cat_total, HT_CONST(200.0));
@@ -836,11 +849,16 @@ static void test_e2e_continuous_regression_stream_pipeline(void) {
     ht_leaf_stats_t *stats = ht_stats_get(&s_e2e_pool, root_stats_idx);
     HT_ASSERT_NOT_NULL(stats);
 
+    const uint8_t n_num = (uint8_t)(HT_MAX_FEATURES / 2U);
+    const uint8_t n_cat_end = (uint8_t)(n_num + (HT_MAX_FEATURES / 4U));
+    const uint8_t nan_num_feat = (uint8_t)(n_num - 1U);
+    const uint8_t miss_cat_feat = (uint8_t)(n_cat_end - 1U);
+
     /* Initialize observers */
-    for (uint8_t f = 0; f < 8; ++f) {
+    for (uint8_t f = 0; f < n_num; ++f) {
         ht_reg_numeric_init(&stats->observers[f].reg_num);
     }
-    for (uint8_t f = 8; f < 12; ++f) {
+    for (uint8_t f = n_num; f < n_cat_end; ++f) {
         ht_reg_categorical_init(&stats->observers[f].reg_cat);
     }
 
@@ -851,40 +869,40 @@ static void test_e2e_continuous_regression_stream_pipeline(void) {
     for (uint32_t i = 0; i < N_SAMPLES; ++i) {
         ht_value_t x[HT_MAX_FEATURES];
 
-        /* Features 0..7: Continuous numeric */
-        for (uint8_t f = 0; f < 8; ++f) {
+        /* Continuous numeric features */
+        for (uint8_t f = 0; f < n_num; ++f) {
             ht_float_t raw = e2e_u01(&lcg); /* [0.0 .. 1.0) */
-            /* Feature 7 has occasional missing values (NaN) */
-            if (f == 7 && (i % 25 == 0)) {
+            /* Last numeric feature has occasional missing values (NaN) */
+            if (f == nan_num_feat && (i % 25 == 0)) {
                 x[f].num = HT_NAN_VAL;
             } else {
                 x[f].num = HT_ADD(HT_MUL(HT_FROM_UINT(f), HT_CONST(5.0)), HT_MUL(raw, HT_CONST(10.0)));
             }
         }
 
-        /* Features 8..11: Nominal categorical */
-        for (uint8_t f = 8; f < 12; ++f) {
-            /* Feature 11 has occasional missing categories (-1) */
-            if (f == 11 && (i % 31 == 0)) {
+        /* Nominal categorical features */
+        for (uint8_t f = n_num; f < n_cat_end; ++f) {
+            /* Last categorical feature has occasional missing categories (-1) */
+            if (f == miss_cat_feat && (i % 31 == 0)) {
                 x[f].cat = -1;
             } else {
                 x[f].cat = (int32_t)((i + f) % HT_MAX_CATEGORIES);
             }
         }
 
-        /* Features 12..15: Additional numeric features */
-        for (uint8_t f = 12; f < HT_MAX_FEATURES; ++f) {
+        /* Additional trailing numeric features */
+        for (uint8_t f = n_cat_end; f < HT_MAX_FEATURES; ++f) {
             lcg = lcg * 1664525U + 1013904223U;
             x[f].num = HT_FROM_INT((int32_t)(lcg & 0xFFU) - 128);
         }
 
         /* Continuous regression target function:
-         * y = 2.0 * x[0] - 1.5 * x[1] + 3.0 * (float)x[8] + noise
+         * y = 2.0 * x[0] - 1.5 * x[1] + 3.0 * (float)x[n_num] + noise
          */
         ht_float_t noise = HT_MUL(HT_SUB(e2e_u01_byte(&lcg), HT_CONST(0.5)), HT_CONST(2.0));
         ht_float_t y = HT_ADD(
             HT_ADD(HT_SUB(HT_MUL(HT_CONST(2.0), x[0].num), HT_MUL(HT_CONST(1.5), x[1].num)),
-                   HT_MUL(HT_CONST(3.0), HT_FROM_INT(x[8].cat))),
+                   HT_MUL(HT_CONST(3.0), HT_FROM_INT(x[n_num].cat))),
             noise
         );
         ht_float_t weight = HT_CONST(1.0);
@@ -893,12 +911,12 @@ static void test_e2e_continuous_regression_stream_pipeline(void) {
         ht_var_update(&root->reg_stats, y, weight);
 
         /* Update numeric regression observers */
-        for (uint8_t f = 0; f < 8; ++f) {
+        for (uint8_t f = 0; f < n_num; ++f) {
             ht_reg_numeric_update(&stats->observers[f].reg_num, x[f].num, y, weight);
         }
 
         /* Update categorical regression observers */
-        for (uint8_t f = 8; f < 12; ++f) {
+        for (uint8_t f = n_num; f < n_cat_end; ++f) {
             ht_reg_categorical_update(&stats->observers[f].reg_cat, x[f].cat, y, weight);
         }
     }
@@ -911,7 +929,7 @@ static void test_e2e_continuous_regression_stream_pipeline(void) {
     HT_ASSERT(target_var > HT_CONST(0.0));
 
     /* 2. Verify all numeric regression observers */
-    for (uint8_t f = 0; f < 8; ++f) {
+    for (uint8_t f = 0; f < n_num; ++f) {
         ht_reg_numeric_obs_t *num_obs = &stats->observers[f].reg_num;
 
         /* All 5 slots must be populated and sorted by x_mean */
@@ -930,7 +948,7 @@ static void test_e2e_continuous_regression_stream_pipeline(void) {
         for (uint8_t k = 0; k < HT_REG_NUM_SLOTS; ++k) {
             slot_w = HT_ADD(slot_w, num_obs->slots[k].y_stats.count);
         }
-        if (f == 7) {
+        if (f == nan_num_feat) {
             /* NaN samples skipped */
             HT_ASSERT(slot_w < HT_FROM_UINT(N_SAMPLES) && slot_w >= HT_FROM_UINT(N_SAMPLES - 30U));
         } else {
@@ -939,7 +957,7 @@ static void test_e2e_continuous_regression_stream_pipeline(void) {
     }
 
     /* 3. Verify categorical regression observers */
-    for (uint8_t f = 8; f < 12; ++f) {
+    for (uint8_t f = n_num; f < n_cat_end; ++f) {
         ht_reg_categorical_obs_t *cat_obs = &stats->observers[f].reg_cat;
         ht_float_t cat_w = HT_CONST(0.0);
         for (uint8_t v = 0; v < HT_MAX_CATEGORIES; ++v) {
@@ -949,7 +967,7 @@ static void test_e2e_continuous_regression_stream_pipeline(void) {
                 HT_ASSERT(cat_obs->cat_stats[v].m2 >= HT_CONST(0.0));
             }
         }
-        if (f == 11) {
+        if (f == miss_cat_feat) {
             HT_ASSERT(cat_w < HT_FROM_UINT(N_SAMPLES) && cat_w >= HT_FROM_UINT(N_SAMPLES - 30U));
         } else {
             HT_ASSERT_FLOAT_EQ(cat_w, HT_FROM_UINT(N_SAMPLES));
@@ -1103,6 +1121,7 @@ static void test_e2e_regression_split_decision_pipeline(void) {
     HT_ASSERT_EQ(ht_memory_bytes_used(&s_e2e_pool), 0);
 }
 
+#ifndef HT_CLASSIF_ONLY
 static void test_e2e_vfdt_reg_prequential_and_serialization(void) {
     static ht_tree_t tree;
     ht_config_params_t params;
@@ -1284,9 +1303,11 @@ static void test_e2e_hat_reg_abrupt_drift_recovery(void) {
     ht_float_t mae_spike = HT_DIV(sum_err_b_spike, HT_FROM_UINT(count_b_spike));
     ht_float_t mae_late = HT_DIV(sum_err_b_late, HT_FROM_UINT(count_b_late));
 
-    /* Assert drift was detected and alternate tree switched */
+    /* Assert drift was detected and alternate tree switched (when leaf pool allows >= 8 leaves) */
     HT_ASSERT(tree.n_alternate_trees > 0U);
+#if HT_MAX_ACTIVE_LEAVES >= 8U
     HT_ASSERT(tree.n_switch_alternate_trees > 0U);
+#endif
 
     /* Assert error recovered: late MAE after switch is much lower than post-drift spike */
     HT_ASSERT(mae_late < HT_MUL(mae_spike, HT_CONST(0.5)));
@@ -1302,6 +1323,7 @@ static void test_e2e_hat_reg_abrupt_drift_recovery(void) {
     HT_ASSERT_EQ(tree.memory.stats_allocated, 0U);
     HT_ASSERT_EQ(adwin_pool.allocated_count, 0U);
 }
+#endif /* !HT_CLASSIF_ONLY */
 
 void test_e2e_flow_run(void) {
     HT_TEST_SUITE_BEGIN("Nivel 3: Fluxo Ponta a Ponta Acumulado (E2E)");
@@ -1315,6 +1337,8 @@ void test_e2e_flow_run(void) {
     HT_RUN_TEST(test_e2e_hat_abrupt_drift_recovery);
     HT_RUN_TEST(test_e2e_continuous_regression_stream_pipeline);
     HT_RUN_TEST(test_e2e_regression_split_decision_pipeline);
+#ifndef HT_CLASSIF_ONLY
     HT_RUN_TEST(test_e2e_vfdt_reg_prequential_and_serialization);
     HT_RUN_TEST(test_e2e_hat_reg_abrupt_drift_recovery);
+#endif
 }

@@ -253,7 +253,7 @@ static void test_memory_bytes_used_calculation(void) {
         stats[i] = ht_stats_alloc(&s_test_pool);
     }
 
-    size_t expected_bytes = 10 * sizeof(ht_node_t) + 3 * sizeof(ht_leaf_stats_t);
+    size_t expected_bytes = 10 * sizeof(ht_node_t) + 3 * s_test_pool.leaf_stride;
     HT_ASSERT_EQ(ht_memory_bytes_used(&s_test_pool), expected_bytes);
 
     /* Free 4 nodes and 1 stats */
@@ -262,7 +262,7 @@ static void test_memory_bytes_used_calculation(void) {
     }
     ht_stats_free(&s_test_pool, stats[0]);
 
-    expected_bytes = 6 * sizeof(ht_node_t) + 2 * sizeof(ht_leaf_stats_t);
+    expected_bytes = 6 * sizeof(ht_node_t) + 2 * s_test_pool.leaf_stride;
     HT_ASSERT_EQ(ht_memory_bytes_used(&s_test_pool), expected_bytes);
 
     /* Free remainder */
@@ -349,6 +349,7 @@ static void test_memory_stress_recycling_100k(void) {
 }
 
 static void test_memory_unified_structures_and_sizes(void) {
+#if (HT_MAX_FEATURES == 16U) && (HT_MAX_CLASSES == 4U) && (HT_MAX_CATEGORIES == 5U) && (HT_REG_NUM_SLOTS == 5U)
 #ifndef HT_USE_DOUBLE
     HT_ASSERT_EQ(offsetof(ht_leaf_stats_t, observers), 16);
     HT_ASSERT_EQ(sizeof(ht_node_t), 20);
@@ -358,7 +359,13 @@ static void test_memory_unified_structures_and_sizes(void) {
     HT_ASSERT_EQ(sizeof(ht_reg_categorical_obs_t), 60);
     HT_ASSERT_EQ(sizeof(ht_feature_obs_t), 80);
     HT_ASSERT_EQ(sizeof(ht_leaf_stats_t), 1360);
+#if (HT_MAX_NODES == 4096U) && (HT_MAX_ACTIVE_LEAVES == 256U)
+#ifdef HT_CLASSIF_ONLY
+    HT_ASSERT_EQ(sizeof(ht_memory_pool_t), 413708);
+#else
     HT_ASSERT_EQ(sizeof(ht_memory_pool_t), 430092);
+#endif
+#endif
 #else
     HT_ASSERT_EQ(offsetof(ht_leaf_stats_t, observers), 32);
     HT_ASSERT_EQ(sizeof(ht_node_t), 40);
@@ -368,7 +375,14 @@ static void test_memory_unified_structures_and_sizes(void) {
     HT_ASSERT_EQ(sizeof(ht_reg_categorical_obs_t), 120);
     HT_ASSERT_EQ(sizeof(ht_feature_obs_t), 160);
     HT_ASSERT_EQ(sizeof(ht_leaf_stats_t), 2720);
+#if (HT_MAX_NODES == 4096U) && (HT_MAX_ACTIVE_LEAVES == 256U)
+#ifdef HT_CLASSIF_ONLY
+    HT_ASSERT(sizeof(ht_memory_pool_t) < 860176);
+#else
     HT_ASSERT_EQ(sizeof(ht_memory_pool_t), 860176);
+#endif
+#endif
+#endif
 #endif
 
     HT_ASSERT(sizeof(ht_memory_pool_t) <= (1024 * 1024));
@@ -531,6 +545,16 @@ static void test_node_unified_regression_stats(void) {
 }
 
 static void test_leaf_stats_regression_observers_and_weights(void) {
+#ifdef HT_CLASSIF_ONLY
+    /* Under HT_CLASSIF_ONLY, regression stride must be rejected and reg_weights omitted */
+    HT_ASSERT(!ht_memory_init_stride(&s_test_pool, 4U, HT_TASK_REGRESSION));
+    HT_ASSERT(ht_memory_init_stride(&s_test_pool, 4U, HT_TASK_CLASSIFICATION));
+    HT_ASSERT(s_test_pool.leaf_stride < sizeof(ht_leaf_stats_t));
+    uint16_t s_idx = ht_stats_alloc(&s_test_pool);
+    HT_ASSERT_NEQ(s_idx, HT_INVALID_IDX);
+    ht_stats_free(&s_test_pool, s_idx);
+    HT_ASSERT_EQ(ht_stats_count(&s_test_pool), 0);
+#else
     ht_memory_init(&s_test_pool);
 
     uint16_t s_idx = ht_stats_alloc(&s_test_pool);
@@ -581,6 +605,7 @@ static void test_leaf_stats_regression_observers_and_weights(void) {
     }
 
     ht_stats_free(&s_test_pool, realloc_idx);
+#endif
 }
 
 static void test_dynamic_stride_slab_initialization_and_alignment(void) {

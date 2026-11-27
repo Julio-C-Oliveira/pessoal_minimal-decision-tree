@@ -12,7 +12,7 @@ Este repositório desenvolve **kansho** (簡樹, "árvore simples"): uma **Hoeff
   - `ht_node_t` (**Leve**): Estrutura permanente do nó (filhos, condição de split binário, `class_counts` e `stats_idx`).
   - `ht_leaf_stats_t` (**Pesado**): Observadores de atributos (Gaussianas de Welford e tabelas categóricas) + contadores do *Naive Bayes Adaptive*. Deve ser **imediatamente devolvido ao pool** quando a folha sofrer split ou for desativada pelo gerenciamento de memória do VFDT.
 - **Precisão Configurável (`ht_float_t`):**
-  - Todo cálculo de ponto flutuante deve usar `ht_float_t` (`float` 32-bit por padrão; `double` 64-bit quando compilado com `-DHT_USE_DOUBLE` para testes de paridade com o River).
+  - Todo cálculo numérico deve usar `ht_float_t` e macros aritméticas `HT_*` (`float` 32-bit por padrão; `double` 64-bit com `-DHT_USE_DOUBLE` para paridade com River; inteiro ponto-fixo `Q16.16` zero-`libm` com `-DHT_USE_FIXED_POINT` para MCUs sem FPU).
 - **Sem Recursão Profunda:** O roteamento da raiz até a folha deve usar loops iterativos (`while`), nunca recursão na pilha de chamadas (stack limitada em microcontroladores).
 - **Dimensionamento Estrito via Macros de Compilação (Zero Redundância em Runtime):**
   - Limites de capacidade (`HT_MAX_NODES`, `HT_MAX_ACTIVE_LEAVES`, `HT_MAX_FEATURES`, `HT_MAX_CLASSES`, `HT_MAX_CATEGORIES`) são definidos exclusivamente em tempo de compilação (`code/include/core/ht_config.h` ou flags `-D` no `Makefile`) para reduzir fisicamente `sizeof(ht_tree_t)` na SRAM.
@@ -24,7 +24,14 @@ Este repositório desenvolve **kansho** (簡樹, "árvore simples"): uma **Hoeff
 
 - **Um Conceito Lógico por Commit:** Nunca misture mudanças de naturezas distintas no mesmo commit (ex: não misture notas teóricas em `docs/`, adição de referências em `references/`, configuração de agentes em `.agents/` e implementação em `src/`).
 - **Estado Sempre Verde e Gate de Testes (Condicional a Código C11):**
-  - **Obrigatoriedade de Testes:** O gate de compilação sem warnings (`-Wall -Wextra -Werror -pedantic`) e execução de 100% dos testes unitários e de integração (em `float` e `double`) é **obrigatório exclusivamente quando houver modificações em código C ou arquivos de build/teste** (`code/include/`, `code/src/`, `code/tests/`, `code/Makefile` ou `Makefile`).
+  - **Obrigatoriedade de Testes:** O gate de compilação sem warnings (`-Wall -Wextra -Werror -pedantic`) e execução de 100% dos testes unitários e de integração nas 3 precisões (`float32`, `double64` e `Q16.16` com auditoria zero-`libm`) é **obrigatório exclusivamente quando houver modificações em código C ou arquivos de build/teste** (`code/include/`, `code/src/`, `code/tests/`, `code/Makefile` ou `Makefile`).
+  - **Gates Completos de Regressão (`Makefile`):**
+    - `make test`: suíte rápida em `float32` (feedback de iteração).
+    - `make test-matrix`: matriz completa de 7 perfis (`float32`, `double64`, `Q16.16`, `HT_CLASSIF_ONLY` em `float32`/`Q16.16`, e `MCU Tier 4` em `float32`/`Q16.16`).
+    - `make test-sanitize`: `AddressSanitizer` + `UndefinedBehaviorSanitizer` nas 3 precisões (`float32`, `double64`, `Q16.16`).
+    - `make test-parity`: gate híbrido de paridade *cross-precision* em cenários sintéticos extremos, slices reais condicionais (`main_benchmark/data/`) e suíte federada TCP POSIX (`bench-fed-net`).
+    - `make coverage`: gate automatizado `gcov` exigindo `>= 92%` de linhas totais, `>= 80%` de branches totais e `>= 85%` de linhas por módulo em `float32` e `Q16.16`.
+    - `make test-all`: executa sequencialmente `test-matrix`, `test-sanitize`, `test-parity` e `coverage` (obrigatório antes de PRs e releases).
   - **Modificações Exclusivas de Documentação/Metadados:** Quando o commit contiver apenas alterações documentais ou conceituais (ex: `README.md`, `docs/`, `wiki/`, `.agents/`, `VERSION` ou `references/`), **não** há necessidade de rodar a suíte de testes antes de commitar.
   - Caso ocorram alterações em código e algum teste falhe ou ocorra erro/warning de compilação, é **expressamente proibido commitar**. O agente deve obrigatoriamente diagnosticar o problema, consertar os erros e validar novamente antes de commitar.
 - **Mensagens Padronizadas (Conventional Commits):**

@@ -1005,6 +1005,9 @@ void ht_default_params(ht_config_params_t *params, uint8_t n_features, uint8_t n
 }
 
 void ht_default_hat_params(ht_config_params_t *params, uint8_t n_features, uint8_t n_classes) {
+    if (params == NULL) {
+        return;
+    }
     ht_default_params(params, n_features, n_classes);
     params->enable_hat = true;
     params->bootstrap_sampling = true;
@@ -1050,6 +1053,9 @@ void ht_default_reg_params(ht_config_params_t *params, uint8_t n_features) {
 }
 
 void ht_default_hat_reg_params(ht_config_params_t *params, uint8_t n_features) {
+    if (params == NULL) {
+        return;
+    }
     ht_default_reg_params(params, n_features);
     params->enable_hat = true;
     params->bootstrap_sampling = true;
@@ -2195,11 +2201,14 @@ static ht_status_t ht_tree_learn_one_reg_subtree(ht_tree_t *tree,
         }
 
         /* 6. Check grace period */
+#ifdef HT_USE_FIXED_POINT
+        /* Accumulate weight since last split attempt directly so Block-Rescaling on high-variance
+         * targets (which caps reg_stats.count when m2 nears Q26.6 ceiling) never stalls grace_period
+         * or deferred-split federated clients (Fed-VFDT STATS-MERGE). */
+        stats->last_split_attempt_at = HT_ADD(stats->last_split_attempt_at, weight);
+#endif
         if (!(tree->tree_flags & HT_TREE_FLAG_DEFER_SPLITS)) {
 #ifdef HT_USE_FIXED_POINT
-            /* Accumulate weight since last split attempt directly so Block-Rescaling on high-variance
-             * targets (which caps reg_stats.count when m2 nears Q26.6 ceiling) never stalls grace_period. */
-            stats->last_split_attempt_at = HT_ADD(stats->last_split_attempt_at, weight);
             if (stats->last_split_attempt_at >= HT_FROM_UINT(tree->params.grace_period)) {
                 ht_tree_attempt_split_reg(tree, leaf_idx, depth);
                 /* Only reset if leaf did not split (still owns stats) */

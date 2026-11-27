@@ -983,6 +983,171 @@ static void test_var_stat_high_amplitude_regression_q24_8(void) {
 #endif
 }
 
+static void test_gaussian_sub_ulp_underflow_fallback(void) {
+    /* Reproduces Electricity Cortex-M3 narrow-feature regime (dx ~ 1e-3):
+     * in Q16.16, delta^2 < 0.5 ULP can leave m2 == 0 while max_val > min_val.
+     * ht_gaussian_stddev must fall back to uniform range (max - min) / sqrt(12)
+     * so CDF stays smooth rather than collapsing to a Dirac step function. */
+    ht_gaussian_obs_t g[HT_MAX_CLASSES];
+    for (uint8_t c = 0; c < HT_MAX_CLASSES; ++c) {
+        ht_gaussian_init(&g[c]);
+    }
+    for (int i = 0; i < 120; ++i) {
+        ht_float_t x = HT_ADD(HT_CONST(0.500), HT_MUL(HT_FROM_INT(i % 20), HT_CONST(0.0002)));
+        ht_gaussian_update(g, 0U, x, HT_CONST(1.0));
+    }
+    HT_ASSERT(g[0].max_val > g[0].min_val);
+    ht_float_t sd = ht_gaussian_stddev(&g[0]);
+    HT_ASSERT(sd > HT_CONST(0.0));
+    HT_ASSERT(HT_ISFINITE(sd));
+
+    ht_float_t mid = HT_DIV(HT_ADD(g[0].min_val, g[0].max_val), HT_CONST(2.0));
+    ht_float_t cdf_mid = ht_normal_cdf(mid, g[0].mean, sd);
+    HT_ASSERT(cdf_mid > HT_CONST(0.1) && cdf_mid < HT_CONST(0.9));
+
+    ht_float_t logp = ht_gaussian_cond_log_proba(&g[0], mid);
+    HT_ASSERT(HT_ISFINITE(logp));
+
+    /* Extreme tails clamp smoothly in [0, 1] */
+    HT_ASSERT(ht_normal_cdf(HT_CONST(-1000.0), g[0].mean, sd) >= HT_CONST(0.0));
+    HT_ASSERT(ht_normal_cdf(HT_CONST(1000.0), g[0].mean, sd) <= HT_CONST(1.0));
+}
+
+static void test_histogram_full_lifecycle_merge_log_proba_and_rescaling(void) {
+    ht_hist_obs_t h1, h2;
+    ht_hist_init(&h1);
+    ht_hist_init(&h2);
+
+    /* Null / empty guards */
+    ht_hist_update(NULL, 0, HT_CONST(1.0), HT_CONST(1.0));
+    ht_hist_update(&h1, 0, HT_NAN_VAL, HT_CONST(1.0));
+    ht_hist_update(&h1, HT_MAX_CLASSES, HT_CONST(1.0), HT_CONST(1.0));
+    ht_hist_update(&h1, 0, HT_CONST(1.0), HT_CONST(0.0));
+    HT_ASSERT_EQ(ht_hist_cond_log_proba(&h1, 0, HT_CONST(1.0)), -HT_INFINITY);
+
+    /* Insert out-of-order (middle, left, right, exact match, and bin merge overflow) */
+    ht_hist_update(&h1, 0, HT_CONST(5.0), HT_CONST(2.0));
+    ht_hist_update(&h1, 0, HT_CONST(1.0), HT_CONST(3.0)); /* left insert */
+    ht_hist_update(&h1, 1, HT_CONST(9.0), HT_CONST(4.0)); /* right insert */
+    ht_hist_update(&h1, 0, HT_CONST(5.0), HT_CONST(5.0)); /* exact match */
+    ht_hist_update(&h1, 0, HT_CONST(3.0), HT_CONST(2.0)); /* middle insert */
+    ht_hist_update(&h1, 1, HT_CONST(7.0), HT_CONST(3.0)); /* triggers merge */
+    ht_hist_update(&h1, 1, HT_CONST(11.0), HT_CONST(2.0)); /* triggers merge */
+
+    for (uint8_t i = 1; i < HT_HIST_MAX_BINS; ++i) {
+        HT_ASSERT(h1.bins[i - 1].center <= h1.bins[i].center);
+    }
+
+    /* Cond proba & cond log proba across inside, below-min, and above-max */
+    ht_float_t p_lo = ht_hist_cond_proba(&h1, 0, HT_CONST(-5.0));
+    ht_float_t p_mid = ht_hist_cond_proba(&h1, 0, HT_CONST(4.0));
+    ht_float_t p_hi = ht_hist_cond_proba(&h1, 1, HT_CONST(50.0));
+    HT_ASSERT(p_lo > HT_CONST(0.0) && p_mid > HT_CONST(0.0) && p_hi > HT_CONST(0.0));
+
+    ht_float_t lp0 = ht_hist_cond_log_proba(&h1, 0, HT_CONST(4.0));
+    ht_float_t lp1 = ht_hist_cond_log_proba(&h1, 1, HT_CONST(8.0));
+    ht_float_t lp_nan = ht_hist_cond_log_proba(&h1, 0, HT_NAN_VAL);
+    HT_ASSERT(HT_ISFINITE(lp0) && HT_ISFINITE(lp1));
+    HT_ASSERT_EQ(lp_nan, -HT_INFINITY);
+
+    /* Trigger Q16.16 histogram rescaling (weight > 16384) via repeated updates */
+    for (int i = 0; i < 200; ++i) {
+        ht_hist_update(&h1, 0, HT_CONST(5.0), HT_CONST(100.0));
+        ht_hist_update(&h1, 1, HT_CONST(9.0), HT_CONST(100.0));
+    }
+    HT_ASSERT(HT_ISFINITE(ht_hist_cond_proba(&h1, 0, HT_CONST(5.0))));
+    HT_ASSERT(HT_ISFINITE(ht_hist_cond_log_proba(&h1, 1, HT_CONST(9.0))));
+
+    /* Merge h2 into h1 (and NULL / invalid guards) */
+    ht_hist_update(&h2, 0, HT_CONST(2.0), HT_CONST(10.0));
+    ht_hist_update(&h2, 1, HT_CONST(12.0), HT_CONST(10.0));
+    ht_hist_merge(NULL, &h2, 2U);
+    ht_hist_merge(&h1, NULL, 2U);
+    ht_hist_merge(&h1, &h2, 2U);
+    HT_ASSERT(HT_ISFINITE(ht_hist_cond_proba(&h1, 0, HT_CONST(2.0))));
+
+    /* Categorical merge edge cases + high-weight rescaling */
+    ht_categorical_obs_t c1, c2;
+    ht_categorical_init(&c1);
+    ht_categorical_init(&c2);
+    ht_categorical_merge(NULL, &c2, 2U);
+    ht_categorical_merge(&c1, NULL, 2U);
+    for (int i = 0; i < 200; ++i) {
+        ht_categorical_update(&c1, 0, 0, HT_CONST(100.0));
+        ht_categorical_update(&c2, 1, 1, HT_CONST(100.0));
+    }
+    ht_categorical_merge(&c1, &c2, 2U);
+    HT_ASSERT(ht_categorical_cond_proba(&c1, 0, 0) > HT_CONST(0.5));
+    HT_ASSERT(ht_categorical_cond_proba(&c1, 1, 1) > HT_CONST(0.5));
+
+    /* NULL / non-finite / out-of-range guards across Gaussian, Hist, Categorical, Var, Reg observers */
+    ht_gaussian_obs_t ga[HT_MAX_CLASSES];
+    for (uint8_t c = 0; c < HT_MAX_CLASSES; ++c) ht_gaussian_init(&ga[c]);
+    ht_gaussian_update(NULL, 0, HT_CONST(1.0), HT_CONST(1.0));
+    ht_gaussian_update(ga, HT_MAX_CLASSES, HT_CONST(1.0), HT_CONST(1.0));
+    ht_gaussian_update(ga, 0, HT_NAN_VAL, HT_CONST(1.0));
+    ht_gaussian_update(ga, 0, HT_INFINITY, HT_CONST(1.0));
+    ht_gaussian_update(ga, 0, HT_CONST(1.0), HT_CONST(0.0));
+    HT_ASSERT_FLOAT_EQ(ht_gaussian_cond_proba(NULL, HT_CONST(1.0)), HT_CONST(0.0));
+    HT_ASSERT_FLOAT_EQ(ht_gaussian_cond_proba(&ga[0], HT_NAN_VAL), HT_CONST(0.0));
+    HT_ASSERT_FLOAT_EQ(ht_gaussian_cond_proba(&ga[0], HT_INFINITY), HT_CONST(0.0));
+    HT_ASSERT_EQ(ht_gaussian_cond_log_proba(NULL, HT_CONST(1.0)), -HT_INFINITY);
+    HT_ASSERT_EQ(ht_gaussian_cond_log_proba(&ga[0], HT_NAN_VAL), -HT_INFINITY);
+    HT_ASSERT_EQ(ht_gaussian_cond_log_proba(&ga[0], HT_INFINITY), -HT_INFINITY);
+
+    ht_float_t sp[HT_GAUSSIAN_SPLITS];
+    ht_float_t dl[HT_MAX_CLASSES], dr[HT_MAX_CLASSES];
+    HT_ASSERT_EQ(ht_gaussian_split_suggestions(NULL, 2, sp), 0U);
+    HT_ASSERT_EQ(ht_gaussian_split_suggestions(ga, 0, sp), 0U);
+    HT_ASSERT_EQ(ht_gaussian_split_suggestions(ga, 2, NULL), 0U);
+    ht_gaussian_binary_split_dists(NULL, 2, HT_CONST(0.0), dl, dr);
+    ht_gaussian_binary_split_dists(ga, 2, HT_CONST(0.0), NULL, dr);
+    HT_ASSERT_EQ(ht_hist_split_suggestions(NULL, 2, sp), 0U);
+    HT_ASSERT_EQ(ht_hist_split_suggestions(&h1, 2, NULL), 0U);
+    ht_hist_binary_split_dists(NULL, 2, HT_CONST(0.0), dl, dr);
+    ht_hist_binary_split_dists(&h1, 2, HT_CONST(0.0), NULL, dr);
+    HT_ASSERT_FLOAT_EQ(ht_categorical_cond_proba(NULL, 0, 0), HT_CONST(0.0));
+    HT_ASSERT_FLOAT_EQ(ht_categorical_cond_proba(&c1, 0, -1), HT_CONST(0.0));
+    HT_ASSERT_FLOAT_EQ(ht_categorical_cond_proba(&c1, 0, HT_MAX_CATEGORIES), HT_CONST(0.0));
+    ht_categorical_binary_split_dists(NULL, 2, 0, dl, dr);
+    ht_categorical_binary_split_dists(&c1, 2, 0, NULL, dr);
+
+    /* High-amplitude Gaussian stream triggering Q16.16 m2 >= INT32_MAX Block-Rescaling */
+    for (int i = 0; i < 300; ++i) {
+        ht_float_t v = ((i & 1) == 0) ? HT_CONST(-400.0) : HT_CONST(400.0);
+        ht_gaussian_update(ga, 0, v, HT_CONST(1.0));
+    }
+    HT_ASSERT(HT_ISFINITE(ga[0].mean));
+    HT_ASSERT(ht_gaussian_stddev(&ga[0]) > HT_CONST(0.0));
+
+    /* Regression observer NULL / NaN / Inf / invalid guards */
+    ht_var_stat_t vs;
+    ht_var_init(&vs);
+    ht_var_update(NULL, HT_CONST(1.0), HT_CONST(1.0));
+    ht_var_update(&vs, HT_NAN_VAL, HT_CONST(1.0));
+    ht_var_update(&vs, HT_INFINITY, HT_CONST(1.0));
+    ht_var_update(&vs, HT_CONST(1.0), HT_CONST(0.0));
+    HT_ASSERT_FLOAT_EQ(ht_var_value(NULL), HT_CONST(0.0));
+
+    ht_reg_numeric_obs_t rn;
+    ht_reg_numeric_init(&rn);
+    ht_reg_numeric_update(NULL, HT_CONST(1.0), HT_CONST(1.0), HT_CONST(1.0));
+    ht_reg_numeric_update(&rn, HT_NAN_VAL, HT_CONST(1.0), HT_CONST(1.0));
+    ht_reg_numeric_update(&rn, HT_INFINITY, HT_CONST(1.0), HT_CONST(1.0));
+    ht_reg_numeric_update(&rn, HT_CONST(1.0), HT_NAN_VAL, HT_CONST(1.0));
+    ht_reg_numeric_update(&rn, HT_CONST(1.0), HT_INFINITY, HT_CONST(1.0));
+    ht_reg_numeric_update(&rn, HT_CONST(1.0), HT_CONST(1.0), HT_CONST(0.0));
+
+    ht_reg_categorical_obs_t rc;
+    ht_reg_categorical_init(&rc);
+    ht_reg_categorical_update(NULL, 0, HT_CONST(1.0), HT_CONST(1.0));
+    ht_reg_categorical_update(&rc, -1, HT_CONST(1.0), HT_CONST(1.0));
+    ht_reg_categorical_update(&rc, HT_MAX_CATEGORIES, HT_CONST(1.0), HT_CONST(1.0));
+    ht_reg_categorical_update(&rc, 0, HT_NAN_VAL, HT_CONST(1.0));
+    ht_reg_categorical_update(&rc, 0, HT_INFINITY, HT_CONST(1.0));
+    ht_reg_categorical_update(&rc, 0, HT_CONST(1.0), HT_CONST(0.0));
+}
+
 /* ========================================================================= */
 /* --- Test Suite Runner --------------------------------------------------- */
 /* ========================================================================= */
@@ -1026,4 +1191,6 @@ void test_observer_run(void) {
     HT_RUN_TEST(test_reg_observers_in_leaf_stats_pool);
     HT_RUN_TEST(test_observer_100k_stream_block_rescaling);
     HT_RUN_TEST(test_var_stat_high_amplitude_regression_q24_8);
+    HT_RUN_TEST(test_gaussian_sub_ulp_underflow_fallback);
+    HT_RUN_TEST(test_histogram_full_lifecycle_merge_log_proba_and_rescaling);
 }

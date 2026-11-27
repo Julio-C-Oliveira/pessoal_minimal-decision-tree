@@ -573,11 +573,17 @@ ht_float_t ht_quantizer_quantile(const ht_feature_quantizer_t *fq, ht_float_t q_
 ht_value_t ht_quantizer_transform_one(const ht_quantizer_t *q, uint8_t feat_idx, ht_float_t val) {
     ht_value_t out;
     out.num = val;
-    if (q == NULL || feat_idx >= HT_MAX_FEATURES || HT_ISNAN(val)) {
+    if (q == NULL || feat_idx >= HT_MAX_FEATURES) {
         return out;
     }
 
     const ht_feature_quantizer_t *fq = &q->feat[feat_idx];
+    if (HT_ISNAN(val)) {
+        if (fq->mode == HT_QUANT_KBINS_CAT) {
+            out.cat = -1;
+        }
+        return out;
+    }
     if (fq->mode == HT_QUANT_CDF_UNIFORM) {
         out.num = ht_quantizer_cdf(fq, val);
         return out;

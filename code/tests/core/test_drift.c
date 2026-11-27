@@ -851,6 +851,46 @@ static void test_hat_evaluate_reg_alternate_z_test_analytical(void) {
     HT_ASSERT_EQ(act, HT_HAT_ACTION_NONE);
 }
 
+static void test_drift_pool_reset_and_hat_combine_edge_cases(void) {
+    /* ADWIN pool reset & NULL bytes_used */
+    HT_ASSERT_EQ(ht_adwin_pool_bytes_used(NULL), 0U);
+    static ht_adwin_pool_t pool;
+    HT_ASSERT_EQ(ht_adwin_pool_init(&pool), HT_OK);
+    uint16_t d0 = ht_adwin_pool_alloc(&pool, NULL);
+    uint16_t d1 = ht_adwin_pool_alloc(&pool, NULL);
+    HT_ASSERT_NEQ(d0, HT_INVALID_IDX);
+    HT_ASSERT_NEQ(d1, HT_INVALID_IDX);
+    HT_ASSERT_EQ(pool.allocated_count, 2U);
+    ht_adwin_pool_reset(NULL);
+    ht_adwin_pool_reset(&pool);
+    HT_ASSERT_EQ(pool.allocated_count, 0U);
+
+    /* ADWIN cut epsilon boundary guards */
+    HT_ASSERT_EQ(ht_adwin_calculate_cut_epsilon(10U, 0U, 10U, HT_CONST(0.5), HT_CONST(0.002), 5U), HT_INFINITY);
+    HT_ASSERT_EQ(ht_adwin_calculate_cut_epsilon(10U, 10U, 0U, HT_CONST(0.5), HT_CONST(0.002), 5U), HT_INFINITY);
+    HT_ASSERT(ht_adwin_calculate_cut_epsilon(20U, 10U, 10U, HT_CONST(-1.0), HT_CONST(0.002), 5U) >= HT_CONST(0.0));
+    HT_ASSERT_EQ(ht_adwin_calculate_cut_epsilon(20U, 10U, 10U, HT_CONST(0.5), HT_CONST(0.0), 5U), HT_INFINITY);
+
+    /* HAT weighted leaf prediction combination edge cases */
+    ht_float_t preds[2 * HT_MAX_CLASSES];
+    memset(preds, 0, sizeof(preds));
+    preds[0 * HT_MAX_CLASSES + 0] = HT_CONST(0.9);
+    preds[0 * HT_MAX_CLASSES + 1] = HT_CONST(0.1);
+    preds[1 * HT_MAX_CLASSES + 0] = HT_CONST(0.2);
+    preds[1 * HT_MAX_CLASSES + 1] = HT_CONST(0.8);
+    ht_float_t errs[2] = { HT_CONST(0.0), HT_CONST(0.5) };
+    ht_float_t out[HT_MAX_CLASSES];
+    ht_hat_combine_leaf_predictions(NULL, errs, 2U, 2U, out);
+    ht_hat_combine_leaf_predictions(preds, errs, 0U, 2U, out);
+    ht_hat_combine_leaf_predictions(preds, errs, 2U, 2U, out);
+    HT_ASSERT(out[0] > HT_CONST(0.85));
+
+    /* All zero errors -> uniform average */
+    errs[0] = HT_CONST(0.0); errs[1] = HT_CONST(0.0);
+    ht_hat_combine_leaf_predictions(preds, errs, 2U, 2U, out);
+    HT_ASSERT_FLOAT_NEAR(out[0], HT_CONST(0.55), HT_TEST_TOL(0.05));
+}
+
 /* Master suite runner for test_drift */
 void test_drift_run(void) {
     HT_TEST_SUITE_BEGIN("Nivel 1 & 2: Detector ADWIN com Histograma Exponencial Fixo (ht_drift)");
@@ -882,4 +922,5 @@ void test_drift_run(void) {
     /* Nível 2: HAT Substituição e Poda de Subárvores */
     HT_RUN_TEST(test_hat_subtree_replacement_and_iterative_recycling);
     HT_RUN_TEST(test_hat_alternate_tree_pruning_and_recycling);
+    HT_RUN_TEST(test_drift_pool_reset_and_hat_combine_edge_cases);
 }
