@@ -32,6 +32,8 @@ uint16_t ht_fed_make_flags(ht_task_type_t task_type) {
     uint16_t flags = 0U;
 #ifdef HT_USE_DOUBLE
     flags |= HT_FED_FLAG_DOUBLE;
+#elif defined(HT_USE_FIXED_POINT)
+    flags |= HT_FED_FLAG_FIXED;
 #endif
     if (task_type == HT_TASK_REGRESSION) {
         flags |= HT_FED_FLAG_REG;
@@ -122,6 +124,16 @@ ht_status_t ht_fed_parse_frame(const void *buf,
     if (hdr.magic != HT_FED_MAGIC ||
         hdr.proto_version != HT_FED_PROTO_VERSION ||
         hdr.float_size != (uint16_t)sizeof(ht_float_t)) {
+        return HT_ERR_CORRUPT_IMAGE;
+    }
+
+    uint16_t expected_fmt = 0U;
+#ifdef HT_USE_DOUBLE
+    expected_fmt = HT_FED_FLAG_DOUBLE;
+#elif defined(HT_USE_FIXED_POINT)
+    expected_fmt = HT_FED_FLAG_FIXED;
+#endif
+    if ((hdr.flags & (HT_FED_FLAG_DOUBLE | HT_FED_FLAG_FIXED)) != expected_fmt) {
         return HT_ERR_CORRUPT_IMAGE;
     }
 

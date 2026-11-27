@@ -36,20 +36,22 @@ Além das páginas desta Wiki, o repositório principal mantém notas matemátic
 - [`docs/03_concept_drift_hat.md`](../docs/03_concept_drift_hat.md) — *Hoeffding Adaptive Tree* (`HAT`), histograma exponencial `ADWIN2` e testes estatísticos de substituição de subárvores.
 - [`docs/04_river_mapping.md`](../docs/04_river_mapping.md) — Mapeamento de paridade algorítmica com o `online-ml/river`.
 - [`docs/05_sklearn_architecture.md`](../docs/05_sklearn_architecture.md) — Mapeamento de estruturas contíguas sem ponteiros inspirado em `sklearn/tree`.
-- [`docs/06_implementation_plan.md`](../docs/06_implementation_plan.md) — Plano de implementação persistente multi-chat (Fases 0 a 11; roadmap `v0.6.0+`).
+- [`docs/06_implementation_plan.md`](../docs/06_implementation_plan.md) — Plano de implementação persistente multi-chat (Fases 0 a 8 e 11 concluídas; roadmap `v0.7.0+`).
 - [`docs/07_regression_trees_fimtdd.md`](../docs/07_regression_trees_fimtdd.md) — Árvores de regressão incremental (`FIMT-DD` / `VFDT-R` e `HAT-R`), variância paralela de Chan e folhas lineares com SGD.
 - [`docs/08_data_preprocessing_and_nonparametric.md`](../docs/08_data_preprocessing_and_nonparametric.md) — Micro-pipelines embarcados zero-malloc (`libht_prep`), Hampel MAD, Ben-Haim & Tom-Tov e normalização SGD híbrida.
 - [`docs/09_extreme_ram_optimization.md`](../docs/09_extreme_ram_optimization.md) — Especificação de otimização extrema de SRAM (`ht_node_t` de 20 B, free-lists intrusivas e *Dynamic Feature Stride Slab*).
-- [`docs/10_fixed_point_arithmetic.md`](../docs/10_fixed_point_arithmetic.md) — Especificação futura para aritmética de ponto fixo (`Q16.16` via `-DHT_USE_FIXED_POINT`, `v0.6.0+`).
+- [`docs/10_fixed_point_arithmetic.md`](../docs/10_fixed_point_arithmetic.md) — Especificação e resultados da aritmética de ponto fixo **`Q16.16` Zero-Libm (`-DHT_USE_FIXED_POINT`, `v0.6.0`)**.
 - [`docs/11_embedded_micro_ensembles.md`](../docs/11_embedded_micro_ensembles.md) — Especificação futura de Micro-Ensembles (`< 100 KB` SRAM, `v0.7.0+`) e fundação compartilhada `ensemble/`.
 - [`docs/12_welford_adaptive_sgd.md`](../docs/12_welford_adaptive_sgd.md) — Análise de estabilidade numérica e aprimoramento do SGD adaptativo em folhas de regressão.
 - [`docs/13_federated_learning.md`](../docs/13_federated_learning.md) — Arquitetura do Aprendizado Federado Embarcado (`Fed-Forest`, `Fed-VFDT`, `HFED`, paridade com `paularaissa/project-vfdt`, resultados em 8 datasets e gates da `v0.5.0`).
 
 ### Suítes e Relatórios de Benchmark
-- **Suíte Principal e Federada ([`main_benchmark/`](../main_benchmark/README.md)):**
+- **Suíte Principal, Federada e Ponto Fixo ([`main_benchmark/`](../main_benchmark/README.md)):**
   - [`main_benchmark/main_benchmark_report.md`](../main_benchmark/main_benchmark_report.md) — Avaliação comparativa completa nos 8 datasets reais e sintéticos (Peak RSS, acurácia holdout/prequential, speedup e Tiers de memória).
   - [`main_benchmark/hyperparam_report.md`](../main_benchmark/hyperparam_report.md) — Estudo de sensibilidade e curvas de Pareto de hiperparâmetros.
   - [`main_benchmark/federated_benchmark_report.md`](../main_benchmark/federated_benchmark_report.md) — Avaliação multi-cliente federada (`Fed-Forest` & `Fed-VFDT`) nos 8 datasets em regime Non-IID (`Dirichlet α=0.3`) e IID ($K=10$, $\le 77{,}01\text{ KB}$ SRAM/cliente).
+  - [`main_benchmark/fixed_point_benchmark_report.md`](../main_benchmark/fixed_point_benchmark_report.md) — Paridade `Q16.16` Zero-Libm (`-DHT_USE_FIXED_POINT`) vs `float32` nos 8 datasets (High Tier e Tier 4).
+  - [`main_benchmark/federated_fixed_point_report.md`](../main_benchmark/federated_fixed_point_report.md) — Paridade federada `Q16.16` vs `float32` nos 8 datasets em Non-IID e IID (112 combinações).
 - **Suíte Especializada de Paridade e Transporte ([`benchmarks/`](../benchmarks/README.md)):**
   - [`benchmarks/benchmark_report.md`](../benchmarks/benchmark_report.md) — Paridade de Classificação Estacionária (`VFDT` C11 vs River vs Scikit-Learn).
   - [`benchmarks/memory_benchmark_report.md`](../benchmarks/memory_benchmark_report.md) — Escalonamento sob extrema restrição de RAM (Tier 256, Tier 8 e Tier 4 com *Promise Deactivation*).
@@ -61,6 +63,7 @@ Além das páginas desta Wiki, o repositório principal mantém notas matemátic
 - **Emulação Hardware-in-the-Loop em ESP32 e ARM Cortex-M3:**
   - [`emulation/esp32/esp32_emulation_report.md`](../emulation/esp32/esp32_emulation_report.md) — Validação em firmware ESP-IDF FreeRTOS sob emulação QEMU Xtensa @ 240 MHz com cronometria de ciclos de clock e comprovação de 0 B de Heap dinâmico.
   - [`emulation/cortex-m3/cortex_m3_emulation_report.md`](../emulation/cortex-m3/cortex_m3_emulation_report.md) — Validação bare-metal em TI Stellaris LM3S6965 (ARM Cortex-M3 @ 50 MHz, Tier 4 $\le 64\text{ KB}$ SRAM) sob QEMU com SysTick e 0 B de Heap dinâmico.
+  - [`emulation/cortex-m3/cortex_m3_fixed_point_report.md`](../emulation/cortex-m3/cortex_m3_fixed_point_report.md) — Comparativo bare-metal `float32` (`soft-fp`) vs `Q16.16` Zero-Libm em ARM Cortex-M3 @ 50 MHz (`-25,6%` Flash `.text`, `1,86×–4,48×` speedup SysTick, 0 símbolos `soft-fp`/`libm`).
 
 ---
 

@@ -15,6 +15,24 @@
 #include "ht_tree.h"
 #include "ht_drift.h"
 
+static ht_float_t e2e_u01(uint32_t *lcg) {
+    *lcg = (*lcg) * 1664525U + 1013904223U;
+#ifdef HT_USE_FIXED_POINT
+    return (ht_float_t)((*lcg) & 0xFFFFU);
+#else
+    return (ht_float_t)((*lcg) & 0xFFFFU) / (ht_float_t)65536.0;
+#endif
+}
+
+static ht_float_t e2e_u01_byte(uint32_t *lcg) {
+    *lcg = (*lcg) * 1664525U + 1013904223U;
+#ifdef HT_USE_FIXED_POINT
+    return (ht_float_t)(((*lcg) & 0xFFU) << 8);
+#else
+    return (ht_float_t)((*lcg) & 0xFFU) / (ht_float_t)256.0;
+#endif
+}
+
 static void test_e2e_sample_vector_ingestion(void) {
     ht_value_t x[HT_MAX_FEATURES];
     ht_feature_type_t types[HT_MAX_FEATURES];
@@ -22,7 +40,7 @@ static void test_e2e_sample_vector_ingestion(void) {
     /* Configure mixed schema: numeric (0..9), categorical (10..13), missing (14..15) */
     for (uint8_t i = 0; i < 10; ++i) {
         types[i] = HT_FEAT_NUMERIC;
-        x[i].num = (ht_float_t)(i * 1.5 - 5.0);
+        x[i].num = HT_SUB(HT_MUL(HT_FROM_UINT(i), HT_CONST(1.5)), HT_CONST(5.0));
     }
     for (uint8_t i = 10; i < 14; ++i) {
         types[i] = HT_FEAT_CATEGORICAL;
@@ -31,7 +49,7 @@ static void test_e2e_sample_vector_ingestion(void) {
 
     /* Missing values */
     types[14] = HT_FEAT_NUMERIC;
-    x[14].num = (ht_float_t)(0.0 / 0.0); /* NaN */
+    x[14].num = HT_NAN_VAL; /* NaN */
 
     types[15] = HT_FEAT_CATEGORICAL;
     x[15].cat = -1; /* Missing categorical */
@@ -67,45 +85,44 @@ static void test_e2e_sample_vector_ingestion(void) {
 static void test_e2e_math_numerical_pipeline(void) {
     /* Test normal CDF: Phi(z) = 0.5 * (1 + erf(z / sqrt(2))) */
     ht_float_t z_vals[] = {
-        (ht_float_t)-3.0,
-        (ht_float_t)-1.96,
-        (ht_float_t)0.0,
-        (ht_float_t)1.96,
-        (ht_float_t)3.0
+        HT_CONST(-3.0),
+        HT_CONST(-1.96),
+        HT_CONST(0.0),
+        HT_CONST(1.96),
+        HT_CONST(3.0)
     };
-    ht_float_t prev_cdf = (ht_float_t)-1.0;
+    ht_float_t prev_cdf = HT_CONST(-1.0);
 
     for (size_t i = 0; i < sizeof(z_vals) / sizeof(z_vals[0]); ++i) {
         ht_float_t z = z_vals[i];
-        ht_float_t cdf = (ht_float_t)0.5 * ((ht_float_t)1.0 + HT_ERF(z / HT_SQRT2));
+        ht_float_t cdf = HT_MUL(HT_CONST(0.5), HT_ADD(HT_CONST(1.0), HT_ERF(HT_DIV(z, HT_SQRT2))));
 
         HT_ASSERT(HT_ISFINITE(cdf));
-        HT_ASSERT(cdf >= (ht_float_t)0.0 && cdf <= (ht_float_t)1.0);
+        HT_ASSERT(cdf >= HT_CONST(0.0) && cdf <= HT_CONST(1.0));
         HT_ASSERT(cdf > prev_cdf); /* Monotonically strictly increasing */
         prev_cdf = cdf;
     }
 
     /* Phi(0) must be exactly 0.5 */
-    ht_float_t cdf_zero = (ht_float_t)0.5 * ((ht_float_t)1.0 + HT_ERF((ht_float_t)0.0 / HT_SQRT2));
-    HT_ASSERT_FLOAT_NEAR(cdf_zero, (ht_float_t)0.5, 1e-6);
+    ht_float_t cdf_zero = HT_MUL(HT_CONST(0.5), HT_ADD(HT_CONST(1.0), HT_ERF(HT_DIV(HT_CONST(0.0), HT_SQRT2))));
+    HT_ASSERT_FLOAT_NEAR(cdf_zero, HT_CONST(0.5), HT_TEST_TOL(1e-6));
 
     /* Phi(1.96) is approximately 0.975002 */
-    ht_float_t cdf_196 = (ht_float_t)0.5 * ((ht_float_t)1.0 + HT_ERF((ht_float_t)1.95996398454 / HT_SQRT2));
-    HT_ASSERT_FLOAT_NEAR(cdf_196, (ht_float_t)0.975, 1e-3);
+    ht_float_t cdf_196 = HT_MUL(HT_CONST(0.5), HT_ADD(HT_CONST(1.0), HT_ERF(HT_DIV(HT_CONST(1.95996398454), HT_SQRT2))));
+    HT_ASSERT_FLOAT_NEAR(cdf_196, HT_CONST(0.975), HT_TEST_TOL(1e-3));
 
-    /* Simulate Hoeffding bound: epsilon = sqrt((R^2 * ln(1/delta)) / (2n)) */
-    ht_float_t r = HT_LOG2((ht_float_t)HT_MAX_CLASSES); /* log2(4) = 2.0 */
-    ht_float_t delta = (ht_float_t)1e-7;
-    ht_float_t ln_inv_delta = HT_LOG((ht_float_t)1.0 / delta);
+    /* Simulate Hoeffding bound: epsilon = sqrt((R^2 * ln(1/delta)) / (2n)) for delta = 1e-7 */
+    ht_float_t r = HT_LOG2(HT_FROM_UINT(HT_MAX_CLASSES)); /* log2(4) = 2.0 */
+    ht_float_t ln_inv_delta = HT_MUL(HT_CONST(7.0), HT_LN10);
 
-    ht_float_t prev_eps = (ht_float_t)1e9;
-    ht_float_t sample_counts[] = { (ht_float_t)200.0, (ht_float_t)1000.0, (ht_float_t)10000.0 };
+    ht_float_t prev_eps = HT_INFINITY;
+    ht_float_t sample_counts[] = { HT_CONST(200.0), HT_CONST(1000.0), HT_CONST(10000.0) };
 
     for (size_t i = 0; i < 3; ++i) {
         ht_float_t n = sample_counts[i];
-        ht_float_t eps = HT_SQRT((r * r * ln_inv_delta) / ((ht_float_t)2.0 * n));
+        ht_float_t eps = ht_hoeffding_bound_ln(r, ln_inv_delta, n);
         HT_ASSERT(HT_ISFINITE(eps));
-        HT_ASSERT(eps > (ht_float_t)0.0);
+        HT_ASSERT(eps > HT_CONST(0.0));
         HT_ASSERT(eps < prev_eps); /* Epsilon shrinks as n grows */
         prev_eps = eps;
     }
@@ -126,8 +143,8 @@ static void test_e2e_memory_split_simulation(void) {
     ht_node_t *root = ht_node_get(&s_e2e_pool, root_idx);
     HT_ASSERT_NOT_NULL(root);
     root->stats_idx = root_stats;
-    root->class_counts[0] = (ht_float_t)120.0;
-    root->class_counts[1] = (ht_float_t)80.0;
+    root->class_counts[0] = HT_CONST(120.0);
+    root->class_counts[1] = HT_CONST(80.0);
 
     /* 2. Simulate split event on root */
     uint16_t mother_stats_idx = root->stats_idx;
@@ -137,7 +154,7 @@ static void test_e2e_memory_split_simulation(void) {
     root->stats_idx = HT_INVALID_IDX;
     root->flags &= ~HT_NODE_IS_LEAF;
     root->feature_idx = 0;
-    root->split_val.threshold = (ht_float_t)2.5;
+    root->split_val.threshold = HT_CONST(2.5);
 
     /* Return mother's stats_idx to stats_pool BEFORE allocating children's stats */
     ht_stats_free(&s_e2e_pool, mother_stats_idx);
@@ -265,10 +282,10 @@ static void test_e2e_stream_observer_pipeline(void) {
     /* Synthetic stream generator: 600 samples (200 per class) with distinct distributions */
     for (uint32_t i = 0; i < 600; ++i) {
         uint8_t y = (uint8_t)(i % n_classes);
-        ht_float_t weight = (ht_float_t)1.0;
+        ht_float_t weight = HT_CONST(1.0);
 
         /* Increment leaf class counts */
-        leaf->class_counts[y] += weight;
+        leaf->class_counts[y] = HT_ADD(leaf->class_counts[y], weight);
 
         /* Prepare feature vector */
         ht_value_t x[HT_MAX_FEATURES];
@@ -276,15 +293,16 @@ static void test_e2e_stream_observer_pipeline(void) {
         /* Numeric features */
         for (uint8_t f = 0; f < n_numeric; ++f) {
             /* Class separation: class y has center at (y * 10.0 + f * 2.0) */
-            ht_float_t base = (ht_float_t)(y * 10.0 + f * 2.0);
+            ht_float_t base = HT_ADD(HT_MUL(HT_FROM_UINT(y), HT_CONST(10.0)),
+                                     HT_MUL(HT_FROM_UINT(f), HT_CONST(2.0)));
             /* Pseudo-random variation within [-3, 3] based on sample index */
-            ht_float_t offset = (ht_float_t)((int32_t)((i * 37 + f * 13) % 7) - 3);
+            ht_float_t offset = HT_FROM_INT((int32_t)((i * 37 + f * 13) % 7) - 3);
 
             /* Inject missing value (NaN) periodically on feature 11 to test robustness */
             if (f == 11 && (i % 25 == 0)) {
-                x[f].num = (ht_float_t)(0.0 / 0.0);
+                x[f].num = HT_NAN_VAL;
             } else {
-                x[f].num = base + offset;
+                x[f].num = HT_ADD(base, offset);
             }
 
             /* Update Gaussian observer */
@@ -307,10 +325,10 @@ static void test_e2e_stream_observer_pipeline(void) {
     }
 
     /* 1. Verify class distribution in leaf */
-    HT_ASSERT_FLOAT_EQ(leaf->class_counts[0], (ht_float_t)200.0);
-    HT_ASSERT_FLOAT_EQ(leaf->class_counts[1], (ht_float_t)200.0);
-    HT_ASSERT_FLOAT_EQ(leaf->class_counts[2], (ht_float_t)200.0);
-    HT_ASSERT_FLOAT_EQ(leaf->class_counts[3], (ht_float_t)0.0);
+    HT_ASSERT_FLOAT_EQ(leaf->class_counts[0], HT_CONST(200.0));
+    HT_ASSERT_FLOAT_EQ(leaf->class_counts[1], HT_CONST(200.0));
+    HT_ASSERT_FLOAT_EQ(leaf->class_counts[2], HT_CONST(200.0));
+    HT_ASSERT_FLOAT_EQ(leaf->class_counts[3], HT_CONST(0.0));
 
     /* 2. Verify all numeric feature observers */
     for (uint8_t f = 0; f < n_numeric; ++f) {
@@ -318,24 +336,24 @@ static void test_e2e_stream_observer_pipeline(void) {
             ht_gaussian_obs_t *g = &stats->observers[f].num[c];
             if (f == 11) {
                 /* Samples with NaN were safely skipped */
-                HT_ASSERT(g->count < (ht_float_t)200.0 && g->count >= (ht_float_t)190.0);
+                HT_ASSERT(g->count < HT_CONST(200.0) && g->count >= HT_CONST(190.0));
             } else {
-                HT_ASSERT_FLOAT_EQ(g->count, (ht_float_t)200.0);
+                HT_ASSERT_FLOAT_EQ(g->count, HT_CONST(200.0));
             }
 
             /* Verify mean and variance are strictly finite and sensible */
             HT_ASSERT(HT_ISFINITE(g->mean));
             ht_float_t var = ht_gaussian_variance(g);
             HT_ASSERT(HT_ISFINITE(var));
-            HT_ASSERT(var > (ht_float_t)0.0);
+            HT_ASSERT(var > HT_CONST(0.0));
             HT_ASSERT(g->min_val < g->max_val);
 
             /* Verify conditional density and log-density */
             ht_float_t p = ht_gaussian_cond_proba(g, g->mean);
-            HT_ASSERT(p > (ht_float_t)0.0);
+            HT_ASSERT(p > HT_CONST(0.0));
             ht_float_t log_p = ht_gaussian_cond_log_proba(g, g->mean);
             HT_ASSERT(HT_ISFINITE(log_p));
-            HT_ASSERT_FLOAT_NEAR(HT_EXP(log_p), p, 1e-4);
+            HT_ASSERT_FLOAT_NEAR(HT_EXP(log_p), p, HT_TEST_TOL(1e-4));
         }
 
         /* 3. Evaluate split candidates for this numeric feature */
@@ -354,9 +372,9 @@ static void test_e2e_stream_observer_pipeline(void) {
 
             for (uint8_t c = 0; c < n_classes; ++c) {
                 ht_float_t expected_total = stats->observers[f].num[c].count;
-                HT_ASSERT_FLOAT_NEAR(lhs[c] + rhs[c], expected_total, 1e-3);
-                HT_ASSERT(lhs[c] >= (ht_float_t)0.0);
-                HT_ASSERT(rhs[c] >= (ht_float_t)0.0);
+                HT_ASSERT_FLOAT_NEAR(HT_ADD(lhs[c], rhs[c]), expected_total, HT_TEST_TOL(2e-2));
+                HT_ASSERT(lhs[c] >= HT_CONST(0.0));
+                HT_ASSERT(rhs[c] >= HT_CONST(0.0));
             }
         }
     }
@@ -366,14 +384,14 @@ static void test_e2e_stream_observer_pipeline(void) {
         ht_categorical_obs_t *cat = &stats->observers[f].cat;
 
         for (uint8_t c = 0; c < n_classes; ++c) {
-            ht_float_t class_cat_total = (ht_float_t)0.0;
+            ht_float_t class_cat_total = HT_CONST(0.0);
             for (uint8_t v = 0; v < HT_MAX_CATEGORIES; ++v) {
-                class_cat_total += cat->counts[c][v];
+                class_cat_total = HT_ADD(class_cat_total, cat->counts[c][v]);
             }
             if (f == 15) {
-                HT_ASSERT(class_cat_total <= (ht_float_t)200.0 && class_cat_total >= (ht_float_t)190.0);
+                HT_ASSERT(class_cat_total <= HT_CONST(200.0) && class_cat_total >= HT_CONST(190.0));
             } else {
-                HT_ASSERT_FLOAT_EQ(class_cat_total, (ht_float_t)200.0);
+                HT_ASSERT_FLOAT_EQ(class_cat_total, HT_CONST(200.0));
             }
         }
 
@@ -386,11 +404,11 @@ static void test_e2e_stream_observer_pipeline(void) {
                 ht_categorical_binary_split_dists(cat, n_classes, cat_v, lhs, rhs);
 
                 for (uint8_t c = 0; c < n_classes; ++c) {
-                    ht_float_t class_cat_total = (ht_float_t)0.0;
+                    ht_float_t class_cat_total = HT_CONST(0.0);
                     for (uint8_t v = 0; v < HT_MAX_CATEGORIES; ++v) {
-                        class_cat_total += cat->counts[c][v];
+                        class_cat_total = HT_ADD(class_cat_total, cat->counts[c][v]);
                     }
-                    HT_ASSERT_FLOAT_EQ(lhs[c] + rhs[c], class_cat_total);
+                    HT_ASSERT_FLOAT_EQ(HT_ADD(lhs[c], rhs[c]), class_cat_total);
                 }
             }
         }
@@ -400,15 +418,15 @@ static void test_e2e_stream_observer_pipeline(void) {
     ht_split_candidate_t cand;
     ht_split_candidate_init(&cand);
     cand.feature_idx = 0;
-    cand.split_val.threshold = (ht_float_t)15.0;
-    cand.merit = (ht_float_t)0.42;
+    cand.split_val.threshold = HT_CONST(15.0);
+    cand.merit = HT_CONST(0.42);
     cand.is_categorical = 0;
     ht_gaussian_binary_split_dists(stats->observers[0].num, n_classes, cand.split_val.threshold,
                                    cand.lhs_dist, cand.rhs_dist);
 
     HT_ASSERT_EQ(cand.feature_idx, 0);
     HT_ASSERT_EQ(cand.is_categorical, 0);
-    HT_ASSERT_FLOAT_EQ(cand.merit, (ht_float_t)0.42);
+    HT_ASSERT_FLOAT_EQ(cand.merit, HT_CONST(0.42));
 
     /* 6. Clean up: recycle leaf stats back to pool */
     ht_stats_free(&s_e2e_pool, leaf_stats_idx);
@@ -453,34 +471,34 @@ static void test_e2e_split_decision_pipeline(void) {
     for (int i = 0; i < 200; i++) {
         /* Sample for Class 0 */
         ht_value_t x0[HT_MAX_FEATURES];
-        x0[0].num = (ht_float_t)(1.0 + (i % 30) * 0.1); /* [1.0 .. 3.9] */
-        x0[1].num = (ht_float_t)((i % 50) * 0.2);        /* [0.0 .. 9.8] noise */
-        x0[2].cat = 0;                                   /* Category 0 */
-        x0[3].cat = (int32_t)(i % 4);                    /* Category noise */
+        x0[0].num = HT_ADD(HT_CONST(1.0), HT_MUL(HT_FROM_INT(i % 30), HT_CONST(0.1))); /* [1.0 .. 3.9] */
+        x0[1].num = HT_MUL(HT_FROM_INT(i % 50), HT_CONST(0.2));                         /* [0.0 .. 9.8] noise */
+        x0[2].cat = 0;                                                                   /* Category 0 */
+        x0[3].cat = (int32_t)(i % 4);                                                    /* Category noise */
 
-        root->class_counts[0] += (ht_float_t)1.0;
-        ht_gaussian_update(stats->observers[0].num, 0, x0[0].num, (ht_float_t)1.0);
-        ht_gaussian_update(stats->observers[1].num, 0, x0[1].num, (ht_float_t)1.0);
-        ht_categorical_update(&stats->observers[2].cat, 0, x0[2].cat, (ht_float_t)1.0);
-        ht_categorical_update(&stats->observers[3].cat, 0, x0[3].cat, (ht_float_t)1.0);
+        root->class_counts[0] = HT_ADD(root->class_counts[0], HT_CONST(1.0));
+        ht_gaussian_update(stats->observers[0].num, 0, x0[0].num, HT_CONST(1.0));
+        ht_gaussian_update(stats->observers[1].num, 0, x0[1].num, HT_CONST(1.0));
+        ht_categorical_update(&stats->observers[2].cat, 0, x0[2].cat, HT_CONST(1.0));
+        ht_categorical_update(&stats->observers[3].cat, 0, x0[3].cat, HT_CONST(1.0));
 
         /* Sample for Class 1 */
         ht_value_t x1[HT_MAX_FEATURES];
-        x1[0].num = (ht_float_t)(6.0 + (i % 30) * 0.1); /* [6.0 .. 8.9] */
-        x1[1].num = (ht_float_t)((i % 50) * 0.2);        /* [0.0 .. 9.8] noise */
-        x1[2].cat = 1;                                   /* Category 1 */
-        x1[3].cat = (int32_t)(i % 4);                    /* Category noise */
+        x1[0].num = HT_ADD(HT_CONST(6.0), HT_MUL(HT_FROM_INT(i % 30), HT_CONST(0.1))); /* [6.0 .. 8.9] */
+        x1[1].num = HT_MUL(HT_FROM_INT(i % 50), HT_CONST(0.2));                         /* [0.0 .. 9.8] noise */
+        x1[2].cat = 1;                                                                   /* Category 1 */
+        x1[3].cat = (int32_t)(i % 4);                                                    /* Category noise */
 
-        root->class_counts[1] += (ht_float_t)1.0;
-        ht_gaussian_update(stats->observers[0].num, 1, x1[0].num, (ht_float_t)1.0);
-        ht_gaussian_update(stats->observers[1].num, 1, x1[1].num, (ht_float_t)1.0);
-        ht_categorical_update(&stats->observers[2].cat, 1, x1[2].cat, (ht_float_t)1.0);
-        ht_categorical_update(&stats->observers[3].cat, 1, x1[3].cat, (ht_float_t)1.0);
+        root->class_counts[1] = HT_ADD(root->class_counts[1], HT_CONST(1.0));
+        ht_gaussian_update(stats->observers[0].num, 1, x1[0].num, HT_CONST(1.0));
+        ht_gaussian_update(stats->observers[1].num, 1, x1[1].num, HT_CONST(1.0));
+        ht_categorical_update(&stats->observers[2].cat, 1, x1[2].cat, HT_CONST(1.0));
+        ht_categorical_update(&stats->observers[3].cat, 1, x1[3].cat, HT_CONST(1.0));
     }
 
-    HT_ASSERT_FLOAT_EQ(root->class_counts[0], (ht_float_t)200.0);
-    HT_ASSERT_FLOAT_EQ(root->class_counts[1], (ht_float_t)200.0);
-    ht_float_t total_weight = root->class_counts[0] + root->class_counts[1]; /* 400.0 */
+    HT_ASSERT_FLOAT_EQ(root->class_counts[0], HT_CONST(200.0));
+    HT_ASSERT_FLOAT_EQ(root->class_counts[1], HT_CONST(200.0));
+    ht_float_t total_weight = HT_ADD(root->class_counts[0], root->class_counts[1]); /* 400.0 */
 
     /* 5. Evaluate split using Gini criterion */
     const ht_criterion_vtable_t *crit = ht_criterion_get_vtable(HT_CRIT_GINI);
@@ -489,21 +507,20 @@ static void test_e2e_split_decision_pipeline(void) {
     ht_split_candidate_t best, second_best;
     ht_find_best_split_candidates(stats, root->class_counts, types,
                                   n_features, n_classes, crit,
-                                  (ht_float_t)0.01, true, &best, &second_best);
+                                  HT_CONST(0.01), true, &best, &second_best);
 
     /* 6. Verify top candidates: either Feature 0 or Feature 2 */
-    HT_ASSERT_FLOAT_NEAR(best.merit, (ht_float_t)1.0, 1e-4);
+    HT_ASSERT_FLOAT_NEAR(best.merit, HT_CONST(1.0), HT_TEST_TOL(1e-4));
     HT_ASSERT(best.feature_idx == 0 || best.feature_idx == 2);
 
     /* 7. Compute Hoeffding bound for delta = 1e-7 and total_weight = 400.0 */
     ht_float_t r = crit->range_of_merit(root->class_counts, n_classes);
-    ht_float_t delta = (ht_float_t)1e-7;
-    ht_float_t tau = (ht_float_t)0.05;
-    ht_float_t eps = ht_hoeffding_bound(r, delta, total_weight);
-    HT_ASSERT_FLOAT_NEAR(eps, (ht_float_t)0.141942, 1e-3);
+    ht_float_t tau = HT_CONST(0.05);
+    ht_float_t eps = ht_hoeffding_bound_ln(r, HT_MUL(HT_CONST(7.0), HT_LN10), total_weight);
+    HT_ASSERT_FLOAT_NEAR(eps, HT_CONST(0.141942), HT_TEST_TOL(1e-3));
 
     /* 8. Split decision with tau */
-    HT_ASSERT(ht_should_split(&best, &second_best, (ht_float_t)0.0, tau));
+    HT_ASSERT(ht_should_split(&best, &second_best, HT_CONST(0.0), tau));
 
     /* 9. Execute split: allocate left and right children in the pool */
     uint16_t left_child = ht_node_alloc(&pool);
@@ -560,8 +577,8 @@ static void test_e2e_full_tree_prequential_and_serialization(void) {
     params.feature_types[3] = HT_FEAT_NUMERIC;
     params.leaf_prediction = HT_LEAF_NBA;
     params.grace_period = 50;
-    params.delta = (ht_float_t)1e-4;
-    params.tau = (ht_float_t)0.05;
+    params.delta = HT_CONST(1e-4);
+    params.tau = HT_CONST(0.05);
 
     HT_ASSERT_EQ(ht_tree_init(&tree, &params), HT_OK);
     HT_ASSERT(sizeof(ht_tree_t) <= 1024 * 1024);
@@ -575,23 +592,23 @@ static void test_e2e_full_tree_prequential_and_serialization(void) {
         memset(x, 0, sizeof(x));
 
         /* Deterministic pseudo-random generation without dynamic allocation */
-        ht_float_t r1 = (ht_float_t)((i * 37 + 13) % 100) / (ht_float_t)100.0;
-        ht_float_t r2 = (ht_float_t)((i * 59 + 29) % 100) / (ht_float_t)100.0;
+        ht_float_t r1 = HT_DIV(HT_FROM_INT((i * 37 + 13) % 100), HT_CONST(100.0));
+        ht_float_t r2 = HT_DIV(HT_FROM_INT((i * 59 + 29) % 100), HT_CONST(100.0));
 
         uint8_t y;
         if (i % 2 == 0) {
             /* Class 0: x[0] in [1.0, 4.0], other features are overlapping / noise */
-            x[0].num = (ht_float_t)1.0 + (ht_float_t)3.0 * r1;
-            x[1].num = (ht_float_t)5.0 + (ht_float_t)3.0 * r2; /* overlapping */
-            x[2].cat = (int32_t)(i % 3);                        /* independent categorical */
-            x[3].num = r1 * (ht_float_t)10.0;                  /* noise */
+            x[0].num = HT_ADD(HT_CONST(1.0), HT_MUL(HT_CONST(3.0), r1));
+            x[1].num = HT_ADD(HT_CONST(5.0), HT_MUL(HT_CONST(3.0), r2)); /* overlapping */
+            x[2].cat = (int32_t)(i % 3);                                  /* independent categorical */
+            x[3].num = HT_MUL(r1, HT_CONST(10.0));                        /* noise */
             y = 0;
         } else {
             /* Class 1: x[0] in [6.0, 9.5], other features are overlapping / noise */
-            x[0].num = (ht_float_t)6.0 + (ht_float_t)3.5 * r1;
-            x[1].num = (ht_float_t)5.0 + (ht_float_t)3.0 * r2; /* overlapping */
-            x[2].cat = (int32_t)(i % 3);                        /* independent categorical */
-            x[3].num = r2 * (ht_float_t)10.0;                  /* noise */
+            x[0].num = HT_ADD(HT_CONST(6.0), HT_MUL(HT_CONST(3.5), r1));
+            x[1].num = HT_ADD(HT_CONST(5.0), HT_MUL(HT_CONST(3.0), r2)); /* overlapping */
+            x[2].cat = (int32_t)(i % 3);                                  /* independent categorical */
+            x[3].num = HT_MUL(r2, HT_CONST(10.0));                        /* noise */
             y = 1;
         }
 
@@ -602,20 +619,18 @@ static void test_e2e_full_tree_prequential_and_serialization(void) {
             if (i >= 800) late_correct++;
         }
 
-        HT_ASSERT_EQ(ht_tree_learn_one(&tree, x, y, (ht_float_t)1.0), HT_OK);
+        HT_ASSERT_EQ(ht_tree_learn_one(&tree, x, y, HT_CONST(1.0)), HT_OK);
     }
 
     /* 3. Verify that learning and splitting took place */
     HT_ASSERT(tree.n_decision_nodes >= 1);
     HT_ASSERT(tree.n_active_leaves >= 2);
     HT_ASSERT(tree.max_depth_seen >= 1);
-    HT_ASSERT(tree.train_weight_seen >= (ht_float_t)1000.0);
+    HT_ASSERT(tree.train_weight_seen >= HT_CONST(1000.0));
 
     /* 4. Verify accuracy improvement: late accuracy (> 90%) must significantly exceed early */
-    double early_acc = (double)early_correct / 100.0;
-    double late_acc = (double)late_correct / 200.0;
-    HT_ASSERT(late_acc >= 0.90);
-    HT_ASSERT(late_acc >= early_acc);
+    HT_ASSERT(late_correct >= 180);
+    HT_ASSERT(late_correct >= early_correct * 2);
 
     /* 5. Memory budget check */
     HT_ASSERT(ht_memory_bytes_used(&tree.memory) <= 1024 * 1024);
@@ -637,10 +652,11 @@ static void test_e2e_full_tree_prequential_and_serialization(void) {
     for (int t = 0; t < 100; ++t) {
         ht_value_t x[HT_MAX_FEATURES];
         memset(x, 0, sizeof(x));
-        x[0].num = (ht_float_t)(t * 0.1);
-        x[1].num = (ht_float_t)(10.0 - t * 0.1);
+        ht_float_t ft = HT_MUL(HT_FROM_INT(t), HT_CONST(0.1));
+        x[0].num = ft;
+        x[1].num = HT_SUB(HT_CONST(10.0), ft);
         x[2].cat = t % 2;
-        x[3].num = (ht_float_t)5.0;
+        x[3].num = HT_CONST(5.0);
 
         ht_float_t p_orig[HT_MAX_CLASSES];
         ht_float_t p_load[HT_MAX_CLASSES];
@@ -648,8 +664,8 @@ static void test_e2e_full_tree_prequential_and_serialization(void) {
         HT_ASSERT_EQ(ht_tree_predict_proba(&tree, x, p_orig), HT_OK);
         HT_ASSERT_EQ(ht_tree_predict_proba(&loaded_tree, x, p_load), HT_OK);
 
-        HT_ASSERT_FLOAT_NEAR(p_orig[0], p_load[0], 1e-6);
-        HT_ASSERT_FLOAT_NEAR(p_orig[1], p_load[1], 1e-6);
+        HT_ASSERT_FLOAT_NEAR(p_orig[0], p_load[0], HT_TEST_TOL(1e-6));
+        HT_ASSERT_FLOAT_NEAR(p_orig[1], p_load[1], HT_TEST_TOL(1e-6));
         HT_ASSERT_EQ(ht_tree_predict(&tree, x), ht_tree_predict(&loaded_tree, x));
     }
 }
@@ -674,19 +690,18 @@ static void test_e2e_drift_stream_pipeline(void) {
     uint32_t lcg = 987654321U;
 
     for (uint32_t t = 0; t < 1500; ++t) {
-        lcg = lcg * 1664525U + 1013904223U;
-        ht_float_t noise = ((ht_float_t)(lcg & 0xFFFFU) / (ht_float_t)65536.0 - (ht_float_t)0.5) * (ht_float_t)0.4;
+        ht_float_t noise = HT_MUL(HT_SUB(e2e_u01(&lcg), HT_CONST(0.5)), HT_CONST(0.4));
 
         ht_float_t center;
         if (t < 500) {
-            center = (ht_float_t)0.0;
+            center = HT_CONST(0.0);
         } else if (t < 1000) {
-            center = (ht_float_t)5.0;
+            center = HT_CONST(5.0);
         } else {
-            center = (ht_float_t)-3.0;
+            center = HT_CONST(-3.0);
         }
 
-        ht_float_t val = center + noise;
+        ht_float_t val = HT_ADD(center, noise);
         bool drift = ht_adwin_update(ad, val);
 
         if (drift) {
@@ -703,7 +718,7 @@ static void test_e2e_drift_stream_pipeline(void) {
     HT_ASSERT(total_drifts_r3 > 0);
 
     /* Final estimation must adapt close to -3.0 */
-    HT_ASSERT_FLOAT_NEAR(ht_adwin_get_estimation(ad), (ht_float_t)-3.0, (ht_float_t)0.3);
+    HT_ASSERT_FLOAT_NEAR(ht_adwin_get_estimation(ad), HT_CONST(-3.0), HT_CONST(0.3));
 
     /* Combined memory budget check: ADWIN pool + Tree memory <= 1 MB */
     size_t adwin_bytes = ht_adwin_pool_bytes_used(&adwin_pool);
@@ -721,9 +736,9 @@ static void test_e2e_hat_abrupt_drift_recovery(void) {
     ht_config_params_t params;
     ht_default_hat_params(&params, 2, 2);
     params.grace_period = 50;
-    params.delta = (ht_float_t)1e-3;
+    params.delta = HT_CONST(1e-3);
     params.drift_window_threshold = 50;
-    params.switch_significance = (ht_float_t)0.05;
+    params.switch_significance = HT_CONST(0.05);
 
     ht_tree_t tree;
     HT_ASSERT_EQ(ht_tree_init_hat(&tree, &params, &adwin_pool), HT_OK);
@@ -734,12 +749,10 @@ static void test_e2e_hat_abrupt_drift_recovery(void) {
 
     /* Concept A: samples 0..999 (x0 > 0 -> class 1, else class 0) */
     for (uint32_t t = 0; t < 1000; ++t) {
-        lcg = lcg * 1664525U + 1013904223U;
-        ht_float_t x0 = ((ht_float_t)(lcg & 0xFFFFU) / (ht_float_t)32768.0) - (ht_float_t)1.0;
-        lcg = lcg * 1664525U + 1013904223U;
-        ht_float_t x1 = ((ht_float_t)(lcg & 0xFFFFU) / (ht_float_t)32768.0) - (ht_float_t)1.0;
+        ht_float_t x0 = HT_SUB(HT_MUL(e2e_u01(&lcg), HT_CONST(2.0)), HT_CONST(1.0));
+        ht_float_t x1 = HT_SUB(HT_MUL(e2e_u01(&lcg), HT_CONST(2.0)), HT_CONST(1.0));
 
-        uint8_t y = (x0 > (ht_float_t)0.0) ? 1 : 0;
+        uint8_t y = (x0 > HT_CONST(0.0)) ? 1 : 0;
         ht_value_t x[HT_MAX_FEATURES];
         memset(x, 0, sizeof(x));
         x[0].num = x0;
@@ -753,12 +766,12 @@ static void test_e2e_hat_abrupt_drift_recovery(void) {
             total_a++;
         }
 
-        HT_ASSERT_EQ(ht_tree_learn_one(&tree, x, y, (ht_float_t)1.0), HT_OK);
+        HT_ASSERT_EQ(ht_tree_learn_one(&tree, x, y, HT_CONST(1.0)), HT_OK);
     }
 
     /* Concept A prequential accuracy in late stage must be > 90% */
-    ht_float_t acc_a = (ht_float_t)correct_a / (ht_float_t)total_a;
-    HT_ASSERT(acc_a > (ht_float_t)0.90);
+    ht_float_t acc_a = HT_DIV(HT_FROM_UINT(correct_a), HT_FROM_UINT(total_a));
+    HT_ASSERT(acc_a > HT_CONST(0.90));
     HT_ASSERT(tree.memory.nodes_allocated > 1U); /* Tree has split */
 
     /* Concept B: samples 1000..2999 (abrupt concept inversion: x0 > 0 -> class 0, else 1) */
@@ -766,12 +779,10 @@ static void test_e2e_hat_abrupt_drift_recovery(void) {
     uint32_t total_b_late = 0;
 
     for (uint32_t t = 1000; t < 3000; ++t) {
-        lcg = lcg * 1664525U + 1013904223U;
-        ht_float_t x0 = ((ht_float_t)(lcg & 0xFFFFU) / (ht_float_t)32768.0) - (ht_float_t)1.0;
-        lcg = lcg * 1664525U + 1013904223U;
-        ht_float_t x1 = ((ht_float_t)(lcg & 0xFFFFU) / (ht_float_t)32768.0) - (ht_float_t)1.0;
+        ht_float_t x0 = HT_SUB(HT_MUL(e2e_u01(&lcg), HT_CONST(2.0)), HT_CONST(1.0));
+        ht_float_t x1 = HT_SUB(HT_MUL(e2e_u01(&lcg), HT_CONST(2.0)), HT_CONST(1.0));
 
-        uint8_t y = (x0 > (ht_float_t)0.0) ? 0 : 1;
+        uint8_t y = (x0 > HT_CONST(0.0)) ? 0 : 1;
         ht_value_t x[HT_MAX_FEATURES];
         memset(x, 0, sizeof(x));
         x[0].num = x0;
@@ -785,12 +796,12 @@ static void test_e2e_hat_abrupt_drift_recovery(void) {
             total_b_late++;
         }
 
-        HT_ASSERT_EQ(ht_tree_learn_one(&tree, x, y, (ht_float_t)1.0), HT_OK);
+        HT_ASSERT_EQ(ht_tree_learn_one(&tree, x, y, HT_CONST(1.0)), HT_OK);
     }
 
     /* Concept B prequential accuracy in late stage must recover to > 85% */
-    ht_float_t acc_b_late = (ht_float_t)correct_b_late / (ht_float_t)total_b_late;
-    HT_ASSERT(acc_b_late > (ht_float_t)0.85);
+    ht_float_t acc_b_late = HT_DIV(HT_FROM_UINT(correct_b_late), HT_FROM_UINT(total_b_late));
+    HT_ASSERT(acc_b_late > HT_CONST(0.85));
 
     /* Assert alternate tree lifecycle events occurred */
     HT_ASSERT(tree.n_alternate_trees > 0U);
@@ -842,13 +853,12 @@ static void test_e2e_continuous_regression_stream_pipeline(void) {
 
         /* Features 0..7: Continuous numeric */
         for (uint8_t f = 0; f < 8; ++f) {
-            lcg = lcg * 1664525U + 1013904223U;
-            ht_float_t raw = (ht_float_t)(lcg & 0xFFFFU) / (ht_float_t)65536.0; /* [0.0 .. 1.0) */
+            ht_float_t raw = e2e_u01(&lcg); /* [0.0 .. 1.0) */
             /* Feature 7 has occasional missing values (NaN) */
             if (f == 7 && (i % 25 == 0)) {
-                x[f].num = (ht_float_t)(0.0 / 0.0);
+                x[f].num = HT_NAN_VAL;
             } else {
-                x[f].num = (ht_float_t)(f * 5.0) + raw * (ht_float_t)10.0;
+                x[f].num = HT_ADD(HT_MUL(HT_FROM_UINT(f), HT_CONST(5.0)), HT_MUL(raw, HT_CONST(10.0)));
             }
         }
 
@@ -865,17 +875,19 @@ static void test_e2e_continuous_regression_stream_pipeline(void) {
         /* Features 12..15: Additional numeric features */
         for (uint8_t f = 12; f < HT_MAX_FEATURES; ++f) {
             lcg = lcg * 1664525U + 1013904223U;
-            x[f].num = (ht_float_t)((lcg & 0xFFU) - 128);
+            x[f].num = HT_FROM_INT((int32_t)(lcg & 0xFFU) - 128);
         }
 
         /* Continuous regression target function:
          * y = 2.0 * x[0] - 1.5 * x[1] + 3.0 * (float)x[8] + noise
          */
-        lcg = lcg * 1664525U + 1013904223U;
-        ht_float_t noise = ((ht_float_t)(lcg & 0xFFU) / (ht_float_t)256.0 - (ht_float_t)0.5) * (ht_float_t)2.0;
-        ht_float_t y = (ht_float_t)2.0 * x[0].num - (ht_float_t)1.5 * x[1].num +
-                       (ht_float_t)3.0 * (ht_float_t)x[8].cat + noise;
-        ht_float_t weight = (ht_float_t)1.0;
+        ht_float_t noise = HT_MUL(HT_SUB(e2e_u01_byte(&lcg), HT_CONST(0.5)), HT_CONST(2.0));
+        ht_float_t y = HT_ADD(
+            HT_ADD(HT_SUB(HT_MUL(HT_CONST(2.0), x[0].num), HT_MUL(HT_CONST(1.5), x[1].num)),
+                   HT_MUL(HT_CONST(3.0), HT_FROM_INT(x[8].cat))),
+            noise
+        );
+        ht_float_t weight = HT_CONST(1.0);
 
         /* Update leaf target variance statistics */
         ht_var_update(&root->reg_stats, y, weight);
@@ -892,11 +904,11 @@ static void test_e2e_continuous_regression_stream_pipeline(void) {
     }
 
     /* 1. Verify target statistics in leaf */
-    HT_ASSERT_FLOAT_EQ(root->reg_stats.count, (ht_float_t)N_SAMPLES);
+    HT_ASSERT_FLOAT_EQ(root->reg_stats.count, HT_FROM_UINT(N_SAMPLES));
     HT_ASSERT(HT_ISFINITE(root->reg_stats.mean));
-    HT_ASSERT(root->reg_stats.m2 > (ht_float_t)0.0);
+    HT_ASSERT(root->reg_stats.m2 > HT_CONST(0.0));
     ht_float_t target_var = ht_var_value(&root->reg_stats);
-    HT_ASSERT(target_var > (ht_float_t)0.0);
+    HT_ASSERT(target_var > HT_CONST(0.0));
 
     /* 2. Verify all numeric regression observers */
     for (uint8_t f = 0; f < 8; ++f) {
@@ -904,43 +916,43 @@ static void test_e2e_continuous_regression_stream_pipeline(void) {
 
         /* All 5 slots must be populated and sorted by x_mean */
         for (uint8_t k = 0; k < HT_REG_NUM_SLOTS; ++k) {
-            HT_ASSERT(num_obs->slots[k].y_stats.count > (ht_float_t)0.0);
+            HT_ASSERT(num_obs->slots[k].y_stats.count > HT_CONST(0.0));
             HT_ASSERT(HT_ISFINITE(num_obs->slots[k].x_mean));
             HT_ASSERT(HT_ISFINITE(num_obs->slots[k].y_stats.mean));
-            HT_ASSERT(num_obs->slots[k].y_stats.m2 >= (ht_float_t)0.0);
+            HT_ASSERT(num_obs->slots[k].y_stats.m2 >= HT_CONST(0.0));
         }
         for (uint8_t k = 0; k < HT_REG_NUM_SLOTS - 1; ++k) {
             HT_ASSERT(num_obs->slots[k].x_mean <= num_obs->slots[k + 1].x_mean);
         }
 
         /* Check total weight conservation */
-        ht_float_t slot_w = (ht_float_t)0.0;
+        ht_float_t slot_w = HT_CONST(0.0);
         for (uint8_t k = 0; k < HT_REG_NUM_SLOTS; ++k) {
-            slot_w += num_obs->slots[k].y_stats.count;
+            slot_w = HT_ADD(slot_w, num_obs->slots[k].y_stats.count);
         }
         if (f == 7) {
             /* NaN samples skipped */
-            HT_ASSERT(slot_w < (ht_float_t)N_SAMPLES && slot_w >= (ht_float_t)(N_SAMPLES - 30));
+            HT_ASSERT(slot_w < HT_FROM_UINT(N_SAMPLES) && slot_w >= HT_FROM_UINT(N_SAMPLES - 30U));
         } else {
-            HT_ASSERT_FLOAT_EQ(slot_w, (ht_float_t)N_SAMPLES);
+            HT_ASSERT_FLOAT_EQ(slot_w, HT_FROM_UINT(N_SAMPLES));
         }
     }
 
     /* 3. Verify categorical regression observers */
     for (uint8_t f = 8; f < 12; ++f) {
         ht_reg_categorical_obs_t *cat_obs = &stats->observers[f].reg_cat;
-        ht_float_t cat_w = (ht_float_t)0.0;
+        ht_float_t cat_w = HT_CONST(0.0);
         for (uint8_t v = 0; v < HT_MAX_CATEGORIES; ++v) {
-            cat_w += cat_obs->cat_stats[v].count;
-            if (cat_obs->cat_stats[v].count > (ht_float_t)0.0) {
+            cat_w = HT_ADD(cat_w, cat_obs->cat_stats[v].count);
+            if (cat_obs->cat_stats[v].count > HT_CONST(0.0)) {
                 HT_ASSERT(HT_ISFINITE(cat_obs->cat_stats[v].mean));
-                HT_ASSERT(cat_obs->cat_stats[v].m2 >= (ht_float_t)0.0);
+                HT_ASSERT(cat_obs->cat_stats[v].m2 >= HT_CONST(0.0));
             }
         }
         if (f == 11) {
-            HT_ASSERT(cat_w < (ht_float_t)N_SAMPLES && cat_w >= (ht_float_t)(N_SAMPLES - 30));
+            HT_ASSERT(cat_w < HT_FROM_UINT(N_SAMPLES) && cat_w >= HT_FROM_UINT(N_SAMPLES - 30U));
         } else {
-            HT_ASSERT_FLOAT_EQ(cat_w, (ht_float_t)N_SAMPLES);
+            HT_ASSERT_FLOAT_EQ(cat_w, HT_FROM_UINT(N_SAMPLES));
         }
     }
 
@@ -990,24 +1002,20 @@ static void test_e2e_regression_split_decision_pipeline(void) {
 
     for (uint32_t i = 0; i < N_SAMPLES; ++i) {
         /* Feature 0: uniform in [0, 10] */
-        lcg = lcg * 1664525U + 1013904223U;
-        ht_float_t x0 = ((ht_float_t)(lcg & 0xFFFFU) / (ht_float_t)65536.0) * (ht_float_t)10.0;
+        ht_float_t x0 = HT_MUL(e2e_u01(&lcg), HT_CONST(10.0));
 
         /* Feature 1 & 2: random noise features in [0, 10] */
-        lcg = lcg * 1664525U + 1013904223U;
-        ht_float_t x1 = ((ht_float_t)(lcg & 0xFFFFU) / (ht_float_t)65536.0) * (ht_float_t)10.0;
-        lcg = lcg * 1664525U + 1013904223U;
-        ht_float_t x2 = ((ht_float_t)(lcg & 0xFFFFU) / (ht_float_t)65536.0) * (ht_float_t)10.0;
+        ht_float_t x1 = HT_MUL(e2e_u01(&lcg), HT_CONST(10.0));
+        ht_float_t x2 = HT_MUL(e2e_u01(&lcg), HT_CONST(10.0));
 
         /* Feature 3: random categorical feature in {0, 1, 2, 3} */
         lcg = lcg * 1664525U + 1013904223U;
         int32_t x3 = (int32_t)(lcg % 4U);
 
         /* Target y: sharp threshold split at x0 = 5.0 with small noise */
-        lcg = lcg * 1664525U + 1013904223U;
-        ht_float_t noise = ((ht_float_t)(lcg & 0xFFU) / (ht_float_t)256.0 - (ht_float_t)0.5) * (ht_float_t)2.0;
-        ht_float_t y = (x0 <= (ht_float_t)5.0) ? ((ht_float_t)5.0 + noise) : ((ht_float_t)50.0 + noise);
-        ht_float_t weight = (ht_float_t)1.0;
+        ht_float_t noise = HT_MUL(HT_SUB(e2e_u01_byte(&lcg), HT_CONST(0.5)), HT_CONST(2.0));
+        ht_float_t y = (x0 <= HT_CONST(5.0)) ? HT_ADD(HT_CONST(5.0), noise) : HT_ADD(HT_CONST(50.0), noise);
+        ht_float_t weight = HT_CONST(1.0);
 
         /* Ingest into leaf target variance statistics */
         ht_var_update(&root->reg_stats, y, weight);
@@ -1022,23 +1030,23 @@ static void test_e2e_regression_split_decision_pipeline(void) {
     /* 1. Evaluate split candidates */
     ht_split_candidate_t best, second_best;
     ht_find_best_reg_split_candidates(stats, &root->reg_stats, feat_types, 4,
-                                      (ht_float_t)5.0, (ht_float_t)0.01, true,
+                                      HT_CONST(5.0), HT_CONST(0.01), true,
                                       &best, &second_best);
 
     /* Assert Feature 0 identified as top split candidate */
     HT_ASSERT_EQ(best.feature_idx, 0);
     HT_ASSERT_EQ(best.is_categorical, 0);
-    HT_ASSERT(best.merit > (ht_float_t)200.0);
+    HT_ASSERT(best.merit > HT_CONST(200.0));
     /* Threshold must be near the actual boundary 5.0 */
-    HT_ASSERT(best.split_val.threshold >= (ht_float_t)3.0 &&
-              best.split_val.threshold <= (ht_float_t)7.0);
+    HT_ASSERT(best.split_val.threshold >= HT_CONST(3.0) &&
+              best.split_val.threshold <= HT_CONST(7.0));
 
-    /* 2. Compute Hoeffding bound for regression (R = 1.0) */
-    ht_float_t epsilon = ht_hoeffding_bound((ht_float_t)1.0, (ht_float_t)1e-7, (ht_float_t)N_SAMPLES);
-    HT_ASSERT(epsilon < (ht_float_t)0.20);
+    /* 2. Compute Hoeffding bound for regression (R = 1.0, delta = 1e-7) */
+    ht_float_t epsilon = ht_hoeffding_bound_ln(HT_CONST(1.0), HT_MUL(HT_CONST(7.0), HT_LN10), HT_FROM_UINT(N_SAMPLES));
+    HT_ASSERT(epsilon < HT_CONST(0.20));
 
     /* 3. Evaluate split decision */
-    bool should_split = ht_should_split_reg(&best, &second_best, epsilon, (ht_float_t)0.05);
+    bool should_split = ht_should_split_reg(&best, &second_best, epsilon, HT_CONST(0.05));
     HT_ASSERT(should_split);
 
     /* 4. Perform simulated tree split (lifecycle & recycling) */
@@ -1104,11 +1112,11 @@ static void test_e2e_vfdt_reg_prequential_and_serialization(void) {
     params.feature_types[2] = HT_FEAT_CATEGORICAL;
     params.leaf_prediction = HT_LEAF_ADAPTIVE;
     params.grace_period = 30U;
-    params.delta = (ht_float_t)1e-3;
-    params.learning_rate = (ht_float_t)0.02;
-    params.l2_regularization = (ht_float_t)1e-4;
-    params.model_selector_decay = (ht_float_t)0.95;
-    params.min_samples_split = (ht_float_t)5.0;
+    params.delta = HT_CONST(1e-3);
+    params.learning_rate = HT_CONST(0.02);
+    params.l2_regularization = HT_CONST(1e-4);
+    params.model_selector_decay = HT_CONST(0.95);
+    params.min_samples_split = HT_CONST(5.0);
 
     HT_ASSERT_EQ(ht_tree_init(&tree, &params), HT_OK);
     HT_ASSERT(sizeof(ht_tree_t) <= 1024 * 1024);
@@ -1119,24 +1127,25 @@ static void test_e2e_vfdt_reg_prequential_and_serialization(void) {
      * If x[0] > 5.0:  y = 50.0 + 3.0 * x[0] + 1.0 * x[1] + (x[2] == 1 ? 5.0 : 0.0) + noise
      */
     uint32_t lcg = 42U;
-    ht_float_t early_mae_sum = (ht_float_t)0.0;
+    ht_float_t early_mae_sum = HT_CONST(0.0);
     uint32_t early_count = 0;
-    ht_float_t late_mae_sum = (ht_float_t)0.0;
+    ht_float_t late_mae_sum = HT_CONST(0.0);
     uint32_t late_count = 0;
 
     for (uint32_t i = 0; i < 1000U; ++i) {
-        lcg = lcg * 1664525U + 1013904223U;
-        ht_float_t x0 = ((ht_float_t)(lcg & 0xFFFFU) / (ht_float_t)65536.0) * (ht_float_t)10.0;
-        lcg = lcg * 1664525U + 1013904223U;
-        ht_float_t x1 = ((ht_float_t)(lcg & 0xFFFFU) / (ht_float_t)65536.0) * (ht_float_t)5.0;
+        ht_float_t x0 = HT_MUL(e2e_u01(&lcg), HT_CONST(10.0));
+        ht_float_t x1 = HT_MUL(e2e_u01(&lcg), HT_CONST(5.0));
         int32_t x2 = (i % 2 == 0) ? 1 : 0;
 
-        lcg = lcg * 1664525U + 1013904223U;
-        ht_float_t noise = (((ht_float_t)(lcg & 0xFFU) / (ht_float_t)256.0) - (ht_float_t)0.5) * (ht_float_t)1.0;
+        ht_float_t noise = HT_SUB(e2e_u01_byte(&lcg), HT_CONST(0.5));
+        ht_float_t cat_term = (x2 == 1) ? HT_CONST(5.0) : HT_CONST(0.0);
 
-        ht_float_t y = (x0 <= (ht_float_t)5.0)
-            ? ((ht_float_t)2.0 * x0 + (ht_float_t)1.0 * x1 + (x2 == 1 ? (ht_float_t)5.0 : (ht_float_t)0.0) + noise)
-            : ((ht_float_t)50.0 + (ht_float_t)3.0 * x0 + (ht_float_t)1.0 * x1 + (x2 == 1 ? (ht_float_t)5.0 : (ht_float_t)0.0) + noise);
+        ht_float_t y;
+        if (x0 <= HT_CONST(5.0)) {
+            y = HT_ADD(HT_ADD(HT_MUL(HT_CONST(2.0), x0), x1), HT_ADD(cat_term, noise));
+        } else {
+            y = HT_ADD(HT_ADD(HT_CONST(50.0), HT_MUL(HT_CONST(3.0), x0)), HT_ADD(x1, HT_ADD(cat_term, noise)));
+        }
 
         ht_value_t x[HT_MAX_FEATURES];
         memset(x, 0, sizeof(x));
@@ -1146,18 +1155,18 @@ static void test_e2e_vfdt_reg_prequential_and_serialization(void) {
 
         /* Prequential prediction */
         ht_float_t pred = ht_tree_predict_reg(&tree, x);
-        ht_float_t err = HT_FABS(y - pred);
+        ht_float_t err = HT_FABS(HT_SUB(y, pred));
 
         if (i < 100U) {
-            early_mae_sum += err;
+            early_mae_sum = HT_ADD(early_mae_sum, err);
             early_count++;
         }
         if (i >= 800U) {
-            late_mae_sum += err;
+            late_mae_sum = HT_ADD(late_mae_sum, err);
             late_count++;
         }
 
-        HT_ASSERT_EQ(ht_tree_learn_one_reg(&tree, x, y, (ht_float_t)1.0), HT_OK);
+        HT_ASSERT_EQ(ht_tree_learn_one_reg(&tree, x, y, HT_CONST(1.0)), HT_OK);
     }
 
     /* Verify splitting and depth */
@@ -1166,10 +1175,10 @@ static void test_e2e_vfdt_reg_prequential_and_serialization(void) {
     HT_ASSERT(tree.max_depth_seen >= 1U);
 
     /* Verify error reduction: late MAE must improve significantly over early MAE */
-    ht_float_t early_mae = early_mae_sum / (ht_float_t)early_count;
-    ht_float_t late_mae = late_mae_sum / (ht_float_t)late_count;
+    ht_float_t early_mae = HT_DIV(early_mae_sum, HT_FROM_UINT(early_count));
+    ht_float_t late_mae = HT_DIV(late_mae_sum, HT_FROM_UINT(late_count));
     HT_ASSERT(late_mae < early_mae);
-    HT_ASSERT(late_mae < (ht_float_t)8.0);
+    HT_ASSERT(late_mae < HT_CONST(8.0));
 
     /* Verify memory usage */
     HT_ASSERT(ht_memory_bytes_used(&tree.memory) <= (1024U * 1024U));
@@ -1192,13 +1201,13 @@ static void test_e2e_vfdt_reg_prequential_and_serialization(void) {
     for (int t = 0; t < 50; ++t) {
         ht_value_t x[HT_MAX_FEATURES];
         memset(x, 0, sizeof(x));
-        x[0].num = (ht_float_t)(t * 0.2);
-        x[1].num = (ht_float_t)(t * 0.1);
+        x[0].num = HT_MUL(HT_FROM_INT(t), HT_CONST(0.2));
+        x[1].num = HT_MUL(HT_FROM_INT(t), HT_CONST(0.1));
         x[2].cat = t % 2;
 
         ht_float_t p_orig = ht_tree_predict_reg(&tree, x);
         ht_float_t p_load = ht_tree_predict_reg(&loaded_tree, x);
-        HT_ASSERT_FLOAT_NEAR(p_orig, p_load, (ht_float_t)1e-5);
+        HT_ASSERT_FLOAT_NEAR(p_orig, p_load, HT_TEST_TOL(1e-5));
     }
 }
 
@@ -1209,10 +1218,10 @@ static void test_e2e_hat_reg_abrupt_drift_recovery(void) {
     ht_config_params_t params;
     ht_default_hat_reg_params(&params, 2);
     params.grace_period = 30U;
-    params.delta = (ht_float_t)1e-2;
+    params.delta = HT_CONST(1e-2);
     params.drift_window_threshold = 20U;
-    params.switch_significance = (ht_float_t)0.05;
-    params.adwin_delta = (ht_float_t)0.002;
+    params.switch_significance = HT_CONST(0.05);
+    params.adwin_delta = HT_CONST(0.002);
 
     static ht_tree_t tree;
     HT_ASSERT_EQ(ht_tree_init_hat(&tree, &params, &adwin_pool), HT_OK);
@@ -1222,67 +1231,65 @@ static void test_e2e_hat_reg_abrupt_drift_recovery(void) {
     memset(x, 0, sizeof(x));
 
     /* Concept A: samples 0 .. 500: y = 5.0 + 3.0 * x0 */
-    ht_float_t sum_err_a = (ht_float_t)0.0;
+    ht_float_t sum_err_a = HT_CONST(0.0);
     uint32_t count_a = 0;
 
     for (uint32_t i = 0; i < 500U; ++i) {
-        lcg = lcg * 1664525U + 1013904223U;
-        ht_float_t x0 = ((ht_float_t)(lcg & 0xFFFFU) / (ht_float_t)65536.0) * (ht_float_t)10.0;
+        ht_float_t x0 = HT_MUL(e2e_u01(&lcg), HT_CONST(10.0));
         x[0].num = x0;
-        x[1].num = (ht_float_t)1.0;
+        x[1].num = HT_CONST(1.0);
 
-        ht_float_t y = (ht_float_t)5.0 + (ht_float_t)3.0 * x0;
+        ht_float_t y = HT_ADD(HT_CONST(5.0), HT_MUL(HT_CONST(3.0), x0));
 
         if (i >= 350U) {
             ht_float_t pred = ht_tree_predict_reg(&tree, x);
-            sum_err_a += HT_FABS(y - pred);
+            sum_err_a = HT_ADD(sum_err_a, HT_FABS(HT_SUB(y, pred)));
             count_a++;
         }
 
-        HT_ASSERT_EQ(ht_tree_learn_one_reg(&tree, x, y, (ht_float_t)1.0), HT_OK);
+        HT_ASSERT_EQ(ht_tree_learn_one_reg(&tree, x, y, HT_CONST(1.0)), HT_OK);
     }
 
-    ht_float_t mae_a = sum_err_a / (ht_float_t)count_a;
-    HT_ASSERT(mae_a < (ht_float_t)10.0);
+    ht_float_t mae_a = HT_DIV(sum_err_a, HT_FROM_UINT(count_a));
+    HT_ASSERT(mae_a < HT_CONST(10.0));
 
     /* Concept B: samples 500 .. 2000 (abrupt shift to y = 150.0 - 4.0 * x0) */
-    ht_float_t sum_err_b_spike = (ht_float_t)0.0;
+    ht_float_t sum_err_b_spike = HT_CONST(0.0);
     uint32_t count_b_spike = 0;
-    ht_float_t sum_err_b_late = (ht_float_t)0.0;
+    ht_float_t sum_err_b_late = HT_CONST(0.0);
     uint32_t count_b_late = 0;
 
     for (uint32_t i = 500U; i < 2000U; ++i) {
-        lcg = lcg * 1664525U + 1013904223U;
-        ht_float_t x0 = ((ht_float_t)(lcg & 0xFFFFU) / (ht_float_t)65536.0) * (ht_float_t)10.0;
+        ht_float_t x0 = HT_MUL(e2e_u01(&lcg), HT_CONST(10.0));
         x[0].num = x0;
-        x[1].num = (ht_float_t)1.0;
+        x[1].num = HT_CONST(1.0);
 
-        ht_float_t y = (ht_float_t)150.0 - (ht_float_t)4.0 * x0;
+        ht_float_t y = HT_SUB(HT_CONST(150.0), HT_MUL(HT_CONST(4.0), x0));
 
         ht_float_t pred = ht_tree_predict_reg(&tree, x);
-        ht_float_t err = HT_FABS(y - pred);
+        ht_float_t err = HT_FABS(HT_SUB(y, pred));
 
         if (i >= 500U && i < 600U) {
-            sum_err_b_spike += err;
+            sum_err_b_spike = HT_ADD(sum_err_b_spike, err);
             count_b_spike++;
         }
         if (i >= 1700U) {
-            sum_err_b_late += err;
+            sum_err_b_late = HT_ADD(sum_err_b_late, err);
             count_b_late++;
         }
 
-        HT_ASSERT_EQ(ht_tree_learn_one_reg(&tree, x, y, (ht_float_t)1.0), HT_OK);
+        HT_ASSERT_EQ(ht_tree_learn_one_reg(&tree, x, y, HT_CONST(1.0)), HT_OK);
     }
 
-    ht_float_t mae_spike = sum_err_b_spike / (ht_float_t)count_b_spike;
-    ht_float_t mae_late = sum_err_b_late / (ht_float_t)count_b_late;
+    ht_float_t mae_spike = HT_DIV(sum_err_b_spike, HT_FROM_UINT(count_b_spike));
+    ht_float_t mae_late = HT_DIV(sum_err_b_late, HT_FROM_UINT(count_b_late));
 
     /* Assert drift was detected and alternate tree switched */
     HT_ASSERT(tree.n_alternate_trees > 0U);
     HT_ASSERT(tree.n_switch_alternate_trees > 0U);
 
     /* Assert error recovered: late MAE after switch is much lower than post-drift spike */
-    HT_ASSERT(mae_late < mae_spike * (ht_float_t)0.5);
+    HT_ASSERT(mae_late < HT_MUL(mae_spike, HT_CONST(0.5)));
 
     /* Verify RAM budget */
     size_t tree_bytes = ht_memory_bytes_used(&tree.memory);

@@ -22,6 +22,7 @@
 #define HT_COMPACT_FLAG_DOUBLE  (1U << 0)
 #define HT_COMPACT_FLAG_REG     (1U << 1)
 #define HT_COMPACT_FLAG_SUBSPC  (1U << 2)
+#define HT_COMPACT_FLAG_FIXED   (1U << 3) /**< Serialized with Q16.16 fixed-point ht_float_t */
 
 /**
  * @brief Compact inference-only decision tree structure (zero stats_pool / drift).

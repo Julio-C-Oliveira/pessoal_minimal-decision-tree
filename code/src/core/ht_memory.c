@@ -58,7 +58,7 @@ bool ht_memory_init_stride(ht_memory_pool_t *pool, uint16_t n_features, ht_task_
     pool->free_stats_head = HT_INVALID_IDX;
     for (int32_t i = (int32_t)max_leaves - 1; i >= 0; --i) {
         ht_leaf_stats_t *stats = (ht_leaf_stats_t *)(pool->stats_storage + ((size_t)i * stride));
-        stats->last_split_attempt_at = (ht_float_t)-1.0;
+        stats->last_split_attempt_at = HT_CONST(-1.0);
         stats->next_free = pool->free_stats_head;
         pool->free_stats_head = (uint16_t)i;
     }
@@ -130,7 +130,7 @@ uint16_t ht_stats_alloc(ht_memory_pool_t *pool) {
     pool->stats_allocated++;
 
     memset(stats, 0, pool->leaf_stride);
-    stats->last_split_attempt_at = (ht_float_t)0.0;
+    stats->last_split_attempt_at = HT_CONST(0.0);
 
     return idx;
 }
@@ -141,12 +141,12 @@ void ht_stats_free(ht_memory_pool_t *pool, uint16_t stats_idx) {
     }
 
     ht_leaf_stats_t *stats = ht_stats_get(pool, stats_idx);
-    if (!stats || stats->last_split_attempt_at < (ht_float_t)0.0) {
+    if (!stats || stats->last_split_attempt_at < HT_CONST(0.0)) {
         return; /* Block double-free */
     }
 
     memset(stats, 0, pool->leaf_stride);
-    stats->last_split_attempt_at = (ht_float_t)-1.0;
+    stats->last_split_attempt_at = HT_CONST(-1.0);
     stats->next_free = pool->free_stats_head;
     pool->free_stats_head = stats_idx;
 

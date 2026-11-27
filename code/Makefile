@@ -2,7 +2,11 @@ CC ?= gcc
 DEPFLAGS = -MMD -MP
 INC_FLAGS = -Iinclude -Iinclude/core -Iinclude/ensemble -Iinclude/federated
 CFLAGS = -std=c11 -O2 -Wall -Wextra -Werror -pedantic $(INC_FLAGS) $(DEPFLAGS) $(CFLAGS_EXTRA)
+ifneq (,$(findstring HT_USE_FIXED_POINT,$(CFLAGS_EXTRA)))
+LDFLAGS =
+else
 LDFLAGS = -lm
+endif
 
 SRC_DIR = src
 INC_DIR = include
@@ -25,7 +29,7 @@ TEST_RUNNER = $(BUILD_DIR)/test_runner
 
 VERSION ?= $(shell cat ../VERSION 2>/dev/null || cat VERSION 2>/dev/null || echo "0.1.0")
 
-.PHONY: all lib test clean bench bench-triple bench-drift bench-regression bench-memory bench-main bench-main-federated bench-prep bench-esp32 bench-tune bench-federated bench-fed-net directories version
+.PHONY: all lib lib-fixed test test-fixed clean bench bench-triple bench-drift bench-regression bench-memory bench-main bench-main-federated bench-prep bench-esp32 bench-tune bench-federated bench-fed-net directories version
 
 version:
 	@echo "kansho (libht) version $(VERSION)"
@@ -55,6 +59,26 @@ $(TEST_RUNNER): directories $(OBJS) $(TEST_OBJS)
 test: $(TEST_RUNNER)
 	@echo "Executing Hoeffding Tree Test Suite..."
 	./$(TEST_RUNNER)
+
+lib-fixed:
+	@$(MAKE) clean
+	@$(MAKE) lib CFLAGS_EXTRA="-DHT_USE_FIXED_POINT $(CFLAGS_EXTRA)"
+	@echo "Auditing $(BUILD_DIR)/libht.a for zero libm / soft-fp symbols..."
+	@if nm -u $(BUILD_DIR)/libht.a | grep -E '(\b(sqrt|log|log2|exp|erf|erfc|pow|fabs|sin|cos|floor|ceil)f?\b|__aeabi_[fd])'; then \
+		echo "ERROR: Forbidden libm or soft-fp symbols found in libht.a!"; exit 1; \
+	else \
+		echo "OK: Zero libm / soft-fp symbols in $(BUILD_DIR)/libht.a"; \
+	fi
+
+test-fixed:
+	@$(MAKE) clean
+	@$(MAKE) lib test CFLAGS_EXTRA="-DHT_USE_FIXED_POINT $(CFLAGS_EXTRA)"
+	@echo "Auditing $(BUILD_DIR)/libht.a for zero libm / soft-fp symbols..."
+	@if nm -u $(BUILD_DIR)/libht.a | grep -E '(\b(sqrt|log|log2|exp|erf|erfc|pow|fabs|sin|cos|floor|ceil)f?\b|__aeabi_[fd])'; then \
+		echo "ERROR: Forbidden libm or soft-fp symbols found in libht.a!"; exit 1; \
+	else \
+		echo "OK: Zero libm / soft-fp symbols in $(BUILD_DIR)/libht.a"; \
+	fi
 
 BENCH_SRC = ../benchmarks/bench_c_runner.c
 BENCH_RUNNER = $(BUILD_DIR)/bench_c_runner

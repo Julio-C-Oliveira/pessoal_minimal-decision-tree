@@ -13,7 +13,7 @@ static void test_compact_tree_classif_parity_and_serialization(void) {
     ht_config_params_t params;
     ht_default_params(&params, 3, 2);
     params.grace_period = 20U;
-    params.delta = (ht_float_t)1e-2;
+    params.delta = HT_CONST(1e-2);
     params.leaf_prediction = HT_LEAF_MC;
 
     ht_tree_t tree;
@@ -24,10 +24,11 @@ static void test_compact_tree_classif_parity_and_serialization(void) {
 
     for (int i = 0; i < 300; ++i) {
         uint8_t c = (i % 2 == 0) ? 0U : 1U;
-        x[0].num = (c == 0U) ? (ht_float_t)(1.0 + (i % 7) * 0.1) : (ht_float_t)(10.0 + (i % 7) * 0.1);
-        x[1].num = (ht_float_t)(i % 5);
-        x[2].num = (ht_float_t)((i * 3) % 11);
-        HT_ASSERT_EQ(ht_tree_learn_one(&tree, x, c, (ht_float_t)1.0), HT_OK);
+        ht_float_t jitter = HT_MUL(HT_FROM_INT(i % 7), HT_CONST(0.1));
+        x[0].num = (c == 0U) ? HT_ADD(HT_CONST(1.0), jitter) : HT_ADD(HT_CONST(10.0), jitter);
+        x[1].num = HT_FROM_INT(i % 5);
+        x[2].num = HT_FROM_INT((i * 3) % 11);
+        HT_ASSERT_EQ(ht_tree_learn_one(&tree, x, c, HT_CONST(1.0)), HT_OK);
     }
     HT_ASSERT(tree.n_decision_nodes >= 1U);
 
@@ -38,9 +39,11 @@ static void test_compact_tree_classif_parity_and_serialization(void) {
 
     /* Verify exact prediction parity (including NaN missing values) */
     for (int i = 0; i < 20; ++i) {
-        x[0].num = (i < 10) ? (ht_float_t)(1.2 + i * 0.05) : (ht_float_t)(10.2 + (i - 10) * 0.05);
-        x[1].num = (ht_float_t)i;
-        x[2].num = (i == 5) ? ((ht_float_t)0.0 / (ht_float_t)0.0) : (ht_float_t)0.0;
+        x[0].num = (i < 10)
+            ? HT_ADD(HT_CONST(1.2), HT_MUL(HT_FROM_INT(i), HT_CONST(0.05)))
+            : HT_ADD(HT_CONST(10.2), HT_MUL(HT_FROM_INT(i - 10), HT_CONST(0.05)));
+        x[1].num = HT_FROM_INT(i);
+        x[2].num = (i == 5) ? HT_NAN_VAL : HT_CONST(0.0);
 
         ht_float_t p_orig[HT_MAX_CLASSES], p_ct[HT_MAX_CLASSES];
         HT_ASSERT_EQ(ht_tree_predict_proba(&tree, x, p_orig), HT_OK);
@@ -67,9 +70,9 @@ static void test_compact_tree_classif_parity_and_serialization(void) {
     HT_ASSERT_EQ(ct_loaded.num_nodes, ct.num_nodes);
     HT_ASSERT_EQ(ct_loaded.n_features, ct.n_features);
 
-    x[0].num = (ht_float_t)1.3;
+    x[0].num = HT_CONST(1.3);
     HT_ASSERT_EQ(ht_compact_tree_predict(&ct_loaded, x), 0U);
-    x[0].num = (ht_float_t)10.3;
+    x[0].num = HT_CONST(10.3);
     HT_ASSERT_EQ(ht_compact_tree_predict(&ct_loaded, x), 1U);
 }
 
@@ -77,7 +80,7 @@ static void test_compact_tree_reg_and_subspace(void) {
     ht_config_params_t params;
     ht_default_reg_params(&params, 2);
     params.grace_period = 20U;
-    params.delta = (ht_float_t)1e-2;
+    params.delta = HT_CONST(1e-2);
     params.leaf_prediction = HT_LEAF_MEAN;
 
     ht_tree_t tree;
@@ -87,18 +90,19 @@ static void test_compact_tree_reg_and_subspace(void) {
     memset(x, 0, sizeof(x));
 
     for (int i = 0; i < 200; ++i) {
-        ht_float_t v = (i % 2 == 0) ? (ht_float_t)(1.0 + (i % 5) * 0.1) : (ht_float_t)(10.0 + (i % 5) * 0.1);
-        ht_float_t y = (i % 2 == 0) ? (ht_float_t)5.0 : (ht_float_t)50.0;
+        ht_float_t jitter = HT_MUL(HT_FROM_INT(i % 5), HT_CONST(0.1));
+        ht_float_t v = (i % 2 == 0) ? HT_ADD(HT_CONST(1.0), jitter) : HT_ADD(HT_CONST(10.0), jitter);
+        ht_float_t y = (i % 2 == 0) ? HT_CONST(5.0) : HT_CONST(50.0);
         x[0].num = v;
-        x[1].num = (ht_float_t)(i % 3);
-        HT_ASSERT_EQ(ht_tree_learn_one_reg(&tree, x, y, (ht_float_t)1.0), HT_OK);
+        x[1].num = HT_FROM_INT(i % 3);
+        HT_ASSERT_EQ(ht_tree_learn_one_reg(&tree, x, y, HT_CONST(1.0)), HT_OK);
     }
 
     ht_compact_tree_t ct;
     HT_ASSERT_EQ(ht_compact_tree_from_tree(&ct, &tree), HT_OK);
 
-    x[0].num = (ht_float_t)1.2;
-    x[1].num = (ht_float_t)1.0;
+    x[0].num = HT_CONST(1.2);
+    x[1].num = HT_CONST(1.0);
     ht_float_t y_tree = ht_tree_predict_reg(&tree, x);
     ht_float_t y_ct = ht_compact_tree_predict_reg(&ct, x);
     HT_ASSERT_FLOAT_EQ(y_ct, y_tree);
@@ -108,56 +112,56 @@ static void test_compact_tree_reg_and_subspace(void) {
     HT_ASSERT_EQ(ht_compact_tree_set_subspace(&ct, fmap, 2U), HT_OK);
     ht_value_t x_global[HT_MAX_FEATURES];
     memset(x_global, 0, sizeof(x_global));
-    x_global[4].num = (ht_float_t)10.2;
-    x_global[5].num = (ht_float_t)1.0;
+    x_global[4].num = HT_CONST(10.2);
+    x_global[5].num = HT_CONST(1.0);
     ht_float_t y_sub = ht_compact_tree_predict_reg(&ct, x_global);
-    HT_ASSERT(y_sub > (ht_float_t)30.0);
+    HT_ASSERT(y_sub > HT_CONST(30.0));
 }
 
 static void test_voting_weighted_and_uniform(void) {
-    ht_float_t err_good = (ht_float_t)0.5;
-    ht_float_t err_bad = (ht_float_t)0.5;
+    ht_float_t err_good = HT_CONST(0.5);
+    ht_float_t err_bad = HT_CONST(0.5);
     for (int i = 0; i < 50; ++i) {
-        ht_voting_update_error_classif(&err_good, 1U, 1U, (ht_float_t)0.9);
-        ht_voting_update_error_classif(&err_bad, 0U, 1U, (ht_float_t)0.9);
+        ht_voting_update_error_classif(&err_good, 1U, 1U, HT_CONST(0.9));
+        ht_voting_update_error_classif(&err_bad, 0U, 1U, HT_CONST(0.9));
     }
-    HT_ASSERT(err_good < (ht_float_t)0.05);
-    HT_ASSERT(err_bad > (ht_float_t)0.95);
+    HT_ASSERT(err_good < HT_CONST(0.05));
+    HT_ASSERT(err_bad > HT_CONST(0.95));
 
     ht_float_t w[2];
     w[0] = ht_voting_member_weight(HT_VOTE_WEIGHTED, HT_TASK_CLASSIFICATION, err_good);
     w[1] = ht_voting_member_weight(HT_VOTE_WEIGHTED, HT_TASK_CLASSIFICATION, err_bad);
-    HT_ASSERT(w[0] > w[1] * (ht_float_t)100.0);
+    HT_ASSERT(w[0] > HT_MUL(w[1], HT_CONST(100.0)));
 
     ht_float_t probas[2 * HT_MAX_CLASSES];
     memset(probas, 0, sizeof(probas));
-    probas[0 * HT_MAX_CLASSES + 1] = (ht_float_t)0.9;
-    probas[0 * HT_MAX_CLASSES + 0] = (ht_float_t)0.1;
-    probas[1 * HT_MAX_CLASSES + 0] = (ht_float_t)0.9;
-    probas[1 * HT_MAX_CLASSES + 1] = (ht_float_t)0.1;
+    probas[0 * HT_MAX_CLASSES + 1] = HT_CONST(0.9);
+    probas[0 * HT_MAX_CLASSES + 0] = HT_CONST(0.1);
+    probas[1 * HT_MAX_CLASSES + 0] = HT_CONST(0.9);
+    probas[1 * HT_MAX_CLASSES + 1] = HT_CONST(0.1);
 
     ht_float_t out[HT_MAX_CLASSES];
     HT_ASSERT_EQ(ht_voting_combine_proba(2U, probas, w, 2U, out), HT_OK);
-    HT_ASSERT(out[1] > (ht_float_t)0.85);
+    HT_ASSERT(out[1] > HT_CONST(0.85));
 
     /* Uniform voting should yield 0.5 / 0.5 */
-    ht_float_t wu[2] = {(ht_float_t)1.0, (ht_float_t)1.0};
+    ht_float_t wu[2] = {HT_CONST(1.0), HT_CONST(1.0)};
     HT_ASSERT_EQ(ht_voting_combine_proba(2U, probas, wu, 2U, out), HT_OK);
-    HT_ASSERT_FLOAT_NEAR(out[0], (ht_float_t)0.5, (ht_float_t)1e-5);
-    HT_ASSERT_FLOAT_NEAR(out[1], (ht_float_t)0.5, (ht_float_t)1e-5);
+    HT_ASSERT_FLOAT_NEAR(out[0], HT_CONST(0.5), HT_TEST_TOL(1e-5));
+    HT_ASSERT_FLOAT_NEAR(out[1], HT_CONST(0.5), HT_TEST_TOL(1e-5));
 
     /* Regression weighted combination */
-    ht_float_t mse_good = (ht_float_t)10.0, mse_bad = (ht_float_t)10.0;
+    ht_float_t mse_good = HT_CONST(10.0), mse_bad = HT_CONST(10.0);
     for (int i = 0; i < 40; ++i) {
-        ht_voting_update_error_reg(&mse_good, (ht_float_t)5.0, (ht_float_t)5.0, (ht_float_t)0.9);
-        ht_voting_update_error_reg(&mse_bad, (ht_float_t)0.0, (ht_float_t)10.0, (ht_float_t)0.9);
+        ht_voting_update_error_reg(&mse_good, HT_CONST(5.0), HT_CONST(5.0), HT_CONST(0.9));
+        ht_voting_update_error_reg(&mse_bad, HT_CONST(0.0), HT_CONST(10.0), HT_CONST(0.9));
     }
     ht_float_t wr[2];
     wr[0] = ht_voting_member_weight(HT_VOTE_WEIGHTED, HT_TASK_REGRESSION, mse_good);
     wr[1] = ht_voting_member_weight(HT_VOTE_WEIGHTED, HT_TASK_REGRESSION, mse_bad);
-    ht_float_t preds[2] = {(ht_float_t)5.0, (ht_float_t)50.0};
+    ht_float_t preds[2] = {HT_CONST(5.0), HT_CONST(50.0)};
     ht_float_t combined = ht_voting_combine_reg(2U, preds, wr);
-    HT_ASSERT(combined < (ht_float_t)7.0);
+    HT_ASSERT(combined < HT_CONST(7.0));
 }
 
 void test_compact_tree_run(void) {

@@ -47,7 +47,7 @@ static void test_fed_forest_server_policies_and_exclude_self(void) {
     ht_default_params(&tp, 2, 2);
 
     /* Ingest 4 clients with distinct reported errors: id 1 (0.40), id 2 (0.05), id 3 (0.20), id 4 (0.10) */
-    const ht_float_t errs[4] = {(ht_float_t)0.40, (ht_float_t)0.05, (ht_float_t)0.20, (ht_float_t)0.10};
+    const ht_float_t errs[4] = {HT_CONST(0.40), HT_CONST(0.05), HT_CONST(0.20), HT_CONST(0.10)};
     for (uint16_t cid = 1U; cid <= 4U; ++cid) {
         ht_fed_forest_client_cfg_t ccfg;
         ht_fed_forest_default_client_config(&ccfg, cid, &tp);
@@ -95,7 +95,7 @@ static void test_fed_forest_non_iid_collaboration_gain(void) {
     ht_config_params_t tp;
     ht_default_params(&tp, 2, 4);
     tp.grace_period = 20U;
-    tp.delta = (ht_float_t)1e-2;
+    tp.delta = HT_CONST(1e-2);
     tp.leaf_prediction = HT_LEAF_MC;
 
     ht_fed_forest_client_cfg_t cfg0, cfg1;
@@ -115,25 +115,26 @@ static void test_fed_forest_non_iid_collaboration_gain(void) {
     memset(x, 0, sizeof(x));
 
     for (int i = 0; i < 300; ++i) {
+        ht_float_t jitter = HT_MUL(HT_FROM_INT(i % 5), HT_CONST(0.1));
         /* Client 0: classes 0 (x0 ~ 1) and 1 (x0 ~ 4) */
         uint8_t y0 = (uint8_t)(i % 2);
-        x[0].num = (y0 == 0U) ? (ht_float_t)(1.0 + (i % 5) * 0.1) : (ht_float_t)(4.0 + (i % 5) * 0.1);
-        x[1].num = (ht_float_t)(i % 7);
-        HT_ASSERT_EQ(ht_fed_forest_client_learn_one(&c0, x, y0, (ht_float_t)1.0), HT_OK);
+        x[0].num = (y0 == 0U) ? HT_ADD(HT_CONST(1.0), jitter) : HT_ADD(HT_CONST(4.0), jitter);
+        x[1].num = HT_FROM_INT(i % 7);
+        HT_ASSERT_EQ(ht_fed_forest_client_learn_one(&c0, x, y0, HT_CONST(1.0)), HT_OK);
 
         /* Client 1: classes 2 (x0 ~ 8) and 3 (x0 ~ 12) */
         uint8_t y1 = (uint8_t)(2 + (i % 2));
-        x[0].num = (y1 == 2U) ? (ht_float_t)(8.0 + (i % 5) * 0.1) : (ht_float_t)(12.0 + (i % 5) * 0.1);
-        x[1].num = (ht_float_t)(i % 7);
-        HT_ASSERT_EQ(ht_fed_forest_client_learn_one(&c1, x, y1, (ht_float_t)1.0), HT_OK);
+        x[0].num = (y1 == 2U) ? HT_ADD(HT_CONST(8.0), jitter) : HT_ADD(HT_CONST(12.0), jitter);
+        x[1].num = HT_FROM_INT(i % 7);
+        HT_ASSERT_EQ(ht_fed_forest_client_learn_one(&c1, x, y1, HT_CONST(1.0)), HT_OK);
     }
 
     /* Evaluate Client 0 BEFORE federation on classes 2 and 3 (unseen locally -> 0% on c2/c3) */
     int correct_before = 0;
-    const ht_float_t centers[4] = {(ht_float_t)1.2, (ht_float_t)4.2, (ht_float_t)8.2, (ht_float_t)12.2};
+    const ht_float_t centers[4] = {HT_CONST(1.2), HT_CONST(4.2), HT_CONST(8.2), HT_CONST(12.2)};
     for (uint8_t c = 0; c < 4U; ++c) {
         x[0].num = centers[c];
-        x[1].num = (ht_float_t)2.0;
+        x[1].num = HT_CONST(2.0);
         if (ht_fed_forest_client_predict(&c0, x) == c) {
             correct_before++;
         }
@@ -153,13 +154,13 @@ static void test_fed_forest_non_iid_collaboration_gain(void) {
 
     /* Evaluate probabilities on classes 2 and 3: now non-zero and informative */
     ht_float_t probas[HT_MAX_CLASSES];
-    x[0].num = (ht_float_t)8.2;
+    x[0].num = HT_CONST(8.2);
     HT_ASSERT_EQ(ht_fed_forest_client_predict_proba(&c0, x, probas), HT_OK);
-    HT_ASSERT(probas[2] > (ht_float_t)0.3);
+    HT_ASSERT(probas[2] > HT_CONST(0.3));
 
-    x[0].num = (ht_float_t)12.2;
+    x[0].num = HT_CONST(12.2);
     HT_ASSERT_EQ(ht_fed_forest_client_predict_proba(&c0, x, probas), HT_OK);
-    HT_ASSERT(probas[3] > (ht_float_t)0.3);
+    HT_ASSERT(probas[3] > HT_CONST(0.3));
 }
 
 static void test_fed_forest_regression_and_drift_downweighting(void) {
@@ -170,14 +171,14 @@ static void test_fed_forest_regression_and_drift_downweighting(void) {
     ht_config_params_t tp;
     ht_default_reg_params(&tp, 2);
     tp.grace_period = 20U;
-    tp.delta = (ht_float_t)1e-2;
+    tp.delta = HT_CONST(1e-2);
     tp.leaf_prediction = HT_LEAF_MEAN;
 
     ht_fed_forest_client_cfg_t cfg_g, cfg_s;
     ht_fed_forest_default_client_config(&cfg_g, 1U, &tp);
     ht_fed_forest_default_client_config(&cfg_s, 2U, &tp);
     cfg_g.voting = HT_VOTE_WEIGHTED;
-    cfg_g.error_decay = (ht_float_t)0.85;
+    cfg_g.error_decay = HT_CONST(0.85);
     HT_ASSERT_EQ(ht_fed_forest_client_init(&c_good, &cfg_g), HT_OK);
     HT_ASSERT_EQ(ht_fed_forest_client_init(&c_stale, &cfg_s), HT_OK);
 
@@ -190,10 +191,10 @@ static void test_fed_forest_regression_and_drift_downweighting(void) {
 
     /* Train c_stale on inverted/shifted target (y = 100.0) and c_good on true target (y = 10.0) */
     for (int i = 0; i < 120; ++i) {
-        x[0].num = (ht_float_t)(i % 10);
-        x[1].num = (ht_float_t)((i * 3) % 7);
-        HT_ASSERT_EQ(ht_fed_forest_client_learn_one_reg(&c_good, x, (ht_float_t)10.0, (ht_float_t)1.0), HT_OK);
-        HT_ASSERT_EQ(ht_fed_forest_client_learn_one_reg(&c_stale, x, (ht_float_t)100.0, (ht_float_t)1.0), HT_OK);
+        x[0].num = HT_FROM_INT(i % 10);
+        x[1].num = HT_FROM_INT((i * 3) % 7);
+        HT_ASSERT_EQ(ht_fed_forest_client_learn_one_reg(&c_good, x, HT_CONST(10.0), HT_CONST(1.0)), HT_OK);
+        HT_ASSERT_EQ(ht_fed_forest_client_learn_one_reg(&c_stale, x, HT_CONST(100.0), HT_CONST(1.0)), HT_OK);
     }
 
     size_t w = 0;
@@ -204,11 +205,11 @@ static void test_fed_forest_regression_and_drift_downweighting(void) {
 
     /* Feed 40 post-exchange samples at y = 10.0: weighted voting must down-weight stale peer */
     for (int i = 0; i < 40; ++i) {
-        x[0].num = (ht_float_t)(i % 10);
-        HT_ASSERT_EQ(ht_fed_forest_client_learn_one_reg(&c_good, x, (ht_float_t)10.0, (ht_float_t)1.0), HT_OK);
+        x[0].num = HT_FROM_INT(i % 10);
+        HT_ASSERT_EQ(ht_fed_forest_client_learn_one_reg(&c_good, x, HT_CONST(10.0), HT_CONST(1.0)), HT_OK);
     }
     ht_float_t pred = ht_fed_forest_client_predict_reg(&c_good, x);
-    HT_ASSERT_FLOAT_NEAR(pred, (ht_float_t)10.0, (ht_float_t)1.0);
+    HT_ASSERT_FLOAT_NEAR(pred, HT_CONST(10.0), HT_CONST(1.0));
 }
 
 void test_fed_forest_run(void) {

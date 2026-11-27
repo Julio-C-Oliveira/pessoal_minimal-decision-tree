@@ -1,6 +1,7 @@
 /**
  * @file ht_criterion.c
- * @brief Implementation of split criteria (Gini, InfoGain) and Hoeffding bound evaluation.
+ * @brief Implementation of split criteria (Gini, InfoGain, Variance Reduction)
+ *        and Hoeffding bound evaluation for float32, double64, and Q16.16 fixed-point.
  */
 
 #include "ht_criterion.h"
@@ -13,12 +14,12 @@ ht_float_t ht_compute_gini(const ht_float_t dist[HT_MAX_CLASSES],
                            uint8_t n_classes,
                            ht_float_t dist_sum)
 {
-    ht_float_t gini = (ht_float_t)1.0;
-    if (dist_sum > (ht_float_t)0.0) {
+    ht_float_t gini = HT_CONST(1.0);
+    if (dist_sum > HT_CONST(0.0)) {
         for (uint8_t c = 0; c < n_classes; c++) {
-            if (dist[c] > (ht_float_t)0.0) {
-                ht_float_t rel_freq = dist[c] / dist_sum;
-                gini -= rel_freq * rel_freq;
+            if (dist[c] > HT_CONST(0.0)) {
+                ht_float_t rel_freq = HT_DIV(dist[c], dist_sum);
+                gini = HT_SUB(gini, HT_MUL(rel_freq, rel_freq));
             }
         }
     }
@@ -30,7 +31,7 @@ static ht_float_t ht_gini_range_of_merit(const ht_float_t pre_dist[HT_MAX_CLASSE
 {
     (void)pre_dist;
     (void)n_classes;
-    return (ht_float_t)1.0;
+    return HT_CONST(1.0);
 }
 
 static ht_float_t ht_gini_merit_of_split(const ht_float_t pre_dist[HT_MAX_CLASSES],
@@ -40,32 +41,67 @@ static ht_float_t ht_gini_merit_of_split(const ht_float_t pre_dist[HT_MAX_CLASSE
                                          ht_float_t min_branch_fraction)
 {
     (void)pre_dist;
-    ht_float_t w_l = (ht_float_t)0.0;
-    ht_float_t w_r = (ht_float_t)0.0;
+#ifdef HT_USE_FIXED_POINT
+    int64_t w_l64 = 0;
+    int64_t w_r64 = 0;
+    for (uint8_t c = 0; c < n_classes; c++) {
+        if (lhs_dist[c] > 0) w_l64 += (int64_t)lhs_dist[c];
+        if (rhs_dist[c] > 0) w_r64 += (int64_t)rhs_dist[c];
+    }
+    int64_t total64 = w_l64 + w_r64;
+    if (total64 <= 0) {
+        return -HT_INFINITY;
+    }
+    ht_float_t frac_l = (ht_float_t)((((uint64_t)w_l64 << 16) + ((uint64_t)total64 >> 1)) / (uint64_t)total64);
+    ht_float_t frac_r = (ht_float_t)((((uint64_t)w_r64 << 16) + ((uint64_t)total64 >> 1)) / (uint64_t)total64);
+    if (frac_l <= min_branch_fraction || frac_r <= min_branch_fraction) {
+        return -HT_INFINITY;
+    }
+    /* Compute branch Ginis in 64-bit denominator to avoid saturation on large sums */
+    ht_float_t gini_l = HT_FIXED_ONE;
+    for (uint8_t c = 0; c < n_classes; c++) {
+        if (lhs_dist[c] > 0) {
+            ht_float_t p = (ht_float_t)((((uint64_t)(uint32_t)lhs_dist[c] << 16) + ((uint64_t)w_l64 >> 1)) / (uint64_t)w_l64);
+            gini_l = HT_SUB(gini_l, HT_MUL(p, p));
+        }
+    }
+    ht_float_t gini_r = HT_FIXED_ONE;
+    for (uint8_t c = 0; c < n_classes; c++) {
+        if (rhs_dist[c] > 0) {
+            ht_float_t p = (ht_float_t)((((uint64_t)(uint32_t)rhs_dist[c] << 16) + ((uint64_t)w_r64 >> 1)) / (uint64_t)w_r64);
+            gini_r = HT_SUB(gini_r, HT_MUL(p, p));
+        }
+    }
+    ht_float_t gini = HT_ADD(HT_MUL(frac_l, gini_l), HT_MUL(frac_r, gini_r));
+    return HT_SUB(HT_FIXED_ONE, gini);
+#else
+    ht_float_t w_l = HT_CONST(0.0);
+    ht_float_t w_r = HT_CONST(0.0);
 
     for (uint8_t c = 0; c < n_classes; c++) {
-        if (lhs_dist[c] > (ht_float_t)0.0) {
-            w_l += lhs_dist[c];
+        if (lhs_dist[c] > HT_CONST(0.0)) {
+            w_l = HT_ADD(w_l, lhs_dist[c]);
         }
-        if (rhs_dist[c] > (ht_float_t)0.0) {
-            w_r += rhs_dist[c];
+        if (rhs_dist[c] > HT_CONST(0.0)) {
+            w_r = HT_ADD(w_r, rhs_dist[c]);
         }
     }
 
-    ht_float_t total_weight = w_l + w_r;
-    if (total_weight <= (ht_float_t)0.0) {
+    ht_float_t total_weight = HT_ADD(w_l, w_r);
+    if (total_weight <= HT_CONST(0.0)) {
         return -HT_INFINITY;
     }
 
-    if ((w_l / total_weight) <= min_branch_fraction ||
-        (w_r / total_weight) <= min_branch_fraction) {
+    if (HT_DIV(w_l, total_weight) <= min_branch_fraction ||
+        HT_DIV(w_r, total_weight) <= min_branch_fraction) {
         return -HT_INFINITY;
     }
 
-    ht_float_t gini = (w_l / total_weight) * ht_compute_gini(lhs_dist, n_classes, w_l) +
-                      (w_r / total_weight) * ht_compute_gini(rhs_dist, n_classes, w_r);
+    ht_float_t gini = HT_ADD(HT_MUL(HT_DIV(w_l, total_weight), ht_compute_gini(lhs_dist, n_classes, w_l)),
+                             HT_MUL(HT_DIV(w_r, total_weight), ht_compute_gini(rhs_dist, n_classes, w_r)));
 
-    return (ht_float_t)1.0 - gini;
+    return HT_SUB(HT_CONST(1.0), gini);
+#endif
 }
 
 static const ht_criterion_vtable_t s_gini_vtable = {
@@ -80,21 +116,44 @@ static const ht_criterion_vtable_t s_gini_vtable = {
 ht_float_t ht_compute_entropy(const ht_float_t dist[HT_MAX_CLASSES],
                               uint8_t n_classes)
 {
-    ht_float_t entropy = (ht_float_t)0.0;
-    ht_float_t dis_sums = (ht_float_t)0.0;
+#ifdef HT_USE_FIXED_POINT
+    int64_t sum64 = 0;
+    for (uint8_t c = 0; c < n_classes; c++) {
+        if (dist[c] > 0) {
+            sum64 += (int64_t)dist[c];
+        }
+    }
+    if (sum64 <= 0) {
+        return 0;
+    }
+    /* Normalize p_c = w_c / W in [0, 1] so p_c * log2(p_c) never overflows Q16.16 */
+    ht_float_t entropy = 0;
+    for (uint8_t c = 0; c < n_classes; c++) {
+        if (dist[c] > 0) {
+            ht_float_t p = (ht_float_t)((((uint64_t)(uint32_t)dist[c] << 16) + ((uint64_t)sum64 >> 1)) / (uint64_t)sum64);
+            if (p > 0 && p < HT_FIXED_ONE) {
+                entropy = HT_SUB(entropy, HT_MUL(p, HT_LOG2(p)));
+            }
+        }
+    }
+    return (entropy > 0) ? entropy : 0;
+#else
+    ht_float_t entropy = HT_CONST(0.0);
+    ht_float_t dis_sums = HT_CONST(0.0);
 
     for (uint8_t c = 0; c < n_classes; c++) {
-        if (dist[c] > (ht_float_t)0.0) {
-            entropy -= dist[c] * HT_LOG2(dist[c]);
-            dis_sums += dist[c];
+        if (dist[c] > HT_CONST(0.0)) {
+            entropy = HT_SUB(entropy, HT_MUL(dist[c], HT_LOG2(dist[c])));
+            dis_sums = HT_ADD(dis_sums, dist[c]);
         }
     }
 
-    if (dis_sums > (ht_float_t)0.0) {
-        return (entropy + dis_sums * HT_LOG2(dis_sums)) / dis_sums;
+    if (dis_sums > HT_CONST(0.0)) {
+        return HT_DIV(HT_ADD(entropy, HT_MUL(dis_sums, HT_LOG2(dis_sums))), dis_sums);
     }
 
-    return (ht_float_t)0.0;
+    return HT_CONST(0.0);
+#endif
 }
 
 static ht_float_t ht_info_gain_range_of_merit(const ht_float_t pre_dist[HT_MAX_CLASSES],
@@ -102,13 +161,13 @@ static ht_float_t ht_info_gain_range_of_merit(const ht_float_t pre_dist[HT_MAX_C
 {
     uint8_t num_observed = 0;
     for (uint8_t c = 0; c < n_classes; c++) {
-        if (pre_dist[c] > (ht_float_t)0.0) {
+        if (pre_dist[c] > HT_CONST(0.0)) {
             num_observed++;
         }
     }
 
     uint8_t k = (num_observed > 2) ? num_observed : 2;
-    return HT_LOG2((ht_float_t)k);
+    return HT_LOG2(HT_FROM_UINT(k));
 }
 
 static ht_float_t ht_info_gain_merit_of_split(const ht_float_t pre_dist[HT_MAX_CLASSES],
@@ -117,33 +176,57 @@ static ht_float_t ht_info_gain_merit_of_split(const ht_float_t pre_dist[HT_MAX_C
                                               uint8_t n_classes,
                                               ht_float_t min_branch_fraction)
 {
-    ht_float_t w_l = (ht_float_t)0.0;
-    ht_float_t w_r = (ht_float_t)0.0;
+#ifdef HT_USE_FIXED_POINT
+    int64_t w_l64 = 0;
+    int64_t w_r64 = 0;
+    for (uint8_t c = 0; c < n_classes; c++) {
+        if (lhs_dist[c] > 0) w_l64 += (int64_t)lhs_dist[c];
+        if (rhs_dist[c] > 0) w_r64 += (int64_t)rhs_dist[c];
+    }
+    int64_t total64 = w_l64 + w_r64;
+    if (total64 <= 0) {
+        return -HT_INFINITY;
+    }
+    ht_float_t frac_l = (ht_float_t)((((uint64_t)w_l64 << 16) + ((uint64_t)total64 >> 1)) / (uint64_t)total64);
+    ht_float_t frac_r = (ht_float_t)((((uint64_t)w_r64 << 16) + ((uint64_t)total64 >> 1)) / (uint64_t)total64);
+    if (frac_l <= min_branch_fraction || frac_r <= min_branch_fraction) {
+        return -HT_INFINITY;
+    }
+    ht_float_t post_entropy = HT_ADD(HT_MUL(frac_l, ht_compute_entropy(lhs_dist, n_classes)),
+                                     HT_MUL(frac_r, ht_compute_entropy(rhs_dist, n_classes)));
+    ht_float_t pre_entropy = ht_compute_entropy(pre_dist, n_classes);
+    return HT_SUB(pre_entropy, post_entropy);
+#else
+    ht_float_t w_l = HT_CONST(0.0);
+    ht_float_t w_r = HT_CONST(0.0);
 
     for (uint8_t c = 0; c < n_classes; c++) {
-        if (lhs_dist[c] > (ht_float_t)0.0) {
-            w_l += lhs_dist[c];
+        if (lhs_dist[c] > HT_CONST(0.0)) {
+            w_l = HT_ADD(w_l, lhs_dist[c]);
         }
-        if (rhs_dist[c] > (ht_float_t)0.0) {
-            w_r += rhs_dist[c];
+        if (rhs_dist[c] > HT_CONST(0.0)) {
+            w_r = HT_ADD(w_r, rhs_dist[c]);
         }
     }
 
-    ht_float_t total_weight = w_l + w_r;
-    if (total_weight <= (ht_float_t)0.0) {
+    ht_float_t total_weight = HT_ADD(w_l, w_r);
+    if (total_weight <= HT_CONST(0.0)) {
         return -HT_INFINITY;
     }
 
-    if ((w_l / total_weight) <= min_branch_fraction ||
-        (w_r / total_weight) <= min_branch_fraction) {
+    if (HT_DIV(w_l, total_weight) <= min_branch_fraction ||
+        HT_DIV(w_r, total_weight) <= min_branch_fraction) {
         return -HT_INFINITY;
     }
 
-    ht_float_t post_entropy = (w_l * ht_compute_entropy(lhs_dist, n_classes) +
-                               w_r * ht_compute_entropy(rhs_dist, n_classes)) / total_weight;
+    ht_float_t post_entropy = HT_DIV(
+        HT_ADD(HT_MUL(w_l, ht_compute_entropy(lhs_dist, n_classes)),
+               HT_MUL(w_r, ht_compute_entropy(rhs_dist, n_classes))),
+        total_weight);
     ht_float_t pre_entropy = ht_compute_entropy(pre_dist, n_classes);
 
-    return pre_entropy - post_entropy;
+    return HT_SUB(pre_entropy, post_entropy);
+#endif
 }
 
 static const ht_criterion_vtable_t s_info_gain_vtable = {
@@ -160,7 +243,7 @@ static ht_float_t ht_vr_range_of_merit(const ht_float_t pre_dist[HT_MAX_CLASSES]
 {
     (void)pre_dist;
     (void)n_classes;
-    return (ht_float_t)1.0;
+    return HT_CONST(1.0);
 }
 
 static ht_float_t ht_vr_merit_of_split(const ht_float_t pre_dist[HT_MAX_CLASSES],
@@ -200,18 +283,58 @@ const ht_criterion_vtable_t *ht_criterion_get_vtable(ht_criterion_type_t type)
     }
 }
 
+ht_float_t ht_hoeffding_bound_ln(ht_float_t range_val,
+                                 ht_float_t neg_ln_delta,
+                                 ht_float_t total_weight)
+{
+    if (total_weight <= HT_CONST(0.0) || neg_ln_delta < HT_CONST(0.0)) {
+        return HT_INFINITY;
+    }
+    if (neg_ln_delta == HT_CONST(0.0)) {
+        return HT_CONST(0.0);
+    }
+#ifdef HT_USE_FIXED_POINT
+    if (!HT_ISFINITE(range_val) || !HT_ISFINITE(neg_ln_delta)) {
+        return HT_INFINITY;
+    }
+    uint64_t ar = (range_val < 0) ? (uint64_t)(-(int64_t)range_val) : (uint64_t)range_val;
+    uint64_t r2_q16 = (ar * ar + 32768ULL) >> 16;
+    uint64_t num_q16 = (r2_q16 * (uint64_t)(uint32_t)neg_ln_delta + 32768ULL) >> 16;
+    uint64_t denom = 2ULL * (uint64_t)(uint32_t)total_weight;
+    uint64_t radicand_q16;
+    if (num_q16 <= (UINT64_MAX >> 16)) {
+        radicand_q16 = ((num_q16 << 16) + (denom >> 1)) / denom;
+    } else {
+        radicand_q16 = (num_q16 / denom) << 16;
+    }
+    if (radicand_q16 >= (uint64_t)INT32_MAX) {
+        return HT_SQRT(INT32_MAX);
+    }
+    return HT_SQRT((ht_float_t)radicand_q16);
+#else
+    return HT_SQRT(HT_DIV(HT_MUL(HT_MUL(range_val, range_val), neg_ln_delta),
+                          HT_MUL(HT_CONST(2.0), total_weight)));
+#endif
+}
+
 ht_float_t ht_hoeffding_bound(ht_float_t range_val,
                               ht_float_t delta,
                               ht_float_t total_weight)
 {
-    if (total_weight <= (ht_float_t)0.0 || delta <= (ht_float_t)0.0) {
+    if (total_weight <= HT_CONST(0.0) || delta <= HT_CONST(0.0)) {
         return HT_INFINITY;
     }
-    if (delta >= (ht_float_t)1.0) {
-        return (ht_float_t)0.0;
+    if (delta >= HT_CONST(1.0)) {
+        return HT_CONST(0.0);
     }
-    return HT_SQRT((range_val * range_val * HT_LOG((ht_float_t)1.0 / delta)) /
-                   ((ht_float_t)2.0 * total_weight));
+#ifdef HT_USE_FIXED_POINT
+    /* Use -ln(delta) directly to avoid 1/delta overflow for small delta */
+    ht_float_t neg_ln_delta = -HT_LOG(delta);
+    return ht_hoeffding_bound_ln(range_val, neg_ln_delta, total_weight);
+#else
+    return HT_SQRT(HT_DIV(HT_MUL(HT_MUL(range_val, range_val), HT_LOG(HT_DIV(HT_CONST(1.0), delta))),
+                          HT_MUL(HT_CONST(2.0), total_weight)));
+#endif
 }
 
 void ht_evaluate_numeric_observer(const ht_gaussian_obs_t obs[HT_MAX_CLASSES],
@@ -449,7 +572,7 @@ bool ht_should_split(const ht_split_candidate_t *best,
         return true;
     }
 
-    ht_float_t diff = best->merit - second_best->merit;
+    ht_float_t diff = HT_SUB(best->merit, second_best->merit);
     if (diff > hoeffding_bound || hoeffding_bound < tau) {
         return true;
     }
@@ -461,12 +584,141 @@ bool ht_should_split(const ht_split_candidate_t *best,
 /* --- Regression Variance Reduction Split Criterion Implementation ------- */
 /* ========================================================================= */
 
+#ifdef HT_USE_FIXED_POINT
+typedef struct {
+    int64_t count; /* Q16.16 */
+    int64_t mean;  /* Q16.16 */
+    int64_t m2;    /* Q26.6 (HT_FIXED_M2_SHIFT) */
+} ht_var64_t;
+
+static ht_var64_t ht_var64_from_stat(const ht_var_stat_t *s)
+{
+    ht_var64_t v;
+    v.count = (int64_t)s->count;
+    v.mean = (int64_t)s->mean;
+    v.m2 = (int64_t)s->m2;
+    return v;
+}
+
+static ht_var_stat_t ht_var64_to_stat(ht_var64_t v)
+{
+    ht_var_stat_t s;
+    while ((v.count >= (int64_t)HT_FIXED_RESCALE_THRESHOLD ||
+            v.m2 >= (int64_t)HT_FIXED_M2_RESCALE_THR) &&
+           v.count >= (4LL * HT_FIXED_ONE)) {
+        v.count = (int64_t)((uint64_t)v.count >> 1);
+        v.m2 = (v.m2 > 0) ? (int64_t)((uint64_t)v.m2 >> 1) : 0;
+    }
+    s.count = ht_fixed_saturate64(v.count);
+    s.mean = ht_fixed_saturate64(v.mean);
+    s.m2 = (v.m2 > 0) ? ht_fixed_saturate64(v.m2) : 0;
+    return s;
+}
+
+static ht_var64_t ht_var64_combine(ht_var64_t a, ht_var64_t b)
+{
+    if (a.count <= 0) return b;
+    if (b.count <= 0) return a;
+    ht_var64_t c;
+    c.count = a.count + b.count;
+    int64_t delta = b.mean - a.mean;
+    c.mean = a.mean + ((delta * b.count) / c.count);
+    int64_t ad = (delta < 0) ? -delta : delta;
+    const unsigned int rshift = (unsigned int)(2 * HT_FIXED_SHIFT - HT_FIXED_M2_SHIFT);
+    uint64_t dsq_m2 = ((uint64_t)ad * (uint64_t)ad + (1ULL << (rshift - 1U))) >> rshift;
+    uint64_t w_term = ((uint64_t)a.count * (uint64_t)b.count) / (uint64_t)c.count;
+    uint64_t cross_m2;
+    if (dsq_m2 <= (UINT64_MAX >> 16) && w_term <= (1ULL << 32)) {
+        cross_m2 = (dsq_m2 * w_term + 32768ULL) >> 16;
+    } else {
+        cross_m2 = (dsq_m2 >> 8) * (w_term >> 8);
+    }
+    c.m2 = a.m2 + b.m2 + (int64_t)cross_m2;
+    return c;
+}
+
+static int64_t ht_var64_value_m2(ht_var64_t v)
+{
+    if (v.count <= (int64_t)HT_FIXED_ONE || v.m2 <= 0) {
+        return 0;
+    }
+    uint64_t denom = (uint64_t)(v.count - (int64_t)HT_FIXED_ONE);
+    uint64_t m2u = (uint64_t)v.m2;
+    if (m2u <= (UINT64_MAX >> 16)) {
+        return (int64_t)(((m2u << 16) + (denom >> 1)) / denom);
+    }
+    return (int64_t)((m2u / denom) << 16);
+}
+
+static ht_float_t ht_compute_vr64(ht_var64_t pre,
+                                  ht_var64_t lhs,
+                                  ht_var64_t rhs,
+                                  ht_float_t min_samples_split,
+                                  ht_float_t min_branch_frac,
+                                  bool scale_large_var)
+{
+    int64_t n_sum = lhs.count + rhs.count;
+    if (pre.count <= (2LL * HT_FIXED_ONE) || n_sum <= 0 ||
+        lhs.count < (int64_t)min_samples_split || rhs.count < (int64_t)min_samples_split) {
+        return -HT_INFINITY;
+    }
+
+    int64_t frac_l = (int64_t)((((uint64_t)lhs.count << 16) + ((uint64_t)n_sum >> 1)) / (uint64_t)n_sum);
+    int64_t frac_r = (int64_t)((((uint64_t)rhs.count << 16) + ((uint64_t)n_sum >> 1)) / (uint64_t)n_sum);
+    if (frac_l < (int64_t)min_branch_frac || frac_r < (int64_t)min_branch_frac) {
+        return -HT_INFINITY;
+    }
+
+    int64_t var_pre_m2 = ht_var64_value_m2(pre);
+    int64_t var_l_m2 = ht_var64_value_m2(lhs);
+    int64_t var_r_m2 = ht_var64_value_m2(rhs);
+
+    int64_t post_m2 = ((lhs.count * var_l_m2) + (rhs.count * var_r_m2)) / n_sum;
+    int64_t vr_m2 = var_pre_m2 - post_m2;
+
+    const unsigned int lshift = (unsigned int)(HT_FIXED_SHIFT - HT_FIXED_M2_SHIFT);
+    if (scale_large_var && var_pre_m2 > (16384LL << HT_FIXED_M2_SHIFT)) {
+        int64_t scaled_m2 = (vr_m2 * (16384LL << HT_FIXED_M2_SHIFT)) / var_pre_m2;
+        int64_t scaled_q16 = (scaled_m2 >= 0)
+            ? (int64_t)((uint64_t)scaled_m2 << lshift)
+            : -(int64_t)((uint64_t)(-scaled_m2) << lshift);
+        return ht_fixed_saturate64(scaled_q16);
+    }
+
+    int64_t vr_q16 = (vr_m2 >= 0)
+        ? (int64_t)((uint64_t)vr_m2 << lshift)
+        : -(int64_t)((uint64_t)(-vr_m2) << lshift);
+    return ht_fixed_saturate64(vr_q16);
+}
+
+static ht_float_t ht_compute_vr_internal(const ht_var_stat_t *pre_var,
+                                         const ht_var_stat_t *lhs_var,
+                                         const ht_var_stat_t *rhs_var,
+                                         ht_float_t min_samples_split,
+                                         ht_float_t min_branch_frac,
+                                         bool scale_large_var)
+{
+    if (pre_var == NULL || lhs_var == NULL || rhs_var == NULL) {
+        return -HT_INFINITY;
+    }
+    return ht_compute_vr64(ht_var64_from_stat(pre_var),
+                           ht_var64_from_stat(lhs_var),
+                           ht_var64_from_stat(rhs_var),
+                           min_samples_split,
+                           min_branch_frac,
+                           scale_large_var);
+}
+#endif
+
 ht_float_t ht_compute_variance_reduction(const ht_var_stat_t *pre_var,
                                          const ht_var_stat_t *lhs_var,
                                          const ht_var_stat_t *rhs_var,
                                          ht_float_t min_samples_split,
                                          ht_float_t min_branch_frac)
 {
+#ifdef HT_USE_FIXED_POINT
+    return ht_compute_vr_internal(pre_var, lhs_var, rhs_var, min_samples_split, min_branch_frac, false);
+#else
     if (pre_var == NULL || lhs_var == NULL || rhs_var == NULL) {
         return -HT_INFINITY;
     }
@@ -475,11 +727,11 @@ ht_float_t ht_compute_variance_reduction(const ht_var_stat_t *pre_var,
     ht_float_t n_l = lhs_var->count;
     ht_float_t n_r = rhs_var->count;
 
-    if (n_pre <= (ht_float_t)2.0 || n_l < min_samples_split || n_r < min_samples_split) {
+    if (n_pre <= HT_CONST(2.0) || n_l < min_samples_split || n_r < min_samples_split) {
         return -HT_INFINITY;
     }
 
-    if ((n_l / n_pre) < min_branch_frac || (n_r / n_pre) < min_branch_frac) {
+    if (HT_DIV(n_l, n_pre) < min_branch_frac || HT_DIV(n_r, n_pre) < min_branch_frac) {
         return -HT_INFINITY;
     }
 
@@ -487,8 +739,11 @@ ht_float_t ht_compute_variance_reduction(const ht_var_stat_t *pre_var,
     ht_float_t var_l = ht_var_value(lhs_var);
     ht_float_t var_r = ht_var_value(rhs_var);
 
-    ht_float_t vr = var_pre - ((n_l / n_pre) * var_l + (n_r / n_pre) * var_r);
+    ht_float_t vr = HT_SUB(var_pre,
+                           HT_ADD(HT_MUL(HT_DIV(n_l, n_pre), var_l),
+                                  HT_MUL(HT_DIV(n_r, n_pre), var_r)));
     return vr;
+#endif
 }
 
 void ht_evaluate_reg_numeric_observer(const ht_reg_numeric_obs_t *obs,
@@ -510,7 +765,7 @@ void ht_evaluate_reg_numeric_observer(const ht_reg_numeric_obs_t *obs,
 
     /* Count active slots in obs->slots (slots are strictly packed 0..m-1) */
     uint8_t m = 0;
-    while (m < HT_REG_NUM_SLOTS && obs->slots[m].y_stats.count > (ht_float_t)0.0) {
+    while (m < HT_REG_NUM_SLOTS && obs->slots[m].y_stats.count > HT_CONST(0.0)) {
         m++;
     }
 
@@ -518,6 +773,42 @@ void ht_evaluate_reg_numeric_observer(const ht_reg_numeric_obs_t *obs,
         return;
     }
 
+#ifdef HT_USE_FIXED_POINT
+    /* Exact 64-bit prefix/suffix variance combination (zero Block-Rescaling distortion, zero stack array) */
+    ht_var64_t total64 = {0, 0, 0};
+    for (uint8_t j = 0; j < m; ++j) {
+        total64 = ht_var64_combine(total64, ht_var64_from_stat(&obs->slots[j].y_stats));
+    }
+
+    ht_var64_t lhs64 = {0, 0, 0};
+    for (uint8_t k = 0; k < m - 1; k++) {
+        lhs64 = ht_var64_combine(lhs64, ht_var64_from_stat(&obs->slots[k].y_stats));
+
+        /* Skip duplicate adjacent x_means */
+        if (obs->slots[k + 1].x_mean <= obs->slots[k].x_mean) {
+            continue;
+        }
+
+        ht_float_t threshold = HT_MUL(HT_ADD(obs->slots[k].x_mean, obs->slots[k + 1].x_mean), HT_CONST(0.5));
+
+        ht_var64_t rhs64 = {0, 0, 0};
+        for (uint8_t j = (uint8_t)(k + 1U); j < m; ++j) {
+            rhs64 = ht_var64_combine(rhs64, ht_var64_from_stat(&obs->slots[j].y_stats));
+        }
+
+        ht_float_t merit = ht_compute_vr64(total64, lhs64, rhs64,
+                                           min_samples_split, min_branch_frac, true);
+
+        if (merit > out_best->merit) {
+            out_best->merit = merit;
+            out_best->feature_idx = feature_idx;
+            out_best->split_val.threshold = threshold;
+            out_best->lhs_var = ht_var64_to_stat(lhs64);
+            out_best->rhs_var = ht_var64_to_stat(rhs64);
+            out_best->is_categorical = 0;
+        }
+    }
+#else
     ht_var_stat_t lhs_var;
     ht_var_init(&lhs_var);
 
@@ -533,9 +824,8 @@ void ht_evaluate_reg_numeric_observer(const ht_reg_numeric_obs_t *obs,
             continue;
         }
 
+        ht_float_t threshold = HT_MUL(HT_ADD(obs->slots[k].x_mean, obs->slots[k + 1].x_mean), HT_CONST(0.5));
         ht_var_stat_t rhs_var = ht_var_subtract(pre_var, &lhs_var);
-        ht_float_t threshold = (obs->slots[k].x_mean + obs->slots[k + 1].x_mean) / (ht_float_t)2.0;
-
         ht_float_t merit = ht_compute_variance_reduction(pre_var, &lhs_var, &rhs_var,
                                                          min_samples_split, min_branch_frac);
 
@@ -548,6 +838,7 @@ void ht_evaluate_reg_numeric_observer(const ht_reg_numeric_obs_t *obs,
             out_best->is_categorical = 0;
         }
     }
+#endif
 }
 
 void ht_evaluate_reg_categorical_observer(const ht_reg_categorical_obs_t *obs,
@@ -568,15 +859,28 @@ void ht_evaluate_reg_categorical_observer(const ht_reg_categorical_obs_t *obs,
     }
 
     for (int32_t cat_v = 0; cat_v < (int32_t)HT_MAX_CATEGORIES; cat_v++) {
-        if (obs->cat_stats[cat_v].count <= (ht_float_t)0.0) {
+        if (obs->cat_stats[cat_v].count <= HT_CONST(0.0)) {
             continue;
         }
 
         const ht_var_stat_t *lhs_var = &obs->cat_stats[cat_v];
+#ifdef HT_USE_FIXED_POINT
+        ht_var64_t lhs64 = ht_var64_from_stat(lhs_var);
+        ht_var64_t rhs64 = {0, 0, 0};
+        for (int32_t u = 0; u < (int32_t)HT_MAX_CATEGORIES; u++) {
+            if (u != cat_v && obs->cat_stats[u].count > 0) {
+                rhs64 = ht_var64_combine(rhs64, ht_var64_from_stat(&obs->cat_stats[u]));
+            }
+        }
+        ht_var64_t pre64 = ht_var64_combine(lhs64, rhs64);
+        ht_float_t merit = ht_compute_vr64(pre64, lhs64, rhs64,
+                                           min_samples_split, min_branch_frac, true);
+        ht_var_stat_t rhs_var = ht_var64_to_stat(rhs64);
+#else
         ht_var_stat_t rhs_var = ht_var_subtract(pre_var, lhs_var);
-
         ht_float_t merit = ht_compute_variance_reduction(pre_var, lhs_var, &rhs_var,
                                                          min_samples_split, min_branch_frac);
+#endif
 
         if (merit > out_best->merit) {
             out_best->merit = merit;
@@ -666,17 +970,17 @@ bool ht_should_split_reg(const ht_split_candidate_t *best,
                          ht_float_t hoeffding_bound,
                          ht_float_t tau)
 {
-    if (best == NULL || best->merit <= (ht_float_t)0.0 || best->feature_idx == HT_NO_FEATURE) {
+    if (best == NULL || best->merit <= HT_CONST(0.0) || best->feature_idx == HT_NO_FEATURE) {
         return false;
     }
 
     if (second_best == NULL || second_best->feature_idx == HT_NO_FEATURE ||
-        second_best->merit == -HT_INFINITY || second_best->merit <= (ht_float_t)0.0) {
+        second_best->merit == -HT_INFINITY || second_best->merit <= HT_CONST(0.0)) {
         return true;
     }
 
-    ht_float_t ratio = second_best->merit / best->merit;
-    if (ratio < ((ht_float_t)1.0 - hoeffding_bound) || hoeffding_bound < tau) {
+    ht_float_t ratio = HT_DIV(second_best->merit, best->merit);
+    if (ratio < HT_SUB(HT_CONST(1.0), hoeffding_bound) || hoeffding_bound < tau) {
         return true;
     }
 

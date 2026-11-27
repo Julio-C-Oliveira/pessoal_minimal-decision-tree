@@ -16,6 +16,7 @@
 
 #define HT_FED_FLAG_DOUBLE    (1U << 0)
 #define HT_FED_FLAG_REG       (1U << 1)
+#define HT_FED_FLAG_FIXED     (1U << 2) /**< Wire payload uses Q16.16 fixed-point ht_float_t */
 
 /**
  * @brief Federated wire message types.

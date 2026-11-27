@@ -58,6 +58,7 @@ typedef struct {
     bool                merit_preprune;                 /**< Include null split candidate (default: true) */
     bool                enable_hat;                     /**< Enable HAT concept drift adaptation */
     bool                bootstrap_sampling;             /**< Enable Poisson(1) online bootstrap sampling */
+    uint8_t             delta_neg_log10;                /**< Optional -log10(delta) exponent (e.g. 7 for 1e-7) used when delta == 0 in Q16.16 (0 extra bytes, uses padding) */
     uint16_t            drift_window_threshold;         /**< Min samples before alternate tree replacement (default: 300) */
     ht_float_t          switch_significance;            /**< Significance for alternate tree replacement (default: 0.05) */
     ht_float_t          adwin_delta;                    /**< Confidence parameter for ADWIN detectors (default: 0.002) */
@@ -123,6 +124,7 @@ _Static_assert(sizeof(ht_tree_t) <= (1024 * 1024), "ht_tree_t exceeds 1 MB RAM b
 #define HT_SERIAL_FLAG_DOUBLE (1U << 0)
 #define HT_SERIAL_FLAG_STATS  (1U << 1)
 #define HT_SERIAL_FLAG_REG    (1U << 2)
+#define HT_SERIAL_FLAG_FIXED  (1U << 3)    /**< Serialized with Q16.16 fixed-point ht_float_t */
 
 /**
  * @brief Binary image header for serialized Hoeffding Tree models.
@@ -155,6 +157,17 @@ typedef struct {
  * @param n_classes Number of target classes (2 .. HT_MAX_CLASSES).
  */
 void ht_default_params(ht_config_params_t *params, uint8_t n_features, uint8_t n_classes);
+
+/**
+ * @brief Sets split confidence delta = 10^(-neg_log10) cleanly across all precision modes.
+ *
+ * In Q16.16 fixed-point mode, allows exact representation of sub-ULP deltas such as 1e-7
+ * via ln(1/delta) = neg_log10 * ln(10) without underflow.
+ *
+ * @param params Parameters struct to update.
+ * @param neg_log10 Positive base-10 negative exponent (1..15, e.g. 7 for 1e-7).
+ */
+void ht_params_set_delta_pow10(ht_config_params_t *params, uint8_t neg_log10);
 
 /**
  * @brief Initializes a Hoeffding Tree instance with the specified parameters.

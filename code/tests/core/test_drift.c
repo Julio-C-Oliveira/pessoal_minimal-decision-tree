@@ -16,7 +16,7 @@ static void test_adwin_default_config_and_init(void) {
     ht_adwin_config_t cfg;
     ht_adwin_default_config(&cfg);
 
-    HT_ASSERT_FLOAT_NEAR(cfg.delta, (ht_float_t)0.002, (ht_float_t)1e-6);
+    HT_ASSERT_FLOAT_NEAR(cfg.delta, HT_CONST(0.002), HT_TEST_TOL(1e-6));
     HT_ASSERT_EQ(cfg.clock, 32U);
     HT_ASSERT_EQ(cfg.min_window_length, 5U);
     HT_ASSERT_EQ(cfg.grace_period, 10U);
@@ -26,9 +26,9 @@ static void test_adwin_default_config_and_init(void) {
     ht_adwin_t ad;
     HT_ASSERT_EQ(ht_adwin_init(&ad, NULL), HT_OK);
     HT_ASSERT_EQ(ht_adwin_get_width(&ad), 0U);
-    HT_ASSERT_FLOAT_EQ(ht_adwin_get_total(&ad), (ht_float_t)0.0);
-    HT_ASSERT_FLOAT_EQ(ht_adwin_get_variance(&ad), (ht_float_t)0.0);
-    HT_ASSERT_FLOAT_EQ(ht_adwin_get_estimation(&ad), (ht_float_t)0.0);
+    HT_ASSERT_FLOAT_EQ(ht_adwin_get_total(&ad), HT_CONST(0.0));
+    HT_ASSERT_FLOAT_EQ(ht_adwin_get_variance(&ad), HT_CONST(0.0));
+    HT_ASSERT_FLOAT_EQ(ht_adwin_get_estimation(&ad), HT_CONST(0.0));
     HT_ASSERT_EQ(ht_adwin_get_n_detections(&ad), 0U);
     HT_ASSERT_EQ(ad.last_bucket_row, 0U);
     HT_ASSERT(!ad.drift_detected);
@@ -37,11 +37,11 @@ static void test_adwin_default_config_and_init(void) {
     HT_ASSERT_EQ(ht_adwin_init(NULL, NULL), HT_ERR_INVALID_ARG);
 
     ht_adwin_config_t bad_cfg = cfg;
-    bad_cfg.delta = (ht_float_t)0.0; /* delta must be > 0 */
+    bad_cfg.delta = HT_CONST(0.0); /* delta must be > 0 */
     HT_ASSERT_EQ(ht_adwin_init(&ad, &bad_cfg), HT_ERR_INVALID_ARG);
 
     bad_cfg = cfg;
-    bad_cfg.delta = (ht_float_t)1.0; /* delta must be < 1 */
+    bad_cfg.delta = HT_CONST(1.0); /* delta must be < 1 */
     HT_ASSERT_EQ(ht_adwin_init(&ad, &bad_cfg), HT_ERR_INVALID_ARG);
 
     bad_cfg = cfg;
@@ -62,39 +62,39 @@ static void test_adwin_single_and_incremental_stats(void) {
     HT_ASSERT_EQ(ht_adwin_init(&ad, NULL), HT_OK);
 
     /* Insert 1st element: 5.0 */
-    bool drift = ht_adwin_update(&ad, (ht_float_t)5.0);
+    bool drift = ht_adwin_update(&ad, HT_CONST(5.0));
     HT_ASSERT(!drift);
     HT_ASSERT_EQ(ht_adwin_get_width(&ad), 1U);
-    HT_ASSERT_FLOAT_EQ(ht_adwin_get_total(&ad), (ht_float_t)5.0);
-    HT_ASSERT_FLOAT_EQ(ht_adwin_get_estimation(&ad), (ht_float_t)5.0);
-    HT_ASSERT_FLOAT_EQ(ht_adwin_get_variance(&ad), (ht_float_t)0.0);
-    HT_ASSERT_FLOAT_EQ(ht_adwin_get_variance_in_window(&ad), (ht_float_t)0.0);
+    HT_ASSERT_FLOAT_EQ(ht_adwin_get_total(&ad), HT_CONST(5.0));
+    HT_ASSERT_FLOAT_EQ(ht_adwin_get_estimation(&ad), HT_CONST(5.0));
+    HT_ASSERT_FLOAT_EQ(ht_adwin_get_variance(&ad), HT_CONST(0.0));
+    HT_ASSERT_FLOAT_EQ(ht_adwin_get_variance_in_window(&ad), HT_CONST(0.0));
 
     /* Insert 2nd element: 15.0
      * n = 2, total = 20.0, mean = 10.0
      * M2 = (5-10)^2 + (15-10)^2 = 25 + 25 = 50.0
      * var_in_window = 50.0 / 2 = 25.0
      */
-    drift = ht_adwin_update(&ad, (ht_float_t)15.0);
+    drift = ht_adwin_update(&ad, HT_CONST(15.0));
     HT_ASSERT(!drift);
     HT_ASSERT_EQ(ht_adwin_get_width(&ad), 2U);
-    HT_ASSERT_FLOAT_EQ(ht_adwin_get_total(&ad), (ht_float_t)20.0);
-    HT_ASSERT_FLOAT_EQ(ht_adwin_get_estimation(&ad), (ht_float_t)10.0);
-    HT_ASSERT_FLOAT_NEAR(ht_adwin_get_variance(&ad), (ht_float_t)50.0, (ht_float_t)1e-4);
-    HT_ASSERT_FLOAT_NEAR(ht_adwin_get_variance_in_window(&ad), (ht_float_t)25.0, (ht_float_t)1e-4);
+    HT_ASSERT_FLOAT_EQ(ht_adwin_get_total(&ad), HT_CONST(20.0));
+    HT_ASSERT_FLOAT_EQ(ht_adwin_get_estimation(&ad), HT_CONST(10.0));
+    HT_ASSERT_FLOAT_NEAR(ht_adwin_get_variance(&ad), HT_CONST(50.0), HT_TEST_TOL(1e-4));
+    HT_ASSERT_FLOAT_NEAR(ht_adwin_get_variance_in_window(&ad), HT_CONST(25.0), HT_TEST_TOL(1e-4));
 
     /* Insert 3rd element: 10.0
      * n = 3, total = 30.0, mean = 10.0
      * M2 = 50.0 + (10 - 10)^2 = 50.0
      * var_in_window = 50.0 / 3 = 16.6667
      */
-    drift = ht_adwin_update(&ad, (ht_float_t)10.0);
+    drift = ht_adwin_update(&ad, HT_CONST(10.0));
     HT_ASSERT(!drift);
     HT_ASSERT_EQ(ht_adwin_get_width(&ad), 3U);
-    HT_ASSERT_FLOAT_EQ(ht_adwin_get_total(&ad), (ht_float_t)30.0);
-    HT_ASSERT_FLOAT_EQ(ht_adwin_get_estimation(&ad), (ht_float_t)10.0);
-    HT_ASSERT_FLOAT_NEAR(ht_adwin_get_variance(&ad), (ht_float_t)50.0, (ht_float_t)1e-4);
-    HT_ASSERT_FLOAT_NEAR(ht_adwin_get_variance_in_window(&ad), (ht_float_t)(50.0 / 3.0), (ht_float_t)1e-4);
+    HT_ASSERT_FLOAT_EQ(ht_adwin_get_total(&ad), HT_CONST(30.0));
+    HT_ASSERT_FLOAT_EQ(ht_adwin_get_estimation(&ad), HT_CONST(10.0));
+    HT_ASSERT_FLOAT_NEAR(ht_adwin_get_variance(&ad), HT_CONST(50.0), HT_TEST_TOL(1e-4));
+    HT_ASSERT_FLOAT_NEAR(ht_adwin_get_variance_in_window(&ad), HT_CONST(50.0 / 3.0), HT_TEST_TOL(1e-4));
 }
 
 static void test_adwin_bucket_compression_powers_of_two(void) {
@@ -105,7 +105,7 @@ static void test_adwin_bucket_compression_powers_of_two(void) {
      * max_buckets = 5: all fit in row 0 without compression
      */
     for (int i = 1; i <= 5; ++i) {
-        ht_adwin_update(&ad, (ht_float_t)i);
+        ht_adwin_update(&ad, HT_FROM_INT(i));
     }
     HT_ASSERT_EQ(ad.rows[0].count, 5U);
     HT_ASSERT_EQ(ad.rows[1].count, 0U);
@@ -117,29 +117,29 @@ static void test_adwin_bucket_compression_powers_of_two(void) {
      * Row 0 count becomes 5 + 1 - 2 = 4.
      * Row 1 count becomes 1.
      */
-    ht_adwin_update(&ad, (ht_float_t)6.0);
+    ht_adwin_update(&ad, HT_CONST(6.0));
     HT_ASSERT_EQ(ad.rows[0].count, 4U);
     HT_ASSERT_EQ(ad.rows[1].count, 1U);
-    HT_ASSERT_FLOAT_EQ(ad.rows[1].sum[0], (ht_float_t)3.0);
+    HT_ASSERT_FLOAT_EQ(ad.rows[1].sum[0], HT_CONST(3.0));
     HT_ASSERT_EQ(ad.last_bucket_row, 1U);
 
     /* Insert more elements to trigger cascading into level 2 (capacity 2^2 = 4) */
     for (int i = 7; i <= 16; ++i) {
-        ht_adwin_update(&ad, (ht_float_t)i);
+        ht_adwin_update(&ad, HT_FROM_INT(i));
     }
 
     /* Total elements = 16, total sum = 16*17/2 = 136 */
     HT_ASSERT_EQ(ht_adwin_get_width(&ad), 16U);
-    HT_ASSERT_FLOAT_EQ(ht_adwin_get_total(&ad), (ht_float_t)136.0);
+    HT_ASSERT_FLOAT_EQ(ht_adwin_get_total(&ad), HT_CONST(136.0));
 
     /* Verify sum of all active buckets equals total_sum */
-    ht_float_t sum_all_buckets = (ht_float_t)0.0;
+    ht_float_t sum_all_buckets = HT_CONST(0.0);
     for (uint8_t r = 0; r < HT_ADWIN_LEVELS; ++r) {
         for (uint8_t b = 0; b < ad.rows[r].count; ++b) {
-            sum_all_buckets += ad.rows[r].sum[b];
+            sum_all_buckets = HT_ADD(sum_all_buckets, ad.rows[r].sum[b]);
         }
     }
-    HT_ASSERT_FLOAT_NEAR(sum_all_buckets, (ht_float_t)136.0, (ht_float_t)1e-4);
+    HT_ASSERT_FLOAT_NEAR(sum_all_buckets, HT_CONST(136.0), HT_TEST_TOL(1e-4));
 }
 
 static void test_adwin_cut_epsilon_analytical(void) {
@@ -153,14 +153,14 @@ static void test_adwin_cut_epsilon_analytical(void) {
      * term2 = (2/3) * 8.43493 * 0.043478 = 0.244491
      * epsilon = 0.428215 + 0.244491 = 0.672706
      */
-    ht_float_t eps = ht_adwin_calculate_cut_epsilon(100U, 50U, 50U, (ht_float_t)0.25, (ht_float_t)0.002, 5U);
-    HT_ASSERT_FLOAT_NEAR(eps, (ht_float_t)0.672706, (ht_float_t)1e-3);
+    ht_float_t eps = ht_adwin_calculate_cut_epsilon(100U, 50U, 50U, HT_CONST(0.25), HT_CONST(0.002), 5U);
+    HT_ASSERT_FLOAT_NEAR(eps, HT_CONST(0.672706), HT_TEST_TOL(2e-3));
 
     /* Edge cases returning HT_INFINITY */
-    HT_ASSERT_FLOAT_EQ(ht_adwin_calculate_cut_epsilon(0U, 0U, 0U, (ht_float_t)0.25, (ht_float_t)0.002, 5U), HT_INFINITY);
-    HT_ASSERT_FLOAT_EQ(ht_adwin_calculate_cut_epsilon(1U, 0U, 1U, (ht_float_t)0.25, (ht_float_t)0.002, 5U), HT_INFINITY);
-    HT_ASSERT_FLOAT_EQ(ht_adwin_calculate_cut_epsilon(100U, 4U, 96U, (ht_float_t)0.25, (ht_float_t)0.002, 5U), HT_INFINITY);
-    HT_ASSERT_FLOAT_EQ(ht_adwin_calculate_cut_epsilon(100U, 50U, 50U, (ht_float_t)0.25, (ht_float_t)0.0, 5U), HT_INFINITY);
+    HT_ASSERT_FLOAT_EQ(ht_adwin_calculate_cut_epsilon(0U, 0U, 0U, HT_CONST(0.25), HT_CONST(0.002), 5U), HT_INFINITY);
+    HT_ASSERT_FLOAT_EQ(ht_adwin_calculate_cut_epsilon(1U, 0U, 1U, HT_CONST(0.25), HT_CONST(0.002), 5U), HT_INFINITY);
+    HT_ASSERT_FLOAT_EQ(ht_adwin_calculate_cut_epsilon(100U, 4U, 96U, HT_CONST(0.25), HT_CONST(0.002), 5U), HT_INFINITY);
+    HT_ASSERT_FLOAT_EQ(ht_adwin_calculate_cut_epsilon(100U, 50U, 50U, HT_CONST(0.25), HT_CONST(0.0), 5U), HT_INFINITY);
 }
 
 static void test_adwin_edge_cases_and_null(void) {
@@ -168,39 +168,38 @@ static void test_adwin_edge_cases_and_null(void) {
     HT_ASSERT_EQ(ht_adwin_init(&ad, NULL), HT_OK);
 
     /* NULL detector protection */
-    HT_ASSERT(!ht_adwin_update(NULL, (ht_float_t)1.0));
-    HT_ASSERT_FLOAT_EQ(ht_adwin_get_estimation(NULL), (ht_float_t)0.0);
-    HT_ASSERT_FLOAT_EQ(ht_adwin_get_variance(NULL), (ht_float_t)0.0);
-    HT_ASSERT_FLOAT_EQ(ht_adwin_get_variance_in_window(NULL), (ht_float_t)0.0);
-    HT_ASSERT_FLOAT_EQ(ht_adwin_get_total(NULL), (ht_float_t)0.0);
+    HT_ASSERT(!ht_adwin_update(NULL, HT_CONST(1.0)));
+    HT_ASSERT_FLOAT_EQ(ht_adwin_get_estimation(NULL), HT_CONST(0.0));
+    HT_ASSERT_FLOAT_EQ(ht_adwin_get_variance(NULL), HT_CONST(0.0));
+    HT_ASSERT_FLOAT_EQ(ht_adwin_get_variance_in_window(NULL), HT_CONST(0.0));
+    HT_ASSERT_FLOAT_EQ(ht_adwin_get_total(NULL), HT_CONST(0.0));
     HT_ASSERT_EQ(ht_adwin_get_width(NULL), 0U);
     HT_ASSERT_EQ(ht_adwin_get_n_detections(NULL), 0U);
     ht_adwin_reset(NULL);
 
     /* NaN and Infinity inputs must be safely ignored */
-    ht_float_t zero = (ht_float_t)0.0;
-    ht_float_t nan_val = zero / zero;
+    ht_float_t nan_val = HT_NAN_VAL;
     HT_ASSERT(!ht_adwin_update(&ad, nan_val));
     HT_ASSERT(!ht_adwin_update(&ad, HT_INFINITY));
-    HT_ASSERT(!ht_adwin_update(&ad, -HT_INFINITY));
+    HT_ASSERT(!ht_adwin_update(&ad, HT_NEG_INFINITY));
     HT_ASSERT_EQ(ht_adwin_get_width(&ad), 0U);
 
     /* Stationary constant stream: 1000 identical items -> zero false positives */
     for (int i = 0; i < 1000; ++i) {
-        bool drift = ht_adwin_update(&ad, (ht_float_t)42.0);
+        bool drift = ht_adwin_update(&ad, HT_CONST(42.0));
         HT_ASSERT(!drift);
     }
     HT_ASSERT_EQ(ht_adwin_get_n_detections(&ad), 0U);
-    HT_ASSERT_FLOAT_EQ(ht_adwin_get_estimation(&ad), (ht_float_t)42.0);
-    HT_ASSERT_FLOAT_EQ(ht_adwin_get_variance_in_window(&ad), (ht_float_t)0.0);
+    HT_ASSERT_FLOAT_EQ(ht_adwin_get_estimation(&ad), HT_CONST(42.0));
+    HT_ASSERT_FLOAT_EQ(ht_adwin_get_variance_in_window(&ad), HT_CONST(0.0));
 
     /* Reset test */
     ht_adwin_reset(&ad);
     HT_ASSERT_EQ(ht_adwin_get_width(&ad), 0U);
-    HT_ASSERT_FLOAT_EQ(ht_adwin_get_total(&ad), (ht_float_t)0.0);
-    HT_ASSERT_FLOAT_EQ(ht_adwin_get_variance(&ad), (ht_float_t)0.0);
+    HT_ASSERT_FLOAT_EQ(ht_adwin_get_total(&ad), HT_CONST(0.0));
+    HT_ASSERT_FLOAT_EQ(ht_adwin_get_variance(&ad), HT_CONST(0.0));
     HT_ASSERT_EQ(ht_adwin_get_n_detections(&ad), 0U);
-    HT_ASSERT_EQ(ad.delta, (ht_float_t)0.002);
+    HT_ASSERT_FLOAT_EQ(ad.delta, HT_CONST(0.002));
     HT_ASSERT_EQ(ad.clock, 32U);
 }
 
@@ -208,31 +207,34 @@ static void test_adwin_highest_level_saturation_and_drop(void) {
     ht_adwin_t ad;
     HT_ASSERT_EQ(ht_adwin_init(&ad, NULL), HT_OK);
 
-    /* Insert enough constant items to cascade into the highest level (HT_ADWIN_LEVELS - 1)
+    /* Insert enough constant items (0.25, exact power of two in float/double/Q16.16)
+     * to cascade into the highest level (HT_ADWIN_LEVELS - 1)
      * and trigger the overflow drop branch in ht_adwin_compress_buckets().
-     * Total window capacity before dropping oldest buckets is:
-     * sum_{i=0}^{L-2} (max_buckets * 2^i) + (max_buckets + 1) * 2^(L-1) = 11 * 2^(L-1) - 5.
-     * Feeding 12 * 2^(L-1) items strictly forces saturation and bucket drops.
      */
     uint32_t n_items = 12U * (1U << (HT_ADWIN_LEVELS - 1U));
     for (uint32_t i = 0; i < n_items; ++i) {
-        ht_adwin_update(&ad, (ht_float_t)1.0);
+        ht_adwin_update(&ad, HT_CONST(0.25));
     }
 
     HT_ASSERT(ad.width < n_items); /* Proof that oldest buckets were dropped */
-    HT_ASSERT(ad.total_variance >= (ht_float_t)0.0);
+    HT_ASSERT(ad.total_variance >= HT_CONST(0.0));
     HT_ASSERT_EQ(ad.last_bucket_row, (uint8_t)(HT_ADWIN_LEVELS - 1U));
     HT_ASSERT(ad.rows[HT_ADWIN_LEVELS - 1U].count <= ad.max_buckets);
 
     /* Sum of all active buckets across all rows must equal ad.total_sum */
-    ht_float_t sum_all = (ht_float_t)0.0;
+    ht_float_t sum_all = HT_CONST(0.0);
     for (uint8_t r = 0; r < HT_ADWIN_LEVELS; ++r) {
         for (uint8_t b = 0; b < ad.rows[r].count; ++b) {
-            sum_all += ad.rows[r].sum[b];
+            sum_all = HT_ADD(sum_all, ad.rows[r].sum[b]);
         }
     }
-    HT_ASSERT_FLOAT_NEAR(sum_all, ad.total_sum, (ht_float_t)1e-3);
-    HT_ASSERT_FLOAT_NEAR(ad.total_sum, (ht_float_t)ad.width, (ht_float_t)1e-3);
+    HT_ASSERT_FLOAT_NEAR(sum_all, ad.total_sum, HT_TEST_TOL(1e-3));
+    ht_float_t expected_sum = HT_DIV(HT_FROM_UINT(ad.width), HT_CONST(4.0));
+#ifdef HT_USE_FIXED_POINT
+    /* width can exceed 32767 so compute exact width / 4 directly in Q16.16 */
+    expected_sum = (ht_float_t)((int64_t)ad.width * (int64_t)HT_CONST(0.25));
+#endif
+    HT_ASSERT_FLOAT_NEAR(ad.total_sum, expected_sum, HT_TEST_TOL(1e-3));
 }
 
 /* --- Level 2: Integration & River Parity Tests --- */
@@ -251,7 +253,7 @@ static void test_adwin_drift_detection_step_change_river_parity(void) {
     uint32_t drift_step_2 = 0U;
 
     for (uint32_t i = 0; i < 200U; ++i) {
-        ht_float_t val = (i < 100U) ? (ht_float_t)0.0 : (ht_float_t)1.0;
+        ht_float_t val = (i < 100U) ? HT_CONST(0.0) : HT_CONST(1.0);
         bool drift = ht_adwin_update(&ad, val);
 
         if (drift) {
@@ -260,18 +262,18 @@ static void test_adwin_drift_detection_step_change_river_parity(void) {
                 /* Exact parity check on step 127 */
                 HT_ASSERT_EQ(i, 127U);
                 HT_ASSERT_EQ(ht_adwin_get_width(&ad), 56U);
-                HT_ASSERT_FLOAT_NEAR(ht_adwin_get_total(&ad), (ht_float_t)28.0, (ht_float_t)1e-4);
-                HT_ASSERT_FLOAT_NEAR(ht_adwin_get_estimation(&ad), (ht_float_t)0.5, (ht_float_t)1e-4);
-                HT_ASSERT_FLOAT_NEAR(ht_adwin_get_variance(&ad), (ht_float_t)14.0, (ht_float_t)1e-4);
-                HT_ASSERT_FLOAT_NEAR(ht_adwin_get_variance_in_window(&ad), (ht_float_t)0.25, (ht_float_t)1e-4);
+                HT_ASSERT_FLOAT_NEAR(ht_adwin_get_total(&ad), HT_CONST(28.0), HT_TEST_TOL(1e-4));
+                HT_ASSERT_FLOAT_NEAR(ht_adwin_get_estimation(&ad), HT_CONST(0.5), HT_TEST_TOL(1e-4));
+                HT_ASSERT_FLOAT_NEAR(ht_adwin_get_variance(&ad), HT_CONST(14.0), HT_TEST_TOL(1e-2));
+                HT_ASSERT_FLOAT_NEAR(ht_adwin_get_variance_in_window(&ad), HT_CONST(0.25), HT_TEST_TOL(1e-3));
                 HT_ASSERT_EQ(ht_adwin_get_n_detections(&ad), 1U);
             } else if (drift_step_2 == 0U) {
                 drift_step_2 = i;
                 /* Exact parity check on step 159 */
                 HT_ASSERT_EQ(i, 159U);
                 HT_ASSERT_EQ(ht_adwin_get_width(&ad), 72U);
-                HT_ASSERT_FLOAT_NEAR(ht_adwin_get_total(&ad), (ht_float_t)60.0, (ht_float_t)1e-4);
-                HT_ASSERT_FLOAT_NEAR(ht_adwin_get_variance(&ad), (ht_float_t)10.0, (ht_float_t)1e-4);
+                HT_ASSERT_FLOAT_NEAR(ht_adwin_get_total(&ad), HT_CONST(60.0), HT_TEST_TOL(1e-4));
+                HT_ASSERT_FLOAT_NEAR(ht_adwin_get_variance(&ad), HT_CONST(10.0), HT_TEST_TOL(1e-2));
                 HT_ASSERT_EQ(ht_adwin_get_n_detections(&ad), 2U);
             }
         }
@@ -296,11 +298,11 @@ static void test_adwin_drift_detection_multiple_shifts(void) {
     for (uint32_t i = 0; i < 900U; ++i) {
         ht_float_t val;
         if (i < 300U) {
-            val = (ht_float_t)0.0;
+            val = HT_CONST(0.0);
         } else if (i < 600U) {
-            val = (ht_float_t)10.0;
+            val = HT_CONST(10.0);
         } else {
-            val = (ht_float_t)2.0;
+            val = HT_CONST(2.0);
         }
 
         bool drift = ht_adwin_update(&ad, val);
@@ -319,7 +321,7 @@ static void test_adwin_drift_detection_multiple_shifts(void) {
     HT_ASSERT_EQ(ht_adwin_get_n_detections(&ad), detections_in_phase2 + detections_in_phase3);
 
     /* In the final stationary regime, mean must have adapted near 2.0 */
-    HT_ASSERT_FLOAT_NEAR(ht_adwin_get_estimation(&ad), (ht_float_t)2.0, (ht_float_t)0.1);
+    HT_ASSERT_FLOAT_NEAR(ht_adwin_get_estimation(&ad), HT_CONST(2.0), HT_CONST(0.1));
 }
 
 static void test_adwin_pool_alloc_free_lifecycle(void) {
@@ -383,11 +385,11 @@ static void test_adwin_pool_concurrent_detectors(void) {
     /* Allocate 2 detectors with different delta values */
     ht_adwin_config_t cfg_sensitive;
     ht_adwin_default_config(&cfg_sensitive);
-    cfg_sensitive.delta = (ht_float_t)0.01; /* more sensitive */
+    cfg_sensitive.delta = HT_CONST(0.01); /* more sensitive */
 
     ht_adwin_config_t cfg_robust;
     ht_adwin_default_config(&cfg_robust);
-    cfg_robust.delta = (ht_float_t)0.0001; /* more conservative */
+    cfg_robust.delta = HT_CONST(0.0001); /* more conservative */
 
     uint16_t idx_sens = ht_adwin_pool_alloc(&pool, &cfg_sensitive);
     uint16_t idx_rob = ht_adwin_pool_alloc(&pool, &cfg_robust);
@@ -402,7 +404,7 @@ static void test_adwin_pool_concurrent_detectors(void) {
     uint32_t rob_first_drift = 0U;
 
     for (uint32_t i = 0; i < 200U; ++i) {
-        ht_float_t val = (i < 100U) ? (ht_float_t)0.0 : (ht_float_t)1.0;
+        ht_float_t val = (i < 100U) ? HT_CONST(0.0) : HT_CONST(1.0);
         if (ht_adwin_update(ad_sens, val) && sens_first_drift == 0U) {
             sens_first_drift = i;
         }
@@ -447,7 +449,7 @@ static void test_adwin_pool_stress_50k_recycling(void) {
         /* Update with sample */
         ht_adwin_t *ad = ht_adwin_pool_get(&pool, active[slot]);
         HT_ASSERT_NOT_NULL(ad);
-        ht_adwin_update(ad, (ht_float_t)(iter % 10));
+        ht_adwin_update(ad, HT_FROM_INT(iter % 10));
     }
 
     HT_ASSERT_EQ(pool.allocated_count, 16U);
@@ -469,7 +471,7 @@ static void test_hat_unilateral_error_filter(void) {
     ht_adwin_t adwin;
     HT_ASSERT_EQ(ht_adwin_init(&adwin, NULL), HT_OK);
 
-    ht_float_t mean_err = (ht_float_t)0.0;
+    ht_float_t mean_err = HT_CONST(0.0);
     uint32_t err_count = 0;
 
     /* Case A: Null checks */
@@ -483,7 +485,7 @@ static void test_hat_unilateral_error_filter(void) {
     for (int i = 0; i < 40; ++i) {
         ht_hat_check_error_drift(&adwin, &mean_err, &err_count, 1);
     }
-    HT_ASSERT(mean_err > (ht_float_t)0.8);
+    HT_ASSERT(mean_err > HT_CONST(0.8));
 
     /* Now feed 100 accurate predictions (0s): error drops sharply.
      * When ADWIN triggers drift, it represents error decreasing!
@@ -501,13 +503,13 @@ static void test_hat_unilateral_error_filter(void) {
      * Start with low error: 40 samples of 0 (error rate ~0.0)
      */
     ht_adwin_reset(&adwin);
-    mean_err = (ht_float_t)0.0;
+    mean_err = HT_CONST(0.0);
     err_count = 0;
 
     for (int i = 0; i < 40; ++i) {
         ht_hat_check_error_drift(&adwin, &mean_err, &err_count, 0);
     }
-    HT_ASSERT_FLOAT_NEAR(mean_err, (ht_float_t)0.0, 1e-5);
+    HT_ASSERT_FLOAT_NEAR(mean_err, HT_CONST(0.0), HT_TEST_TOL(1e-5));
 
     /* Now feed 100 errors (1s): error rises sharply.
      * When ADWIN triggers drift, error is increasing!
@@ -532,34 +534,34 @@ static void test_hat_switch_prune_bound_analytical(void) {
      * bound = sqrt(0.0088533107) = 0.09409203
      */
     ht_float_t bound = ht_hat_calculate_switch_bound(
-        (ht_float_t)0.40, 400U, 400U, (ht_float_t)0.05
+        HT_CONST(0.40), 400U, 400U, HT_CONST(0.05)
     );
-    HT_ASSERT_FLOAT_NEAR(bound, (ht_float_t)0.09409203, 1e-4);
+    HT_ASSERT_FLOAT_NEAR(bound, HT_CONST(0.09409203), HT_TEST_TOL(1e-4));
 
     /* Test equal sample sizes with different error */
     /* e_old = 0.50, n_old = 500, n_alt = 500, alpha = 0.05 */
     /* var = 0.25, ln(40) = 3.688879, inv_n = 0.004 */
     /* bound = sqrt(2 * 0.25 * 3.688879 * 0.004) = sqrt(0.00737776) = 0.0858939 */
     bound = ht_hat_calculate_switch_bound(
-        (ht_float_t)0.50, 500U, 500U, (ht_float_t)0.05
+        HT_CONST(0.50), 500U, 500U, HT_CONST(0.05)
     );
-    HT_ASSERT_FLOAT_NEAR(bound, (ht_float_t)0.0858939, 1e-4);
+    HT_ASSERT_FLOAT_NEAR(bound, HT_CONST(0.0858939), HT_TEST_TOL(1e-4));
 
     /* Edge cases */
-    HT_ASSERT_EQ(ht_hat_calculate_switch_bound((ht_float_t)0.5, 0U, 500U, (ht_float_t)0.05), HT_INFINITY);
-    HT_ASSERT_EQ(ht_hat_calculate_switch_bound((ht_float_t)0.5, 500U, 0U, (ht_float_t)0.05), HT_INFINITY);
-    HT_ASSERT_EQ(ht_hat_calculate_switch_bound((ht_float_t)0.5, 500U, 500U, (ht_float_t)0.0), HT_INFINITY);
-    HT_ASSERT_EQ(ht_hat_calculate_switch_bound((ht_float_t)0.5, 500U, 500U, (ht_float_t)1.0), HT_INFINITY);
+    HT_ASSERT_EQ(ht_hat_calculate_switch_bound(HT_CONST(0.5), 0U, 500U, HT_CONST(0.05)), HT_INFINITY);
+    HT_ASSERT_EQ(ht_hat_calculate_switch_bound(HT_CONST(0.5), 500U, 0U, HT_CONST(0.05)), HT_INFINITY);
+    HT_ASSERT_EQ(ht_hat_calculate_switch_bound(HT_CONST(0.5), 500U, 500U, HT_CONST(0.0)), HT_INFINITY);
+    HT_ASSERT_EQ(ht_hat_calculate_switch_bound(HT_CONST(0.5), 500U, 500U, HT_CONST(1.0)), HT_INFINITY);
 
     /* Extreme errors e = 0.0 and e = 1.0 yield bound = 0.0 */
-    HT_ASSERT_FLOAT_EQ(ht_hat_calculate_switch_bound((ht_float_t)0.0, 500U, 500U, (ht_float_t)0.05), (ht_float_t)0.0);
-    HT_ASSERT_FLOAT_EQ(ht_hat_calculate_switch_bound((ht_float_t)1.0, 500U, 500U, (ht_float_t)0.05), (ht_float_t)0.0);
+    HT_ASSERT_FLOAT_EQ(ht_hat_calculate_switch_bound(HT_CONST(0.0), 500U, 500U, HT_CONST(0.05)), HT_CONST(0.0));
+    HT_ASSERT_FLOAT_EQ(ht_hat_calculate_switch_bound(HT_CONST(1.0), 500U, 500U, HT_CONST(0.05)), HT_CONST(0.0));
 }
 
 static void test_hat_evaluate_alternate_switch_and_prune(void) {
     /* 1. min_obs rejection: if observations < threshold (300), action must be NONE */
     ht_hat_action_t act = ht_hat_evaluate_alternate(
-        (ht_float_t)0.60, 250U, (ht_float_t)0.10, 250U, 300U, (ht_float_t)0.05
+        HT_CONST(0.60), 250U, HT_CONST(0.10), 250U, 300U, HT_CONST(0.05)
     );
     HT_ASSERT_EQ(act, HT_HAT_ACTION_NONE);
 
@@ -568,7 +570,7 @@ static void test_hat_evaluate_alternate_switch_and_prune(void) {
      * e_old = 0.50, e_alt = 0.20 -> diff = 0.30 > bound
      */
     act = ht_hat_evaluate_alternate(
-        (ht_float_t)0.50, 500U, (ht_float_t)0.20, 500U, 300U, (ht_float_t)0.05
+        HT_CONST(0.50), 500U, HT_CONST(0.20), 500U, 300U, HT_CONST(0.05)
     );
     HT_ASSERT_EQ(act, HT_HAT_ACTION_SWITCH);
 
@@ -576,7 +578,7 @@ static void test_hat_evaluate_alternate_switch_and_prune(void) {
      * e_old = 0.20, e_alt = 0.50 -> diff e_alt - e_old = 0.30 > bound
      */
     act = ht_hat_evaluate_alternate(
-        (ht_float_t)0.20, 500U, (ht_float_t)0.50, 500U, 300U, (ht_float_t)0.05
+        HT_CONST(0.20), 500U, HT_CONST(0.50), 500U, 300U, HT_CONST(0.05)
     );
     HT_ASSERT_EQ(act, HT_HAT_ACTION_PRUNE);
 
@@ -584,26 +586,26 @@ static void test_hat_evaluate_alternate_switch_and_prune(void) {
      * e_old = 0.35, e_alt = 0.33 -> diff = 0.02 < bound ~ 0.088
      */
     act = ht_hat_evaluate_alternate(
-        (ht_float_t)0.35, 500U, (ht_float_t)0.33, 500U, 300U, (ht_float_t)0.05
+        HT_CONST(0.35), 500U, HT_CONST(0.33), 500U, 300U, HT_CONST(0.05)
     );
     HT_ASSERT_EQ(act, HT_HAT_ACTION_NONE);
 
     /* 5. Zero error in old tree never switches (bound = 0.0 < 0 - e_alt is false) */
     act = ht_hat_evaluate_alternate(
-        (ht_float_t)0.0, 500U, (ht_float_t)0.10, 500U, 300U, (ht_float_t)0.05
+        HT_CONST(0.0), 500U, HT_CONST(0.10), 500U, 300U, HT_CONST(0.05)
     );
     HT_ASSERT_EQ(act, HT_HAT_ACTION_PRUNE);
 }
 
 static void test_hat_weighted_voting_one_over_error_squared(void) {
     /* 1. Single leaf: probability must be identical to base */
-    ht_float_t leaf1_p[HT_MAX_CLASSES] = {(ht_float_t)0.7, (ht_float_t)0.3, (ht_float_t)0.0, (ht_float_t)0.0};
-    ht_float_t leaf1_err = (ht_float_t)0.25;
+    ht_float_t leaf1_p[HT_MAX_CLASSES] = {HT_CONST(0.7), HT_CONST(0.3), HT_CONST(0.0), HT_CONST(0.0)};
+    ht_float_t leaf1_err = HT_CONST(0.25);
     ht_float_t out[HT_MAX_CLASSES];
 
     ht_hat_combine_leaf_predictions(leaf1_p, &leaf1_err, 1U, 2U, out);
-    HT_ASSERT_FLOAT_NEAR(out[0], (ht_float_t)0.7, 1e-5);
-    HT_ASSERT_FLOAT_NEAR(out[1], (ht_float_t)0.3, 1e-5);
+    HT_ASSERT_FLOAT_NEAR(out[0], HT_CONST(0.7), HT_TEST_TOL(1e-5));
+    HT_ASSERT_FLOAT_NEAR(out[1], HT_CONST(0.3), HT_TEST_TOL(1e-5));
 
     /* 2. Two leaves:
      * Leaf 0: err = 0.50 -> weight = 1 / 0.5^2 = 4.0. Proba = [0.8, 0.2]
@@ -614,24 +616,24 @@ static void test_hat_weighted_voting_one_over_error_squared(void) {
      * Normalized: P(0) = 13.2 / 104.0 = 0.126923, P(1) = 90.8 / 104.0 = 0.873077
      */
     ht_float_t two_leaves_p[2 * HT_MAX_CLASSES];
-    two_leaves_p[0] = (ht_float_t)0.8; two_leaves_p[1] = (ht_float_t)0.2;
-    two_leaves_p[2] = (ht_float_t)0.0; two_leaves_p[3] = (ht_float_t)0.0;
+    two_leaves_p[0] = HT_CONST(0.8); two_leaves_p[1] = HT_CONST(0.2);
+    two_leaves_p[2] = HT_CONST(0.0); two_leaves_p[3] = HT_CONST(0.0);
 
-    two_leaves_p[4] = (ht_float_t)0.1; two_leaves_p[5] = (ht_float_t)0.9;
-    two_leaves_p[6] = (ht_float_t)0.0; two_leaves_p[7] = (ht_float_t)0.0;
+    two_leaves_p[4] = HT_CONST(0.1); two_leaves_p[5] = HT_CONST(0.9);
+    two_leaves_p[6] = HT_CONST(0.0); two_leaves_p[7] = HT_CONST(0.0);
 
-    ht_float_t errs[2] = {(ht_float_t)0.50, (ht_float_t)0.10};
+    ht_float_t errs[2] = {HT_CONST(0.50), HT_CONST(0.10)};
     ht_hat_combine_leaf_predictions(two_leaves_p, errs, 2U, 2U, out);
 
-    HT_ASSERT_FLOAT_NEAR(out[0], (ht_float_t)0.126923, 1e-4);
-    HT_ASSERT_FLOAT_NEAR(out[1], (ht_float_t)0.873077, 1e-4);
+    HT_ASSERT_FLOAT_NEAR(out[0], HT_CONST(0.126923), HT_TEST_TOL(1e-4));
+    HT_ASSERT_FLOAT_NEAR(out[1], HT_CONST(0.873077), HT_TEST_TOL(1e-4));
 
     /* 3. Zero error floor protection */
-    errs[1] = (ht_float_t)0.0; /* 0.0 error */
+    errs[1] = HT_CONST(0.0); /* 0.0 error */
     ht_hat_combine_leaf_predictions(two_leaves_p, errs, 2U, 2U, out);
-    /* Leaf 1 with 0.0 error gets massive weight 1e12 and dominates */
-    HT_ASSERT_FLOAT_NEAR(out[0], (ht_float_t)0.1, 1e-3);
-    HT_ASSERT_FLOAT_NEAR(out[1], (ht_float_t)0.9, 1e-3);
+    /* Leaf 1 with 0.0 error gets massive weight and dominates */
+    HT_ASSERT_FLOAT_NEAR(out[0], HT_CONST(0.1), HT_TEST_TOL(1e-3));
+    HT_ASSERT_FLOAT_NEAR(out[1], HT_CONST(0.9), HT_TEST_TOL(1e-3));
 }
 
 /* --- Level 2: HAT Subtree Replacement and Pruning Integration Tests --- */
@@ -753,41 +755,41 @@ static void test_hat_reg_error_drift_unilateral_filter(void) {
     cfg.min_window_length = 5;
     HT_ASSERT_EQ(ht_adwin_init(&ad, &cfg), HT_OK);
 
-    ht_float_t mean_error = (ht_float_t)0.0;
-    ht_float_t error_m2 = (ht_float_t)0.0;
+    ht_float_t mean_error = HT_CONST(0.0);
+    ht_float_t error_m2 = HT_CONST(0.0);
     uint32_t error_count = 0;
 
     /* Feed baseline error of 10.0 for 50 samples */
     for (int i = 0; i < 50; ++i) {
-        bool drift = ht_hat_check_reg_error_drift(&ad, &mean_error, &error_m2, &error_count, (ht_float_t)10.0);
+        bool drift = ht_hat_check_reg_error_drift(&ad, &mean_error, &error_m2, &error_count, HT_CONST(10.0));
         HT_ASSERT(!drift);
     }
-    HT_ASSERT_FLOAT_NEAR(mean_error, (ht_float_t)10.0, (ht_float_t)1e-4);
+    HT_ASSERT_FLOAT_NEAR(mean_error, HT_CONST(10.0), HT_TEST_TOL(1e-4));
     HT_ASSERT_EQ(error_count, 50U);
 
     /* Feed improving (lower) error: 0.1 for 50 samples.
      * ADWIN detects change, but mean_error is decreasing -> unilateral filter suppresses drift! */
     for (int i = 0; i < 50; ++i) {
-        bool drift = ht_hat_check_reg_error_drift(&ad, &mean_error, &error_m2, &error_count, (ht_float_t)0.1);
+        bool drift = ht_hat_check_reg_error_drift(&ad, &mean_error, &error_m2, &error_count, HT_CONST(0.1));
         HT_ASSERT(!drift);
     }
 
     /* Reset detector */
     ht_adwin_reset(&ad);
-    mean_error = (ht_float_t)0.0;
-    error_m2 = (ht_float_t)0.0;
+    mean_error = HT_CONST(0.0);
+    error_m2 = HT_CONST(0.0);
     error_count = 0;
 
     /* Feed baseline error of 0.5 for 50 samples */
     for (int i = 0; i < 50; ++i) {
-        bool drift = ht_hat_check_reg_error_drift(&ad, &mean_error, &error_m2, &error_count, (ht_float_t)0.5);
+        bool drift = ht_hat_check_reg_error_drift(&ad, &mean_error, &error_m2, &error_count, HT_CONST(0.5));
         HT_ASSERT(!drift);
     }
 
     /* Feed worsening error: 50.0. Drift detected! */
     bool drift_detected = false;
     for (int i = 0; i < 60; ++i) {
-        bool drift = ht_hat_check_reg_error_drift(&ad, &mean_error, &error_m2, &error_count, (ht_float_t)50.0);
+        bool drift = ht_hat_check_reg_error_drift(&ad, &mean_error, &error_m2, &error_count, HT_CONST(50.0));
         if (drift) {
             drift_detected = true;
             break;
@@ -796,55 +798,55 @@ static void test_hat_reg_error_drift_unilateral_filter(void) {
     HT_ASSERT(drift_detected);
 
     /* Null pointer guard checks */
-    HT_ASSERT(!ht_hat_check_reg_error_drift(NULL, &mean_error, &error_m2, &error_count, (ht_float_t)1.0));
-    HT_ASSERT(!ht_hat_check_reg_error_drift(&ad, NULL, &error_m2, &error_count, (ht_float_t)1.0));
+    HT_ASSERT(!ht_hat_check_reg_error_drift(NULL, &mean_error, &error_m2, &error_count, HT_CONST(1.0)));
+    HT_ASSERT(!ht_hat_check_reg_error_drift(&ad, NULL, &error_m2, &error_count, HT_CONST(1.0)));
 }
 
 static void test_hat_evaluate_reg_alternate_z_test_analytical(void) {
     /* 1. min_obs guard: when n_old <= min_obs or n_alt <= min_obs */
     ht_hat_action_t act = ht_hat_evaluate_reg_alternate(
-        (ht_float_t)10.0, (ht_float_t)1.0, 200,
-        (ht_float_t)2.0,  (ht_float_t)1.0, 400,
-        300, (ht_float_t)0.05
+        HT_CONST(10.0), HT_CONST(1.0), 200,
+        HT_CONST(2.0),  HT_CONST(1.0), 400,
+        300, HT_CONST(0.05)
     );
     HT_ASSERT_EQ(act, HT_HAT_ACTION_NONE);
 
     act = ht_hat_evaluate_reg_alternate(
-        (ht_float_t)10.0, (ht_float_t)1.0, 400,
-        (ht_float_t)2.0,  (ht_float_t)1.0, 200,
-        300, (ht_float_t)0.05
+        HT_CONST(10.0), HT_CONST(1.0), 400,
+        HT_CONST(2.0),  HT_CONST(1.0), 200,
+        300, HT_CONST(0.05)
     );
     HT_ASSERT_EQ(act, HT_HAT_ACTION_NONE);
 
     /* 2. Analytical Switch test: alt is significantly better (lower error) */
     act = ht_hat_evaluate_reg_alternate(
-        (ht_float_t)5.0, (ht_float_t)2.0, 500,
-        (ht_float_t)2.0, (ht_float_t)2.0, 500,
-        300, (ht_float_t)0.05
+        HT_CONST(5.0), HT_CONST(2.0), 500,
+        HT_CONST(2.0), HT_CONST(2.0), 500,
+        300, HT_CONST(0.05)
     );
     HT_ASSERT_EQ(act, HT_HAT_ACTION_SWITCH);
 
     /* 3. Analytical Prune test: alt is significantly worse (higher error) */
     act = ht_hat_evaluate_reg_alternate(
-        (ht_float_t)2.0, (ht_float_t)2.0, 500,
-        (ht_float_t)5.0, (ht_float_t)2.0, 500,
-        300, (ht_float_t)0.05
+        HT_CONST(2.0), HT_CONST(2.0), 500,
+        HT_CONST(5.0), HT_CONST(2.0), 500,
+        300, HT_CONST(0.05)
     );
     HT_ASSERT_EQ(act, HT_HAT_ACTION_PRUNE);
 
     /* 4. Insignificant difference test: p > alpha -> NONE */
     act = ht_hat_evaluate_reg_alternate(
-        (ht_float_t)2.00, (ht_float_t)10.0, 400,
-        (ht_float_t)1.99, (ht_float_t)10.0, 400,
-        300, (ht_float_t)0.05
+        HT_CONST(2.00), HT_CONST(10.0), 400,
+        HT_CONST(1.99), HT_CONST(10.0), 400,
+        300, HT_CONST(0.05)
     );
     HT_ASSERT_EQ(act, HT_HAT_ACTION_NONE);
 
     /* 5. Identical errors test: diff == 0.0 -> NONE */
     act = ht_hat_evaluate_reg_alternate(
-        (ht_float_t)3.0, (ht_float_t)1.0, 400,
-        (ht_float_t)3.0, (ht_float_t)1.0, 400,
-        300, (ht_float_t)0.05
+        HT_CONST(3.0), HT_CONST(1.0), 400,
+        HT_CONST(3.0), HT_CONST(1.0), 400,
+        300, HT_CONST(0.05)
     );
     HT_ASSERT_EQ(act, HT_HAT_ACTION_NONE);
 }

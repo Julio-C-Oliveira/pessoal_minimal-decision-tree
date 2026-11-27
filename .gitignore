@@ -5,6 +5,7 @@ emulation/esp32/build/
 emulation/esp32/sdkconfig
 emulation/esp32/sdkconfig.old
 emulation/cortex-m3/build/
+emulation/cortex-m3/build_fixed/
 *.o
 *.d
 *.a

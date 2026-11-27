@@ -31,10 +31,14 @@ static void test_tree_default_params_and_init(void) {
     HT_ASSERT_EQ(params.leaf_prediction, HT_LEAF_NBA);
     HT_ASSERT_EQ(params.grace_period, 200);
     HT_ASSERT_EQ(params.max_depth, 64);
-    HT_ASSERT_FLOAT_NEAR(params.delta, (ht_float_t)1e-7, 1e-12);
-    HT_ASSERT_FLOAT_NEAR(params.tau, (ht_float_t)0.05, 1e-6);
-    HT_ASSERT_FLOAT_NEAR(params.min_branch_fraction, (ht_float_t)0.01, 1e-6);
-    HT_ASSERT_FLOAT_NEAR(params.max_share_to_split, (ht_float_t)0.99, 1e-6);
+#ifdef HT_USE_FIXED_POINT
+    HT_ASSERT_EQ(params.delta_neg_log10, 7U);
+#else
+    HT_ASSERT_FLOAT_NEAR(params.delta, HT_CONST(1e-7), HT_TEST_TOL(1e-12));
+#endif
+    HT_ASSERT_FLOAT_NEAR(params.tau, HT_CONST(0.05), HT_TEST_TOL(1e-6));
+    HT_ASSERT_FLOAT_NEAR(params.min_branch_fraction, HT_CONST(0.01), HT_TEST_TOL(1e-6));
+    HT_ASSERT_FLOAT_NEAR(params.max_share_to_split, HT_CONST(0.99), HT_TEST_TOL(1e-6));
     HT_ASSERT(params.merit_preprune);
 
     /* Initialization validation */
@@ -60,7 +64,7 @@ static void test_tree_default_params_and_init(void) {
     HT_ASSERT_EQ(tree.n_inactive_leaves, 0);
     HT_ASSERT_EQ(tree.n_decision_nodes, 0);
     HT_ASSERT_EQ(tree.max_depth_seen, 0);
-    HT_ASSERT_FLOAT_EQ(tree.train_weight_seen, (ht_float_t)0.0);
+    HT_ASSERT_FLOAT_EQ(tree.train_weight_seen, HT_CONST(0.0));
 
     const ht_node_t *root = &tree.memory.node_pool[tree.root_idx];
     HT_ASSERT(root->flags & HT_NODE_IS_LEAF);
@@ -73,23 +77,23 @@ static void test_tree_node_promise_analytical(void) {
     memset(&node, 0, sizeof(node));
 
     /* Empty node: promise = 0.0 */
-    HT_ASSERT_FLOAT_EQ(ht_tree_node_promise(&node, 3), (ht_float_t)0.0);
+    HT_ASSERT_FLOAT_EQ(ht_tree_node_promise(&node, 3), HT_CONST(0.0));
 
     /* Pure node [100, 0, 0]: total = 100, max = 100 -> promise = 0.0 */
-    node.class_counts[0] = (ht_float_t)100.0;
-    HT_ASSERT_FLOAT_EQ(ht_tree_node_promise(&node, 3), (ht_float_t)0.0);
+    node.class_counts[0] = HT_CONST(100.0);
+    HT_ASSERT_FLOAT_EQ(ht_tree_node_promise(&node, 3), HT_CONST(0.0));
 
     /* Balanced node [30, 30, 30]: total = 90, max = 30 -> promise = 60.0 */
-    node.class_counts[1] = (ht_float_t)30.0;
-    node.class_counts[2] = (ht_float_t)30.0;
-    node.class_counts[0] = (ht_float_t)30.0;
-    HT_ASSERT_FLOAT_EQ(ht_tree_node_promise(&node, 3), (ht_float_t)60.0);
+    node.class_counts[1] = HT_CONST(30.0);
+    node.class_counts[2] = HT_CONST(30.0);
+    node.class_counts[0] = HT_CONST(30.0);
+    HT_ASSERT_FLOAT_EQ(ht_tree_node_promise(&node, 3), HT_CONST(60.0));
 
     /* Skewed node [70, 20, 10]: total = 100, max = 70 -> promise = 30.0 */
-    node.class_counts[0] = (ht_float_t)70.0;
-    node.class_counts[1] = (ht_float_t)20.0;
-    node.class_counts[2] = (ht_float_t)10.0;
-    HT_ASSERT_FLOAT_EQ(ht_tree_node_promise(&node, 3), (ht_float_t)30.0);
+    node.class_counts[0] = HT_CONST(70.0);
+    node.class_counts[1] = HT_CONST(20.0);
+    node.class_counts[2] = HT_CONST(10.0);
+    HT_ASSERT_FLOAT_EQ(ht_tree_node_promise(&node, 3), HT_CONST(30.0));
 }
 
 static void test_tree_routing_numeric_and_categorical(void) {
@@ -115,7 +119,7 @@ static void test_tree_routing_numeric_and_categorical(void) {
     ht_node_t *r = &tree.memory.node_pool[tree.root_idx];
     r->flags = HT_NODE_IN_USE; /* internal */
     r->feature_idx = 0;
-    r->split_val.threshold = (ht_float_t)5.0;
+    r->split_val.threshold = HT_CONST(5.0);
     r->left_child = n1;
     r->right_child = n2;
 
@@ -133,7 +137,7 @@ static void test_tree_routing_numeric_and_categorical(void) {
     /* Route test 1: x[0] = 3.0 (<= 5.0), x[1] = 2 (== 2) -> reaches n3 at depth 2 */
     ht_value_t x[HT_MAX_FEATURES];
     memset(x, 0, sizeof(x));
-    x[0].num = (ht_float_t)3.0;
+    x[0].num = HT_CONST(3.0);
     x[1].cat = 2;
 
     uint16_t parent = HT_INVALID_IDX;
@@ -154,7 +158,7 @@ static void test_tree_routing_numeric_and_categorical(void) {
     HT_ASSERT_EQ(depth, 2);
 
     /* Route test 3: x[0] = 8.5 (> 5.0) -> reaches n2 at depth 1 */
-    x[0].num = (ht_float_t)8.5;
+    x[0].num = HT_CONST(8.5);
     dest = ht_tree_route(&tree, x, &parent, &branch, &depth);
     HT_ASSERT_EQ(dest, n2);
     HT_ASSERT_EQ(parent, tree.root_idx);
@@ -175,31 +179,31 @@ static void test_tree_routing_missing_nan_and_most_common_path(void) {
     ht_node_t *root = &tree.memory.node_pool[tree.root_idx];
     root->flags = HT_NODE_IN_USE; /* internal */
     root->feature_idx = 0;
-    root->split_val.threshold = (ht_float_t)10.0;
+    root->split_val.threshold = HT_CONST(10.0);
     root->left_child = left_child;
     root->right_child = right_child;
 
     ht_node_t *left = &tree.memory.node_pool[left_child];
     left->flags = HT_NODE_IN_USE | HT_NODE_IS_LEAF;
-    left->class_counts[0] = (ht_float_t)70.0;
-    left->class_counts[1] = (ht_float_t)30.0; /* Left sum = 100 */
+    left->class_counts[0] = HT_CONST(70.0);
+    left->class_counts[1] = HT_CONST(30.0); /* Left sum = 100 */
 
     ht_node_t *right = &tree.memory.node_pool[right_child];
     right->flags = HT_NODE_IN_USE | HT_NODE_IS_LEAF;
-    right->class_counts[0] = (ht_float_t)10.0;
-    right->class_counts[1] = (ht_float_t)20.0; /* Right sum = 30 */
+    right->class_counts[0] = HT_CONST(10.0);
+    right->class_counts[1] = HT_CONST(20.0); /* Right sum = 30 */
 
     /* Query with NaN: left child has more weight (100 >= 30), must pick left */
     ht_value_t x[HT_MAX_FEATURES];
     memset(x, 0, sizeof(x));
-    x[0].num = (ht_float_t)(0.0 / 0.0); /* NaN */
+    x[0].num = HT_NAN_VAL; /* NaN */
 
     uint16_t dest = ht_tree_route(&tree, x, NULL, NULL, NULL);
     HT_ASSERT_EQ(dest, left_child);
 
     /* Update right child weight to dominate (120 > 100) */
-    right->class_counts[0] = (ht_float_t)100.0;
-    right->class_counts[1] = (ht_float_t)20.0;
+    right->class_counts[0] = HT_CONST(100.0);
+    right->class_counts[1] = HT_CONST(20.0);
 
     dest = ht_tree_route(&tree, x, NULL, NULL, NULL);
     HT_ASSERT_EQ(dest, right_child);
@@ -213,21 +217,21 @@ static void test_tree_predict_majority_class(void) {
     HT_ASSERT_EQ(ht_tree_init(&tree, &params), HT_OK);
 
     ht_node_t *root = &tree.memory.node_pool[tree.root_idx];
-    root->class_counts[0] = (ht_float_t)10.0;
-    root->class_counts[1] = (ht_float_t)60.0;
-    root->class_counts[2] = (ht_float_t)30.0;
+    root->class_counts[0] = HT_CONST(10.0);
+    root->class_counts[1] = HT_CONST(60.0);
+    root->class_counts[2] = HT_CONST(30.0);
 
     ht_value_t x[HT_MAX_FEATURES];
     memset(x, 0, sizeof(x));
-    x[0].num = (ht_float_t)1.0;
+    x[0].num = HT_CONST(1.0);
 
     ht_float_t probas[HT_MAX_CLASSES];
     HT_ASSERT_EQ(ht_tree_predict_proba(&tree, x, probas), HT_OK);
 
-    HT_ASSERT_FLOAT_NEAR(probas[0], (ht_float_t)0.10, 1e-6);
-    HT_ASSERT_FLOAT_NEAR(probas[1], (ht_float_t)0.60, 1e-6);
-    HT_ASSERT_FLOAT_NEAR(probas[2], (ht_float_t)0.30, 1e-6);
-    HT_ASSERT_FLOAT_EQ(probas[3], (ht_float_t)0.0);
+    HT_ASSERT_FLOAT_NEAR(probas[0], HT_CONST(0.10), HT_TEST_TOL(1e-6));
+    HT_ASSERT_FLOAT_NEAR(probas[1], HT_CONST(0.60), HT_TEST_TOL(1e-6));
+    HT_ASSERT_FLOAT_NEAR(probas[2], HT_CONST(0.30), HT_TEST_TOL(1e-6));
+    HT_ASSERT_FLOAT_EQ(probas[3], HT_CONST(0.0));
 
     HT_ASSERT_EQ(ht_tree_predict(&tree, x), 1);
 }
@@ -240,21 +244,23 @@ static void test_tree_predict_naive_bayes_lse(void) {
     HT_ASSERT_EQ(ht_tree_init(&tree, &params), HT_OK);
 
     ht_node_t *root = &tree.memory.node_pool[tree.root_idx];
-    root->class_counts[0] = (ht_float_t)50.0;
-    root->class_counts[1] = (ht_float_t)50.0;
+    root->class_counts[0] = HT_CONST(50.0);
+    root->class_counts[1] = HT_CONST(50.0);
 
     ht_leaf_stats_t *stats = ht_stats_get(&tree.memory, root->stats_idx);
 
     /* Populate Class 0: clustered around (1.0, 1.0) */
     for (int i = 0; i < 50; ++i) {
-        ht_gaussian_update(stats->observers[0].num, 0, (ht_float_t)(0.8 + 0.008 * i), (ht_float_t)1.0);
-        ht_gaussian_update(stats->observers[1].num, 0, (ht_float_t)(0.9 + 0.004 * i), (ht_float_t)1.0);
+        ht_float_t fi = HT_FROM_INT(i);
+        ht_gaussian_update(stats->observers[0].num, 0, HT_ADD(HT_CONST(0.8), HT_MUL(HT_CONST(0.008), fi)), HT_CONST(1.0));
+        ht_gaussian_update(stats->observers[1].num, 0, HT_ADD(HT_CONST(0.9), HT_MUL(HT_CONST(0.004), fi)), HT_CONST(1.0));
     }
 
     /* Populate Class 1: clustered around (10.0, 10.0) */
     for (int i = 0; i < 50; ++i) {
-        ht_gaussian_update(stats->observers[0].num, 1, (ht_float_t)(9.5 + 0.02 * i), (ht_float_t)1.0);
-        ht_gaussian_update(stats->observers[1].num, 1, (ht_float_t)(10.0 + 0.01 * i), (ht_float_t)1.0);
+        ht_float_t fi = HT_FROM_INT(i);
+        ht_gaussian_update(stats->observers[0].num, 1, HT_ADD(HT_CONST(9.5), HT_MUL(HT_CONST(0.02), fi)), HT_CONST(1.0));
+        ht_gaussian_update(stats->observers[1].num, 1, HT_ADD(HT_CONST(10.0), HT_MUL(HT_CONST(0.01), fi)), HT_CONST(1.0));
     }
 
     ht_value_t x[HT_MAX_FEATURES];
@@ -262,19 +268,19 @@ static void test_tree_predict_naive_bayes_lse(void) {
     ht_float_t probas[HT_MAX_CLASSES];
 
     /* Query point near Class 0 cluster: (1.0, 1.0) */
-    x[0].num = (ht_float_t)1.0;
-    x[1].num = (ht_float_t)1.0;
+    x[0].num = HT_CONST(1.0);
+    x[1].num = HT_CONST(1.0);
     HT_ASSERT_EQ(ht_tree_predict_proba(&tree, x, probas), HT_OK);
-    HT_ASSERT(probas[0] > (ht_float_t)0.99);
-    HT_ASSERT_FLOAT_NEAR(probas[0] + probas[1], (ht_float_t)1.0, 1e-5);
+    HT_ASSERT(probas[0] > HT_CONST(0.99));
+    HT_ASSERT_FLOAT_NEAR(HT_ADD(probas[0], probas[1]), HT_CONST(1.0), HT_TEST_TOL(1e-5));
     HT_ASSERT_EQ(ht_tree_predict(&tree, x), 0);
 
     /* Query point near Class 1 cluster: (10.0, 10.0) */
-    x[0].num = (ht_float_t)10.0;
-    x[1].num = (ht_float_t)10.0;
+    x[0].num = HT_CONST(10.0);
+    x[1].num = HT_CONST(10.0);
     HT_ASSERT_EQ(ht_tree_predict_proba(&tree, x, probas), HT_OK);
-    HT_ASSERT(probas[1] > (ht_float_t)0.99);
-    HT_ASSERT_FLOAT_NEAR(probas[0] + probas[1], (ht_float_t)1.0, 1e-5);
+    HT_ASSERT(probas[1] > HT_CONST(0.99));
+    HT_ASSERT_FLOAT_NEAR(HT_ADD(probas[0], probas[1]), HT_CONST(1.0), HT_TEST_TOL(1e-5));
     HT_ASSERT_EQ(ht_tree_predict(&tree, x), 1);
 }
 
@@ -287,29 +293,30 @@ static void test_tree_predict_nba_adaptive_switching(void) {
 
     ht_node_t *root = &tree.memory.node_pool[tree.root_idx];
     /* MC predicts class 0 overwhelmingly */
-    root->class_counts[0] = (ht_float_t)90.0;
-    root->class_counts[1] = (ht_float_t)10.0;
+    root->class_counts[0] = HT_CONST(90.0);
+    root->class_counts[1] = HT_CONST(10.0);
 
     ht_leaf_stats_t *stats = ht_stats_get(&tree.memory, root->stats_idx);
 
     /* Setup Gaussian observers such that x=10 has very high density in Class 1 */
     for (int i = 0; i < 50; ++i) {
-        ht_gaussian_update(stats->observers[0].num, 0, (ht_float_t)(0.0 + 0.01 * i), (ht_float_t)1.0);
-        ht_gaussian_update(stats->observers[0].num, 1, (ht_float_t)(10.0 + 0.01 * i), (ht_float_t)1.0);
+        ht_float_t fi = HT_FROM_INT(i);
+        ht_gaussian_update(stats->observers[0].num, 0, HT_MUL(HT_CONST(0.01), fi), HT_CONST(1.0));
+        ht_gaussian_update(stats->observers[0].num, 1, HT_ADD(HT_CONST(10.0), HT_MUL(HT_CONST(0.01), fi)), HT_CONST(1.0));
     }
 
     ht_value_t x[HT_MAX_FEATURES];
     memset(x, 0, sizeof(x));
-    x[0].num = (ht_float_t)10.0;
+    x[0].num = HT_CONST(10.0);
 
     /* Case A: nb_correct_weight >= mc_correct_weight -> Uses NB -> predicts Class 1 */
-    stats->nb_correct_weight = (ht_float_t)50.0;
-    stats->mc_correct_weight = (ht_float_t)30.0;
+    stats->nb_correct_weight = HT_CONST(50.0);
+    stats->mc_correct_weight = HT_CONST(30.0);
     HT_ASSERT_EQ(ht_tree_predict(&tree, x), 1);
 
     /* Case B: nb_correct_weight < mc_correct_weight -> Falls back to MC -> predicts Class 0 */
-    stats->nb_correct_weight = (ht_float_t)20.0;
-    stats->mc_correct_weight = (ht_float_t)50.0;
+    stats->nb_correct_weight = HT_CONST(20.0);
+    stats->mc_correct_weight = HT_CONST(50.0);
     HT_ASSERT_EQ(ht_tree_predict(&tree, x), 0);
 }
 
@@ -322,8 +329,8 @@ static void test_tree_learn_one_and_split(void) {
     ht_config_params_t params;
     ht_default_params(&params, 2, 2);
     params.grace_period = 25;
-    params.delta = (ht_float_t)1e-4;
-    params.tau = (ht_float_t)0.05;
+    params.delta = HT_CONST(1e-4);
+    params.tau = HT_CONST(0.05);
     HT_ASSERT_EQ(ht_tree_init(&tree, &params), HT_OK);
 
     HT_ASSERT_EQ(tree.n_decision_nodes, 0);
@@ -338,13 +345,13 @@ static void test_tree_learn_one_and_split(void) {
 
     for (int i = 0; i < 200; ++i) {
         if (i % 2 == 0) {
-            x[0].num = (ht_float_t)(1.0 + (i % 3));
-            x[1].num = (ht_float_t)0.5;
-            HT_ASSERT_EQ(ht_tree_learn_one(&tree, x, 0, (ht_float_t)1.0), HT_OK);
+            x[0].num = HT_FROM_INT(1 + (i % 3));
+            x[1].num = HT_CONST(0.5);
+            HT_ASSERT_EQ(ht_tree_learn_one(&tree, x, 0, HT_CONST(1.0)), HT_OK);
         } else {
-            x[0].num = (ht_float_t)(7.0 + (i % 3));
-            x[1].num = (ht_float_t)0.5;
-            HT_ASSERT_EQ(ht_tree_learn_one(&tree, x, 1, (ht_float_t)1.0), HT_OK);
+            x[0].num = HT_FROM_INT(7 + (i % 3));
+            x[1].num = HT_CONST(0.5);
+            HT_ASSERT_EQ(ht_tree_learn_one(&tree, x, 1, HT_CONST(1.0)), HT_OK);
         }
     }
 
@@ -359,14 +366,14 @@ static void test_tree_learn_one_and_split(void) {
     HT_ASSERT_EQ(root->stats_idx, HT_INVALID_IDX); /* Root stats recycled! */
 
     /* The split threshold must be between 4.0 and 6.0 */
-    HT_ASSERT(root->split_val.threshold >= (ht_float_t)3.0 &&
-              root->split_val.threshold <= (ht_float_t)7.0);
+    HT_ASSERT(root->split_val.threshold >= HT_CONST(3.0) &&
+              root->split_val.threshold <= HT_CONST(7.0));
 
     /* Test that new samples route accurately through split */
-    x[0].num = (ht_float_t)2.0;
+    x[0].num = HT_CONST(2.0);
     HT_ASSERT_EQ(ht_tree_predict(&tree, x), 0);
 
-    x[0].num = (ht_float_t)8.0;
+    x[0].num = HT_CONST(8.0);
     HT_ASSERT_EQ(ht_tree_predict(&tree, x), 1);
 }
 
@@ -420,16 +427,16 @@ static void test_tree_leaf_deactivation_least_promising_selection(void) {
     tree.n_active_leaves = 3;
 
     /* leaf1: [50, 50] -> promise = 100 - 50 = 50.0 */
-    tree.memory.node_pool[leaf1].class_counts[0] = (ht_float_t)50.0;
-    tree.memory.node_pool[leaf1].class_counts[1] = (ht_float_t)50.0;
+    tree.memory.node_pool[leaf1].class_counts[0] = HT_CONST(50.0);
+    tree.memory.node_pool[leaf1].class_counts[1] = HT_CONST(50.0);
 
     /* leaf2: [95, 5] -> promise = 100 - 95 = 5.0 (Lowest Promise!) */
-    tree.memory.node_pool[leaf2].class_counts[0] = (ht_float_t)95.0;
-    tree.memory.node_pool[leaf2].class_counts[1] = (ht_float_t)5.0;
+    tree.memory.node_pool[leaf2].class_counts[0] = HT_CONST(95.0);
+    tree.memory.node_pool[leaf2].class_counts[1] = HT_CONST(5.0);
 
     /* leaf3: [70, 30] -> promise = 100 - 70 = 30.0 */
-    tree.memory.node_pool[leaf3].class_counts[0] = (ht_float_t)70.0;
-    tree.memory.node_pool[leaf3].class_counts[1] = (ht_float_t)30.0;
+    tree.memory.node_pool[leaf3].class_counts[0] = HT_CONST(70.0);
+    tree.memory.node_pool[leaf3].class_counts[1] = HT_CONST(30.0);
 
     /* Deactivating least promising must target leaf2 */
     HT_ASSERT_EQ(ht_tree_deactivate_least_promising_leaf(&tree), HT_OK);
@@ -445,7 +452,7 @@ static void test_tree_leaf_deactivation_pool_exhaustion_stress(void) {
     ht_config_params_t params;
     ht_default_params(&params, 2, 2);
     params.grace_period = 20;
-    params.delta = (ht_float_t)1e-3;
+    params.delta = HT_CONST(1e-3);
     HT_ASSERT_EQ(ht_tree_init(&tree, &params), HT_OK);
 
     /* Artificially exhaust stats_pool by allocating all remaining stats blocks */
@@ -464,11 +471,11 @@ static void test_tree_leaf_deactivation_pool_exhaustion_stress(void) {
 
     for (int i = 0; i < 150; ++i) {
         if (i % 2 == 0) {
-            x[0].num = (ht_float_t)1.0;
-            HT_ASSERT_EQ(ht_tree_learn_one(&tree, x, 0, (ht_float_t)1.0), HT_OK);
+            x[0].num = HT_CONST(1.0);
+            HT_ASSERT_EQ(ht_tree_learn_one(&tree, x, 0, HT_CONST(1.0)), HT_OK);
         } else {
-            x[0].num = (ht_float_t)9.0;
-            HT_ASSERT_EQ(ht_tree_learn_one(&tree, x, 1, (ht_float_t)1.0), HT_OK);
+            x[0].num = HT_CONST(9.0);
+            HT_ASSERT_EQ(ht_tree_learn_one(&tree, x, 1, HT_CONST(1.0)), HT_OK);
         }
     }
 
@@ -486,7 +493,7 @@ static void test_tree_serialization_roundtrip_full_and_inference(void) {
     ht_config_params_t params;
     ht_default_params(&params, 3, 2);
     params.grace_period = 25;
-    params.delta = (ht_float_t)1e-4;
+    params.delta = HT_CONST(1e-4);
     HT_ASSERT_EQ(ht_tree_init(&original_tree, &params), HT_OK);
 
     /* Train tree to create some decision nodes and leaves */
@@ -494,11 +501,11 @@ static void test_tree_serialization_roundtrip_full_and_inference(void) {
     memset(x, 0, sizeof(x));
 
     for (int i = 0; i < 200; ++i) {
-        x[0].num = (i % 2 == 0) ? (ht_float_t)1.5 : (ht_float_t)8.5;
-        x[1].num = (ht_float_t)(i * 0.1);
+        x[0].num = (i % 2 == 0) ? HT_CONST(1.5) : HT_CONST(8.5);
+        x[1].num = HT_MUL(HT_FROM_INT(i), HT_CONST(0.1));
         x[2].cat = i % 3;
         uint8_t y = (i % 2 == 0) ? 0 : 1;
-        HT_ASSERT_EQ(ht_tree_learn_one(&original_tree, x, y, (ht_float_t)1.0), HT_OK);
+        HT_ASSERT_EQ(ht_tree_learn_one(&original_tree, x, y, HT_CONST(1.0)), HT_OK);
     }
 
     /* Buffer capacity query */
@@ -542,8 +549,8 @@ static void test_tree_serialization_roundtrip_full_and_inference(void) {
 
     /* Verify prediction parity across all models on test points */
     for (int t = 0; t < 20; ++t) {
-        x[0].num = (ht_float_t)(t * 0.5);
-        x[1].num = (ht_float_t)(t * 0.2);
+        x[0].num = HT_MUL(HT_FROM_INT(t), HT_CONST(0.5));
+        x[1].num = HT_MUL(HT_FROM_INT(t), HT_CONST(0.2));
         x[2].cat = t % 3;
 
         ht_float_t proba_orig[HT_MAX_CLASSES];
@@ -555,11 +562,20 @@ static void test_tree_serialization_roundtrip_full_and_inference(void) {
         HT_ASSERT_EQ(ht_tree_predict_proba(&loaded_infer, x, proba_infer), HT_OK);
 
         /* Loaded full model must match bit-for-bit with original */
-        HT_ASSERT_FLOAT_NEAR(proba_orig[0], proba_full[0], 1e-6);
-        HT_ASSERT_FLOAT_NEAR(proba_orig[1], proba_full[1], 1e-6);
+        HT_ASSERT_FLOAT_NEAR(proba_orig[0], proba_full[0], HT_TEST_TOL(1e-6));
+        HT_ASSERT_FLOAT_NEAR(proba_orig[1], proba_full[1], HT_TEST_TOL(1e-6));
 
         HT_ASSERT_EQ(ht_tree_predict(&original_tree, x), ht_tree_predict(&loaded_full, x));
     }
+
+    /* Test cross-format flag rejection (float vs Q16.16) */
+    ht_serial_header_t flipped_hdr;
+    memcpy(&flipped_hdr, full_buffer, sizeof(flipped_hdr));
+    flipped_hdr.flags ^= HT_SERIAL_FLAG_FIXED;
+    uint8_t flipped_buf[65536];
+    memcpy(flipped_buf, full_buffer, full_bytes_needed);
+    memcpy(flipped_buf, &flipped_hdr, sizeof(flipped_hdr));
+    HT_ASSERT_EQ(ht_tree_load(&loaded_full, flipped_buf, full_bytes_needed), HT_ERR_CORRUPT_IMAGE);
 
     /* Test corrupt buffer rejection */
     uint8_t corrupt_buffer[128];
@@ -582,12 +598,16 @@ static void test_tree_reg_default_params_and_init(void) {
     HT_ASSERT_EQ(params.criterion, HT_CRIT_VARIANCE_REDUCTION);
     HT_ASSERT_EQ(params.leaf_prediction, HT_LEAF_ADAPTIVE);
     HT_ASSERT_EQ(params.grace_period, 200U);
-    HT_ASSERT_FLOAT_NEAR(params.delta, (ht_float_t)1e-7, (ht_float_t)1e-12);
-    HT_ASSERT_FLOAT_NEAR(params.tau, (ht_float_t)0.05, (ht_float_t)1e-6);
-    HT_ASSERT_FLOAT_NEAR(params.learning_rate, (ht_float_t)0.01, (ht_float_t)1e-6);
-    HT_ASSERT_FLOAT_NEAR(params.l2_regularization, (ht_float_t)1e-4, (ht_float_t)1e-8);
-    HT_ASSERT_FLOAT_NEAR(params.model_selector_decay, (ht_float_t)0.95, (ht_float_t)1e-6);
-    HT_ASSERT_FLOAT_NEAR(params.min_samples_split, (ht_float_t)5.0, (ht_float_t)1e-6);
+#ifdef HT_USE_FIXED_POINT
+    HT_ASSERT_EQ(params.delta_neg_log10, 7U);
+#else
+    HT_ASSERT_FLOAT_NEAR(params.delta, HT_CONST(1e-7), HT_TEST_TOL(1e-12));
+#endif
+    HT_ASSERT_FLOAT_NEAR(params.tau, HT_CONST(0.05), HT_TEST_TOL(1e-6));
+    HT_ASSERT_FLOAT_NEAR(params.learning_rate, HT_CONST(0.01), HT_TEST_TOL(1e-6));
+    HT_ASSERT_FLOAT_NEAR(params.l2_regularization, HT_CONST(1e-4), HT_TEST_TOL(1e-8));
+    HT_ASSERT_FLOAT_NEAR(params.model_selector_decay, HT_CONST(0.95), HT_TEST_TOL(1e-6));
+    HT_ASSERT_FLOAT_NEAR(params.min_samples_split, HT_CONST(5.0), HT_TEST_TOL(1e-6));
     HT_ASSERT(!params.enable_hat);
 
     ht_config_params_t hat_params;
@@ -601,9 +621,9 @@ static void test_tree_reg_default_params_and_init(void) {
     HT_ASSERT_EQ(tree.root_idx, 0U);
     HT_ASSERT_EQ(tree.n_active_leaves, 1U);
     HT_ASSERT_EQ(tree.n_decision_nodes, 0U);
-    HT_ASSERT_FLOAT_EQ(tree.memory.node_pool[0].reg_stats.count, (ht_float_t)0.0);
-    HT_ASSERT_FLOAT_EQ(tree.memory.node_pool[0].reg_stats.mean, (ht_float_t)0.0);
-    HT_ASSERT_FLOAT_EQ(tree.memory.node_pool[0].reg_stats.m2, (ht_float_t)0.0);
+    HT_ASSERT_FLOAT_EQ(tree.memory.node_pool[0].reg_stats.count, HT_CONST(0.0));
+    HT_ASSERT_FLOAT_EQ(tree.memory.node_pool[0].reg_stats.mean, HT_CONST(0.0));
+    HT_ASSERT_FLOAT_EQ(tree.memory.node_pool[0].reg_stats.m2, HT_CONST(0.0));
 }
 
 static void test_tree_reg_predict_leaf_mean(void) {
@@ -618,30 +638,30 @@ static void test_tree_reg_predict_leaf_mean(void) {
     memset(x, 0, sizeof(x));
 
     /* Empty tree prediction is 0.0 */
-    HT_ASSERT_FLOAT_EQ(ht_tree_predict_reg(&tree, x), (ht_float_t)0.0);
+    HT_ASSERT_FLOAT_EQ(ht_tree_predict_reg(&tree, x), HT_CONST(0.0));
 
     /* Feed 3 samples: y = 10, 20, 30 */
-    x[0].num = (ht_float_t)1.0;
-    HT_ASSERT_EQ(ht_tree_learn_one_reg(&tree, x, (ht_float_t)10.0, (ht_float_t)1.0), HT_OK);
-    HT_ASSERT_FLOAT_NEAR(ht_tree_predict_reg(&tree, x), (ht_float_t)10.0, (ht_float_t)1e-5);
+    x[0].num = HT_CONST(1.0);
+    HT_ASSERT_EQ(ht_tree_learn_one_reg(&tree, x, HT_CONST(10.0), HT_CONST(1.0)), HT_OK);
+    HT_ASSERT_FLOAT_NEAR(ht_tree_predict_reg(&tree, x), HT_CONST(10.0), HT_TEST_TOL(1e-5));
 
-    HT_ASSERT_EQ(ht_tree_learn_one_reg(&tree, x, (ht_float_t)20.0, (ht_float_t)1.0), HT_OK);
-    HT_ASSERT_FLOAT_NEAR(ht_tree_predict_reg(&tree, x), (ht_float_t)15.0, (ht_float_t)1e-5);
+    HT_ASSERT_EQ(ht_tree_learn_one_reg(&tree, x, HT_CONST(20.0), HT_CONST(1.0)), HT_OK);
+    HT_ASSERT_FLOAT_NEAR(ht_tree_predict_reg(&tree, x), HT_CONST(15.0), HT_TEST_TOL(1e-5));
 
-    HT_ASSERT_EQ(ht_tree_learn_one_reg(&tree, x, (ht_float_t)30.0, (ht_float_t)1.0), HT_OK);
-    HT_ASSERT_FLOAT_NEAR(ht_tree_predict_reg(&tree, x), (ht_float_t)20.0, (ht_float_t)1e-5);
+    HT_ASSERT_EQ(ht_tree_learn_one_reg(&tree, x, HT_CONST(30.0), HT_CONST(1.0)), HT_OK);
+    HT_ASSERT_FLOAT_NEAR(ht_tree_predict_reg(&tree, x), HT_CONST(20.0), HT_TEST_TOL(1e-5));
 
     /* Deactivate leaf: prediction remains target mean (20.0) */
     HT_ASSERT_EQ(ht_tree_deactivate_leaf(&tree, tree.root_idx), HT_OK);
-    HT_ASSERT_FLOAT_NEAR(ht_tree_predict_reg(&tree, x), (ht_float_t)20.0, (ht_float_t)1e-5);
+    HT_ASSERT_FLOAT_NEAR(ht_tree_predict_reg(&tree, x), HT_CONST(20.0), HT_TEST_TOL(1e-5));
 }
 
 static void test_tree_reg_predict_leaf_model_sgd_and_clipping(void) {
     ht_config_params_t params;
     ht_default_reg_params(&params, 2);
     params.leaf_prediction = HT_LEAF_MODEL;
-    params.learning_rate = (ht_float_t)0.05;
-    params.l2_regularization = (ht_float_t)1e-4;
+    params.learning_rate = HT_CONST(0.05);
+    params.l2_regularization = HT_CONST(1e-4);
     params.grace_period = 1000U; /* Retain leaf without splitting during SGD tests */
 
     ht_tree_t tree;
@@ -652,35 +672,44 @@ static void test_tree_reg_predict_leaf_model_sgd_and_clipping(void) {
 
     /* Train on linear target y = 3.0 * x_0 + 2.0 */
     for (int i = 0; i < 300; ++i) {
-        ht_float_t x_val = (ht_float_t)(i % 10) * (ht_float_t)0.5;
-        ht_float_t y_val = (ht_float_t)3.0 * x_val + (ht_float_t)2.0;
+        ht_float_t x_val = HT_MUL(HT_FROM_INT(i % 10), HT_CONST(0.5));
+        ht_float_t y_val = HT_ADD(HT_MUL(HT_CONST(3.0), x_val), HT_CONST(2.0));
         x[0].num = x_val;
-        HT_ASSERT_EQ(ht_tree_learn_one_reg(&tree, x, y_val, (ht_float_t)1.0), HT_OK);
+        HT_ASSERT_EQ(ht_tree_learn_one_reg(&tree, x, y_val, HT_CONST(1.0)), HT_OK);
     }
 
     /* Test linear model prediction on unseen points */
-    x[0].num = (ht_float_t)2.0; /* Expected ~ 8.0 */
+    x[0].num = HT_CONST(2.0); /* Expected ~ 8.0 */
     ht_float_t pred = ht_tree_predict_reg(&tree, x);
-    HT_ASSERT_FLOAT_NEAR(pred, (ht_float_t)8.0, (ht_float_t)1.0);
+    HT_ASSERT_FLOAT_NEAR(pred, HT_CONST(8.0), HT_CONST(1.0));
 
     /* Test gradient clipping with extreme values */
-    x[0].num = (ht_float_t)1e8;
-    HT_ASSERT_EQ(ht_tree_learn_one_reg(&tree, x, (ht_float_t)1e14, (ht_float_t)1.0), HT_OK);
+#ifdef HT_USE_FIXED_POINT
+    x[0].num = HT_CONST(10000.0);
+    HT_ASSERT_EQ(ht_tree_learn_one_reg(&tree, x, HT_CONST(30000.0), HT_CONST(1.0)), HT_OK);
+    const ht_float_t clamp_lim = HT_CONST(10000.0);
+    const ht_float_t neg_clamp_lim = HT_CONST(-10000.0);
+#else
+    x[0].num = HT_CONST(1e8);
+    HT_ASSERT_EQ(ht_tree_learn_one_reg(&tree, x, HT_CONST(1e14), HT_CONST(1.0)), HT_OK);
+    const ht_float_t clamp_lim = HT_CONST(1e12);
+    const ht_float_t neg_clamp_lim = HT_CONST(-1e12);
+#endif
     uint16_t s_idx = tree.memory.node_pool[tree.root_idx].stats_idx;
     ht_leaf_stats_t *s_leaf = ht_stats_get(&tree.memory, s_idx);
     HT_ASSERT_NOT_NULL(s_leaf);
     const ht_float_t *s_w = ht_leaf_reg_weights_const(s_leaf, tree.params.n_features);
-    HT_ASSERT(s_w[0] <= (ht_float_t)1e12);
-    HT_ASSERT(s_w[0] >= (ht_float_t)-1e12);
-    HT_ASSERT(s_leaf->reg_intercept <= (ht_float_t)1e12);
-    HT_ASSERT(s_leaf->reg_intercept >= (ht_float_t)-1e12);
+    HT_ASSERT(s_w[0] <= clamp_lim);
+    HT_ASSERT(s_w[0] >= neg_clamp_lim);
+    HT_ASSERT(s_leaf->reg_intercept <= clamp_lim);
+    HT_ASSERT(s_leaf->reg_intercept >= neg_clamp_lim);
 }
 
 static void test_tree_reg_predict_leaf_adaptive_fmse(void) {
     ht_config_params_t params;
     ht_default_reg_params(&params, 2);
     params.leaf_prediction = HT_LEAF_ADAPTIVE;
-    params.model_selector_decay = (ht_float_t)0.95;
+    params.model_selector_decay = HT_CONST(0.95);
     params.grace_period = 1000U; /* Retain leaf without splitting during adaptive selector tests */
 
     ht_tree_t tree;
@@ -691,10 +720,10 @@ static void test_tree_reg_predict_leaf_adaptive_fmse(void) {
 
     /* 1. Feed strong linear relationship y = 5.0 * x_0 */
     for (int i = 0; i < 200; ++i) {
-        ht_float_t x_val = (ht_float_t)(i % 5);
-        ht_float_t y_val = (ht_float_t)5.0 * x_val;
+        ht_float_t x_val = HT_FROM_INT(i % 5);
+        ht_float_t y_val = HT_MUL(HT_CONST(5.0), x_val);
         x[0].num = x_val;
-        HT_ASSERT_EQ(ht_tree_learn_one_reg(&tree, x, y_val, (ht_float_t)1.0), HT_OK);
+        HT_ASSERT_EQ(ht_tree_learn_one_reg(&tree, x, y_val, HT_CONST(1.0)), HT_OK);
     }
 
     uint16_t s_idx = tree.memory.node_pool[tree.root_idx].stats_idx;
@@ -705,17 +734,17 @@ static void test_tree_reg_predict_leaf_adaptive_fmse(void) {
     HT_ASSERT(st->fmse_model < st->fmse_mean);
 
     /* Adaptive predicts using linear model */
-    x[0].num = (ht_float_t)2.0; /* Expected ~ 10.0 */
-    HT_ASSERT_FLOAT_NEAR(ht_tree_predict_reg(&tree, x), (ht_float_t)10.0, (ht_float_t)1.5);
+    x[0].num = HT_CONST(2.0); /* Expected ~ 10.0 */
+    HT_ASSERT_FLOAT_NEAR(ht_tree_predict_reg(&tree, x), HT_CONST(10.0), HT_CONST(1.5));
 }
 
 static void test_tree_reg_split_and_weight_inheritance(void) {
     ht_config_params_t params;
     ht_default_reg_params(&params, 2);
     params.grace_period = 25U;
-    params.delta = (ht_float_t)1e-3;
-    params.min_samples_split = (ht_float_t)5.0;
-    params.min_branch_fraction = (ht_float_t)0.01;
+    params.delta = HT_CONST(1e-3);
+    params.min_samples_split = HT_CONST(5.0);
+    params.min_branch_fraction = HT_CONST(0.01);
 
     ht_tree_t tree;
     HT_ASSERT_EQ(ht_tree_init(&tree, &params), HT_OK);
@@ -728,11 +757,11 @@ static void test_tree_reg_split_and_weight_inheritance(void) {
      * If x_0 > 5.0:  y ~ 100.0
      */
     for (int i = 0; i < 200; ++i) {
-        ht_float_t x_val = (ht_float_t)(i % 10);
-        ht_float_t y_val = (x_val <= (ht_float_t)4.5) ? (ht_float_t)10.0 : (ht_float_t)100.0;
+        ht_float_t x_val = HT_FROM_INT(i % 10);
+        ht_float_t y_val = (x_val <= HT_CONST(4.5)) ? HT_CONST(10.0) : HT_CONST(100.0);
         x[0].num = x_val;
-        x[1].num = (ht_float_t)1.0;
-        HT_ASSERT_EQ(ht_tree_learn_one_reg(&tree, x, y_val, (ht_float_t)1.0), HT_OK);
+        x[1].num = HT_CONST(1.0);
+        HT_ASSERT_EQ(ht_tree_learn_one_reg(&tree, x, y_val, HT_CONST(1.0)), HT_OK);
         if (!(tree.memory.node_pool[tree.root_idx].flags & HT_NODE_IS_LEAF)) {
             break; /* Stop immediately after root split to inspect children */
         }
@@ -755,23 +784,23 @@ static void test_tree_reg_split_and_weight_inheritance(void) {
     HT_ASSERT_NEQ(right->stats_idx, HT_INVALID_IDX);
 
     /* Left child target mean should be low (< 40), Right child target mean high (> 60) */
-    HT_ASSERT(left->reg_stats.mean < (ht_float_t)40.0);
-    HT_ASSERT(right->reg_stats.mean > (ht_float_t)60.0);
+    HT_ASSERT(left->reg_stats.mean < HT_CONST(40.0));
+    HT_ASSERT(right->reg_stats.mean > HT_CONST(60.0));
 
     /* Test predictions follow the split */
-    x[0].num = (ht_float_t)2.0;
-    HT_ASSERT(ht_tree_predict_reg(&tree, x) < (ht_float_t)40.0);
+    x[0].num = HT_CONST(2.0);
+    HT_ASSERT(ht_tree_predict_reg(&tree, x) < HT_CONST(40.0));
 
-    x[0].num = (ht_float_t)8.0;
-    HT_ASSERT(ht_tree_predict_reg(&tree, x) > (ht_float_t)70.0);
+    x[0].num = HT_CONST(8.0);
+    HT_ASSERT(ht_tree_predict_reg(&tree, x) > HT_CONST(70.0));
 }
 
 static void test_tree_reg_leaf_deactivation_by_depth(void) {
     ht_config_params_t params;
     ht_default_reg_params(&params, 2);
     params.grace_period = 20U;
-    params.delta = (ht_float_t)1e-2;
-    params.min_samples_split = (ht_float_t)5.0;
+    params.delta = HT_CONST(1e-2);
+    params.min_samples_split = HT_CONST(5.0);
 
     ht_tree_t tree;
     HT_ASSERT_EQ(ht_tree_init(&tree, &params), HT_OK);
@@ -781,11 +810,11 @@ static void test_tree_reg_leaf_deactivation_by_depth(void) {
 
     /* Create splits to produce leaves at depth 1 and depth 2 */
     for (int i = 0; i < 200; ++i) {
-        ht_float_t x0 = (ht_float_t)(i % 10);
-        ht_float_t y = (x0 < (ht_float_t)3.0) ? (ht_float_t)5.0 :
-                       (x0 < (ht_float_t)7.0) ? (ht_float_t)50.0 : (ht_float_t)200.0;
+        ht_float_t x0 = HT_FROM_INT(i % 10);
+        ht_float_t y = (x0 < HT_CONST(3.0)) ? HT_CONST(5.0) :
+                       (x0 < HT_CONST(7.0)) ? HT_CONST(50.0) : HT_CONST(200.0);
         x[0].num = x0;
-        HT_ASSERT_EQ(ht_tree_learn_one_reg(&tree, x, y, (ht_float_t)1.0), HT_OK);
+        HT_ASSERT_EQ(ht_tree_learn_one_reg(&tree, x, y, HT_CONST(1.0)), HT_OK);
     }
 
     uint16_t active_before = tree.n_active_leaves;
@@ -801,7 +830,7 @@ static void test_tree_reg_serialization_roundtrip(void) {
     ht_config_params_t params;
     ht_default_reg_params(&params, 3);
     params.grace_period = 30U;
-    params.delta = (ht_float_t)1e-2;
+    params.delta = HT_CONST(1e-2);
 
     ht_tree_t orig_tree;
     HT_ASSERT_EQ(ht_tree_init(&orig_tree, &params), HT_OK);
@@ -810,11 +839,11 @@ static void test_tree_reg_serialization_roundtrip(void) {
     memset(x, 0, sizeof(x));
 
     for (int i = 0; i < 150; ++i) {
-        x[0].num = (ht_float_t)(i % 10);
-        x[1].num = (ht_float_t)(i % 5);
-        x[2].num = (ht_float_t)(i * 0.1);
-        ht_float_t y = (ht_float_t)2.5 * x[0].num + (ht_float_t)1.5 * x[1].num;
-        HT_ASSERT_EQ(ht_tree_learn_one_reg(&orig_tree, x, y, (ht_float_t)1.0), HT_OK);
+        x[0].num = HT_FROM_INT(i % 10);
+        x[1].num = HT_FROM_INT(i % 5);
+        x[2].num = HT_MUL(HT_FROM_INT(i), HT_CONST(0.1));
+        ht_float_t y = HT_ADD(HT_MUL(HT_CONST(2.5), x[0].num), HT_MUL(HT_CONST(1.5), x[1].num));
+        HT_ASSERT_EQ(ht_tree_learn_one_reg(&orig_tree, x, y, HT_CONST(1.0)), HT_OK);
     }
 
     /* Save full model */
@@ -831,12 +860,12 @@ static void test_tree_reg_serialization_roundtrip(void) {
 
     /* Verify prediction equality */
     for (int i = 0; i < 10; ++i) {
-        x[0].num = (ht_float_t)(i * 0.7);
-        x[1].num = (ht_float_t)(i * 0.3);
-        x[2].num = (ht_float_t)(i * 0.1);
+        x[0].num = HT_MUL(HT_FROM_INT(i), HT_CONST(0.7));
+        x[1].num = HT_MUL(HT_FROM_INT(i), HT_CONST(0.3));
+        x[2].num = HT_MUL(HT_FROM_INT(i), HT_CONST(0.1));
         ht_float_t p_orig = ht_tree_predict_reg(&orig_tree, x);
         ht_float_t p_load = ht_tree_predict_reg(&loaded_tree, x);
-        HT_ASSERT_FLOAT_NEAR(p_orig, p_load, (ht_float_t)1e-5);
+        HT_ASSERT_FLOAT_NEAR(p_orig, p_load, HT_TEST_TOL(1e-5));
     }
 }
 
@@ -847,7 +876,7 @@ static void test_tree_hat_reg_alternate_tree_switch_and_prune(void) {
     ht_config_params_t params;
     ht_default_hat_reg_params(&params, 2);
     params.drift_window_threshold = 10U; /* Small threshold for test */
-    params.switch_significance = (ht_float_t)0.05;
+    params.switch_significance = HT_CONST(0.05);
 
     ht_tree_t tree;
     HT_ASSERT_EQ(ht_tree_init_hat(&tree, &params, &ad_pool), HT_OK);
@@ -862,20 +891,20 @@ static void test_tree_hat_reg_alternate_tree_switch_and_prune(void) {
     tree.n_alternate_trees++;
 
     /* 2. Configure alt tree with lower error than main tree (Switch case) */
-    tree.node_drift[tree.root_idx].mean_error = (ht_float_t)10.0;
-    tree.node_drift[tree.root_idx].error_m2 = (ht_float_t)5.0;
+    tree.node_drift[tree.root_idx].mean_error = HT_CONST(10.0);
+    tree.node_drift[tree.root_idx].error_m2 = HT_CONST(5.0);
     tree.node_drift[tree.root_idx].error_count = 50U;
 
-    tree.node_drift[alt_root].mean_error = (ht_float_t)1.0;
-    tree.node_drift[alt_root].error_m2 = (ht_float_t)2.0;
+    tree.node_drift[alt_root].mean_error = HT_CONST(1.0);
+    tree.node_drift[alt_root].error_m2 = HT_CONST(2.0);
     tree.node_drift[alt_root].error_count = 50U;
 
     ht_hat_action_t act = ht_hat_evaluate_reg_alternate(
         tree.node_drift[tree.root_idx].mean_error,
-        tree.node_drift[tree.root_idx].error_m2 / (ht_float_t)49.0,
+        HT_DIV(tree.node_drift[tree.root_idx].error_m2, HT_CONST(49.0)),
         tree.node_drift[tree.root_idx].error_count,
         tree.node_drift[alt_root].mean_error,
-        tree.node_drift[alt_root].error_m2 / (ht_float_t)49.0,
+        HT_DIV(tree.node_drift[alt_root].error_m2, HT_CONST(49.0)),
         tree.node_drift[alt_root].error_count,
         tree.params.drift_window_threshold,
         tree.params.switch_significance
@@ -883,13 +912,13 @@ static void test_tree_hat_reg_alternate_tree_switch_and_prune(void) {
     HT_ASSERT_EQ(act, HT_HAT_ACTION_SWITCH);
 
     /* 3. Configure alt tree with higher error (Prune case) */
-    tree.node_drift[alt_root].mean_error = (ht_float_t)25.0;
+    tree.node_drift[alt_root].mean_error = HT_CONST(25.0);
     act = ht_hat_evaluate_reg_alternate(
         tree.node_drift[tree.root_idx].mean_error,
-        tree.node_drift[tree.root_idx].error_m2 / (ht_float_t)49.0,
+        HT_DIV(tree.node_drift[tree.root_idx].error_m2, HT_CONST(49.0)),
         tree.node_drift[tree.root_idx].error_count,
         tree.node_drift[alt_root].mean_error,
-        tree.node_drift[alt_root].error_m2 / (ht_float_t)49.0,
+        HT_DIV(tree.node_drift[alt_root].error_m2, HT_CONST(49.0)),
         tree.node_drift[alt_root].error_count,
         tree.params.drift_window_threshold,
         tree.params.switch_significance
@@ -905,8 +934,8 @@ static void test_tree_leaf_sgd_hybrid_normalization(void) {
     ht_config_params_t params;
     ht_default_reg_params(&params, 2);
     params.leaf_prediction = HT_LEAF_MODEL;
-    params.learning_rate = (ht_float_t)0.05;
-    params.l2_regularization = (ht_float_t)1e-4;
+    params.learning_rate = HT_CONST(0.05);
+    params.l2_regularization = HT_CONST(1e-4);
     params.leaf_sgd_normalize = true;
     params.grace_period = 500U;
 
@@ -921,31 +950,31 @@ static void test_tree_leaf_sgd_hybrid_normalization(void) {
      * x[1] in [0, 1000]
      * Target y = 5.0 * x[0] + 0.002 * x[1] + 3.0 */
     for (int i = 0; i < 400; ++i) {
-        ht_float_t v0 = (ht_float_t)(i % 10) * (ht_float_t)0.1;
-        ht_float_t v1 = (ht_float_t)((i * 37) % 1000);
-        ht_float_t y = (ht_float_t)5.0 * v0 + (ht_float_t)0.002 * v1 + (ht_float_t)3.0;
+        ht_float_t v0 = HT_MUL(HT_FROM_INT(i % 10), HT_CONST(0.1));
+        ht_float_t v1 = HT_FROM_INT((i * 37) % 1000);
+        ht_float_t y = HT_ADD(HT_ADD(HT_MUL(HT_CONST(5.0), v0), HT_MUL(HT_CONST(0.002), v1)), HT_CONST(3.0));
 
         x[0].num = v0;
         x[1].num = v1;
-        HT_ASSERT_EQ(ht_tree_learn_one_reg(&tree, x, y, (ht_float_t)1.0), HT_OK);
+        HT_ASSERT_EQ(ht_tree_learn_one_reg(&tree, x, y, HT_CONST(1.0)), HT_OK);
     }
 
     /* Test prediction at unseen vector */
-    x[0].num = (ht_float_t)0.5;
-    x[1].num = (ht_float_t)500.0;
+    x[0].num = HT_CONST(0.5);
+    x[1].num = HT_CONST(500.0);
     /* Expected y = 5.0 * 0.5 + 0.002 * 500 + 3.0 = 2.5 + 1.0 + 3.0 = 6.5 */
     ht_float_t pred = ht_tree_predict_reg(&tree, x);
-    HT_ASSERT_FLOAT_NEAR(pred, (ht_float_t)6.5, (ht_float_t)1.5);
+    HT_ASSERT_FLOAT_NEAR(pred, HT_CONST(6.5), HT_CONST(1.5));
 
     /* Verify weights are stable and bounded */
     uint16_t s_idx = tree.memory.node_pool[tree.root_idx].stats_idx;
     ht_leaf_stats_t *s_leaf = ht_stats_get(&tree.memory, s_idx);
     HT_ASSERT_NOT_NULL(s_leaf);
     const ht_float_t *s_w = ht_leaf_reg_weights_const(s_leaf, tree.params.n_features);
-    HT_ASSERT(s_w[0] < (ht_float_t)100.0);
-    HT_ASSERT(s_w[0] > (ht_float_t)-100.0);
-    HT_ASSERT(s_w[1] < (ht_float_t)100.0);
-    HT_ASSERT(s_w[1] > (ht_float_t)-100.0);
+    HT_ASSERT(s_w[0] < HT_CONST(100.0));
+    HT_ASSERT(s_w[0] > HT_CONST(-100.0));
+    HT_ASSERT(s_w[1] < HT_CONST(100.0));
+    HT_ASSERT(s_w[1] > HT_CONST(-100.0));
 }
 
 static void test_tree_attached_prep_pipeline(void) {
@@ -965,7 +994,7 @@ static void test_tree_attached_prep_pipeline(void) {
     ht_prep_pipeline_t pipe;
     ht_prep_pipeline_init(&pipe, 2, types);
     ht_hampel_set_enabled(&pipe.hampel, 0, true);
-    ht_hampel_set_threshold(&pipe.hampel, (ht_float_t)3.0);
+    ht_hampel_set_threshold(&pipe.hampel, HT_CONST(3.0));
 
     /* Attach pipeline to tree */
     HT_ASSERT_EQ(ht_tree_set_prep_pipeline(&tree, &pipe), HT_OK);
@@ -975,30 +1004,30 @@ static void test_tree_attached_prep_pipeline(void) {
     memset(x, 0, sizeof(x));
 
     /* Train with cluster 0 around (1, 1) and cluster 1 around (10, 10),
-     * injecting occasional sensor spikes (e.g. 100000.0) */
+     * injecting occasional sensor spikes */
     for (int i = 0; i < 200; ++i) {
         uint8_t c = (i % 2 == 0) ? 0 : 1;
-        ht_float_t base_v = (c == 0) ? (ht_float_t)1.0 : (ht_float_t)10.0;
-        ht_float_t noise = (ht_float_t)((i % 5) - 2) * (ht_float_t)0.1;
+        ht_float_t base_v = (c == 0) ? HT_CONST(1.0) : HT_CONST(10.0);
+        ht_float_t noise = HT_MUL(HT_FROM_INT((i % 5) - 2), HT_CONST(0.1));
 
-        x[0].num = base_v + noise;
-        x[1].num = base_v + noise;
+        x[0].num = HT_ADD(base_v, noise);
+        x[1].num = HT_ADD(base_v, noise);
 
         /* Inject spike every 25 samples */
         if (i > 10 && i % 25 == 0) {
-            x[0].num = (ht_float_t)100000.0;
+            x[0].num = HT_CONST(20000.0);
         }
 
-        HT_ASSERT_EQ(ht_tree_learn_one(&tree, x, c, (ht_float_t)1.0), HT_OK);
+        HT_ASSERT_EQ(ht_tree_learn_one(&tree, x, c, HT_CONST(1.0)), HT_OK);
     }
 
     /* Test prediction: with spike injected at query time, Hampel replaces it with median */
-    x[0].num = (ht_float_t)1.1;
-    x[1].num = (ht_float_t)1.0;
+    x[0].num = HT_CONST(1.1);
+    x[1].num = HT_CONST(1.0);
     HT_ASSERT_EQ(ht_tree_predict(&tree, x), 0);
 
-    x[0].num = (ht_float_t)10.2;
-    x[1].num = (ht_float_t)9.9;
+    x[0].num = HT_CONST(10.2);
+    x[1].num = HT_CONST(9.9);
     HT_ASSERT_EQ(ht_tree_predict(&tree, x), 1);
 
     /* Detach pipeline */
@@ -1010,7 +1039,7 @@ static void test_tree_defer_splits_apply_and_reset_subtree(void) {
     ht_config_params_t params;
     ht_default_params(&params, 2, 2);
     params.grace_period = 20U;
-    params.delta = (ht_float_t)1e-2;
+    params.delta = HT_CONST(1e-2);
 
     ht_tree_t tree;
     HT_ASSERT_EQ(ht_tree_init(&tree, &params), HT_OK);
@@ -1021,9 +1050,10 @@ static void test_tree_defer_splits_apply_and_reset_subtree(void) {
 
     for (int i = 0; i < 120; ++i) {
         uint8_t c = (i % 2 == 0) ? 0U : 1U;
-        x[0].num = (c == 0U) ? (ht_float_t)(1.0 + (i % 5) * 0.1) : (ht_float_t)(10.0 + (i % 5) * 0.1);
-        x[1].num = (ht_float_t)(i % 7);
-        HT_ASSERT_EQ(ht_tree_learn_one(&tree, x, c, (ht_float_t)1.0), HT_OK);
+        ht_float_t jitter = HT_MUL(HT_FROM_INT(i % 5), HT_CONST(0.1));
+        x[0].num = (c == 0U) ? HT_ADD(HT_CONST(1.0), jitter) : HT_ADD(HT_CONST(10.0), jitter);
+        x[1].num = HT_FROM_INT(i % 7);
+        HT_ASSERT_EQ(ht_tree_learn_one(&tree, x, c, HT_CONST(1.0)), HT_OK);
     }
 
     /* Because splits are deferred, root must still be a single active leaf */
@@ -1053,6 +1083,34 @@ static void test_tree_defer_splits_apply_and_reset_subtree(void) {
     HT_ASSERT_EQ(tree.n_active_leaves, 1U);
     HT_ASSERT_EQ(ht_node_count(&tree.memory), 1U);
     HT_ASSERT_EQ(ht_stats_count(&tree.memory), 1U);
+}
+
+static void test_tree_delta_pow10_sub_ulp_parity(void) {
+    ht_config_params_t params;
+    ht_default_params(&params, 2, 2);
+    ht_params_set_delta_pow10(&params, 7U);
+    HT_ASSERT_EQ(params.delta_neg_log10, 7U);
+    params.grace_period = 25U;
+
+    ht_tree_t tree;
+    HT_ASSERT_EQ(ht_tree_init(&tree, &params), HT_OK);
+
+    /* Verify invalid delta_neg_log10 = 0 with delta = 0 is rejected */
+    ht_config_params_t bad = params;
+    ht_params_set_delta_pow10(&bad, 0U);
+    HT_ASSERT_EQ(ht_tree_init(&tree, &bad), HT_ERR_INVALID_ARG);
+
+    /* Re-init with delta = 1e-7 and verify split occurs on separable stream */
+    HT_ASSERT_EQ(ht_tree_init(&tree, &params), HT_OK);
+    ht_value_t x[HT_MAX_FEATURES];
+    memset(x, 0, sizeof(x));
+    for (int i = 0; i < 300; ++i) {
+        uint8_t y = (uint8_t)(i % 2);
+        x[0].num = (y == 0U) ? HT_FROM_INT(1 + (i % 3)) : HT_FROM_INT(8 + (i % 3));
+        x[1].num = HT_CONST(0.5);
+        HT_ASSERT_EQ(ht_tree_learn_one(&tree, x, y, HT_CONST(1.0)), HT_OK);
+    }
+    HT_ASSERT(tree.n_decision_nodes >= 1U);
 }
 
 /* ========================================================================= */
@@ -1092,6 +1150,7 @@ void test_tree_run(void) {
     HT_RUN_TEST(test_tree_leaf_sgd_hybrid_normalization);
     HT_RUN_TEST(test_tree_attached_prep_pipeline);
 
-    /* Nível 1 & 2: Primitivas de Coordenação Externa (Fed-VFDT) */
+    /* Nível 1 & 2: Primitivas de Coordenação Externa (Fed-VFDT) & Sub-ULP Delta */
     HT_RUN_TEST(test_tree_defer_splits_apply_and_reset_subtree);
+    HT_RUN_TEST(test_tree_delta_pow10_sub_ulp_parity);
 }

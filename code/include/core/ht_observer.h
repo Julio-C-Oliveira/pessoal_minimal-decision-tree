@@ -344,6 +344,22 @@ void ht_var_update(ht_var_stat_t *var, ht_float_t y, ht_float_t weight);
  */
 ht_float_t ht_var_value(const ht_var_stat_t *var);
 
+#ifdef HT_USE_FIXED_POINT
+/**
+ * @brief Converts a compile-time literal to ht_var_stat_t.m2 internal scale (Q26.6).
+ */
+#define HT_VAR_M2_CONST(x) ((ht_float_t)((double)(x) >= 0.0 \
+                            ? ((double)(x) * (double)(1L << HT_FIXED_M2_SHIFT) + 0.5) \
+                            : ((double)(x) * (double)(1L << HT_FIXED_M2_SHIFT) - 0.5)))
+/**
+ * @brief Returns unbiased sample variance in 64-bit shifted m2 scale (value * 2^HT_FIXED_M2_SHIFT)
+ *        without Q16.16 saturation for high-amplitude regression targets.
+ */
+int64_t ht_var_value_q8(const ht_var_stat_t *var);
+#else
+#define HT_VAR_M2_CONST(x) HT_CONST(x)
+#endif
+
 /**
  * @brief Exact parallel addition/combination of two variance statistics (Chan et al., 1983).
  *
