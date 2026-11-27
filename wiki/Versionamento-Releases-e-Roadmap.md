@@ -12,20 +12,20 @@ Em **C11 e bibliotecas de baixo nível / embarcadas** (padrão adotado por SQLit
 
 ```text
 ┌─────────────────────────────────────────────────────────────────────────┐
-│ 1. Metadata File (Raiz)        │ VERSION ("0.6.0")                      │
+│ 1. Metadata File (Raiz)        │ VERSION ("0.6.1")                      │
 │ (Equivalente ao pyproject.toml) │ Lido pelo Makefile, scripts e CI/CD   │
 ├─────────────────────────────────────────────────────────────────────────┤
 │ 2. Single Source of Truth em C │ HT_VERSION_MAJOR / MINOR / PATCH       │
-│ (code/include/core/ht_config.h)│ HT_VERSION_STRING ("0.6.0")            │
+│ (code/include/core/ht_config.h)│ HT_VERSION_STRING ("0.6.1")            │
 │                                │ HT_VERSION_CHECK(maj, min, patch)      │
 │                                │ const char *ht_version(void);          │
 ├─────────────────────────────────────────────────────────────────────────┤
-│ 3. Git Tags e GitHub Releases  │ v0.6.0 (Tags anotadas no Git)          │
+│ 3. Git Tags e GitHub Releases  │ v0.6.1 (Tags anotadas no Git)          │
 │                                │ GitHub Releases / Tarballs             │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
-1. **Arquivo de Metadados ([`VERSION`](../VERSION)):** Localizado na raiz do repositório, armazena a versão canônica (ex: `0.6.0`). É a referência única para automações, empacotadores e regras de build.
+1. **Arquivo de Metadados ([`VERSION`](../VERSION)):** Localizado na raiz do repositório, armazena a versão canônica (ex: `0.6.1`). É a referência única para automações, empacotadores e regras de build.
 2. **Macros e Símbolos em C ([`ht_config.h`](../code/include/core/ht_config.h) e [`ht_tree.h`](../code/include/core/ht_tree.h)):** Fornece constantes numéricas para o pré-processador e uma função estática de runtime (`ht_version()`).
 3. **Tags do Git (`vX.Y.Z`):** Conectam o histórico de commits do repositório com as versões públicas disponibilizadas no GitHub.
 
@@ -58,7 +58,7 @@ void print_system_info(void) {
 ### Via Linha de Comando / Build
 ```bash
 make version
-# Saida: kansho (libht) version 0.6.0
+# Saida: kansho (libht) version 0.6.1
 ```
 
 ---
@@ -96,6 +96,21 @@ Para lançar uma nova versão oficial no GitHub:
 ---
 
 ## 4.1 Histórico de Releases (Changelog)
+
+### v0.6.1 (2026-11-27) — Hardening de Testes, Cobertura `gcov`, Sanitizers & 4 Correções no Núcleo C11
+- **4 Bugs Reais Descobertos e Corrigidos em `code/src/` (Sem Alteração da API Pública):**
+  - **`fix(prep)` ([`ht_prep.c`](../code/src/core/ht_prep.c)):** `ht_quantizer_transform_one` agora retorna explicitamente a categoria ausente `-1` para entradas `NaN` no modo `HT_QUANT_KBINS_CAT` (evitando propagar o padrão de bits IEEE-754 de `NaN` em `.cat`).
+  - **`fix(tree)` ([`ht_tree.c`](../code/src/core/ht_tree.c)):** Guarda contra ponteiro `NULL` adicionada em `ht_default_hat_params` e `ht_default_hat_reg_params` (capturada via `ASan`/`UBSan`).
+  - **`fix(observer)` ([`ht_observer.c`](../code/src/core/ht_observer.c)):** Em `Q16.16`, `ht_gaussian_update` agora exige `new_count >= 4.0` antes de acionar `ht_gaussian_rescale_all`, impedindo que features de alta amplitude (`|Δ| > 180`) colapsem `count` abaixo de `2.0` e travem `ht_gaussian_stddev = 0.0`.
+  - **`fix(tree)` ([`ht_tree.c`](../code/src/core/ht_tree.c)):** Em `Q16.16`, o acúmulo do peso não-reescalado em `stats->last_split_attempt_at` agora ocorre também sob `HT_TREE_FLAG_DEFER_SPLITS`, garantindo que clientes `Fed-VFDT STATS-MERGE` em regressão de alta amplitude (`y ∈ [250, 3500]`) atinjam `grace_period` normalmente após o Block-Rescaling Q26.6.
+- **Hardening da Suíte de Testes e Novos Alvos no `Makefile` (`make test-all`):**
+  - **`make test-matrix` (7/7 perfis):** `float32`, `double64`, `Q16.16` (zero-`libm`), `HT_CLASSIF_ONLY` (`float32`/`Q16.16`) e `MCU Tier 4` (`HT_MAX_NODES=64, LEAVES=4, FEATURES=8, CLASSES=4`, `float32`/`Q16.16`).
+  - **`make test-sanitize` (3/3 perfis):** `AddressSanitizer` + `UndefinedBehaviorSanitizer` em `float32`, `double64` e `Q16.16` (**0 erros de memória / 0 UB**).
+  - **`make test-parity` ([`run_parity_and_smoke.py`](../code/tests/run_parity_and_smoke.py)):** Gate híbrido *cross-precision* combinando 7 cenários sintéticos extremos (`Sub-ULP`, regressão de alta amplitude, `HAT` drift abrupto, `Fed-VFDT`/`Fed-Forest` Classif & Reg), 4 slices reais condicionais (`electricity`, `bikes`, `nyc_taxi`, `covertype`) e a suíte federada TCP POSIX multi-processo (`make bench-fed-net`, 5/5).
+  - **`make coverage` ([`run_coverage.py`](../code/tests/run_coverage.py)):** Gate automatizado `gcov` exigindo `>= 92%` linhas totais, `>= 80%` branches totais e `>= 85%` linhas por módulo:
+    - `float32`: **`94,77%` linhas** (`4.663` linhas) e **`80,92%` branches** (`3.580` branches), menor módulo `92,45%` (`ht_tree.c`).
+    - `Q16.16`: **`94,43%` linhas** (`5.247` linhas) e **`80,01%` branches** (`4.068` branches), menor módulo `91,90%` (`ht_tree.c`).
+- **Suíte de Testes:** **167/167 testes aprovados em `Q16.16`** (`250.188` asserções, zero `-lm`), **161/161 em `float32`** e **161/161 em `double64`** com zero warnings sob `-std=c11 -Wall -Wextra -Werror -pedantic`.
 
 ### v0.6.0 (2026-11-27) — Aritmética de Ponto Fixo `Q16.16` Zero-Libm (`-DHT_USE_FIXED_POINT`) (Fase 8)
 - **Motor Matemático `Q16.16` Zero-Libm ([`ht_math_fixed`](../code/include/core/ht_math_fixed.h), Entrega 8.2):**
