@@ -19,7 +19,7 @@ Ao compilar a biblioteca no PC para gerar os arquivos binários gravados no disp
 
 > [!NOTE]
 > - **Zero overhead estático interno na biblioteca:** A `libht` possui `0 B` em `.data` e `0 B` em `.bss` internos. Todo o footprint de execução reside exclusivamente nas instâncias alocadas pelo usuário (`ht_tree_t`, `ht_fed_forest_client_t`, `ht_fed_vfdt_client_t`).
-> - **Microcontroladores de 32 bits (ARM Thumb-2 / Xtensa LX6):** Na prática em hardware emulado (`v0.5.0`), o firmware bare-metal completo do **ARM Cortex-M3** (`lm3s6965evb`, Tier 4) ocupa **65.832 B de Flash** e **57.468 B de RAM ($\le 64\text{ KB}$)**; no **ESP32**, **186.263 B de Flash** e **148.904 B de DRAM**.
+> - **Microcontroladores de 32 bits (ARM Thumb-2 / Xtensa LX6):** Na prática em hardware emulado, o firmware bare-metal completo do **ARM Cortex-M3** (`lm3s6965evb`, Tier 4 sem FPU) ocupa **66.220 B de Flash** e **57.468 B de RAM ($\le 64\text{ KB}$)** em `float32` (`soft-fp`), caindo para **`49.264 B` de Flash (`-25,6%`)** e **`57.104 B` de RAM** com **`-DHT_USE_FIXED_POINT`** (`Q16.16` zero-`libm`, `v0.6.0`, speedup SysTick de `1,86×–4,48×` e `0` símbolos `soft-fp`/`libm`); no **ESP32**, **186.263 B de Flash** e **148.904 B de DRAM**.
 
 ---
 
@@ -87,16 +87,22 @@ strip --strip-all app_inferencia
 
 ### B) Microcontroladores Bare-Metal / RTOS (ARM Cortex-M, STM32, ESP32)
 ```bash
-# 1. Compilação cruzada do núcleo (exemplo ARM Cortex-M4F):
+# 1. Compilação cruzada do núcleo com FPU em hardware (exemplo ARM Cortex-M4F):
 arm-none-eabi-gcc -mcpu=cortex-m4 -mthumb -mfloat-abi=hard -mfpu=fpv4-sp-d16 \
     -std=c11 -Os -ffunction-sections -fdata-sections \
     -Icode/include -Icode/include/core code/src/core/*.c main.c -lm \
     -Wl,--gc-sections -o firmware.elf
 
-# 2. Extração da imagem binária limpa (.bin) para gravação na Flash:
-arm-none-eabi-objcopy -O binary firmware.elf firmware.bin
+# 2. Compilação cruzada ZERO-LIBM em ponto fixo Q16.16 para MCUs SEM FPU (Cortex-M0/M0+/M3, sem -lm!):
+arm-none-eabi-gcc -mcpu=cortex-m3 -mthumb -mfloat-abi=soft \
+    -DHT_USE_FIXED_POINT -std=c11 -Os -ffunction-sections -fdata-sections \
+    -Icode/include -Icode/include/core code/src/core/*.c main.c \
+    -Wl,--gc-sections -o firmware_q16.elf
+
+# 3. Extração da imagem binária limpa (.bin) para gravação na Flash:
+arm-none-eabi-objcopy -O binary firmware_q16.elf firmware_q16.bin
 ```
-*O firmware final do núcleo C11 na Flash do microcontrolador ocupará **$\approx 28{,}6\text{ KB}$ completo** (ou **$< 10\text{ KB}$** somente inferência com `--gc-sections`).*
+*O firmware final do núcleo C11 na Flash do microcontrolador ocupará **$\approx 28{,}6\text{ KB}$ completo** (ou **$< 10\text{ KB}$** somente inferência com `--gc-sections`), e o modo `-DHT_USE_FIXED_POINT` elimina 100% da biblioteca `libm` e da emulação `soft-fp` (`-25,6%` no binário completo Cortex-M3).*
 
 ### C) Redimensionando a RAM para Microcontroladores com Pouca Memória (< 128 KB de RAM)
 Se o microcontrolador possuir apenas 32 KB, 64 KB ou 128 KB de memória RAM (como STM32F103, ESP8266 ou RP2040), não é necessário alocar os $484,4\text{ KB}$ da configuração padrão. Basta reduzir as macros de capacidade no momento da compilação:

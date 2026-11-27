@@ -12,20 +12,20 @@ Em **C11 e bibliotecas de baixo nível / embarcadas** (padrão adotado por SQLit
 
 ```text
 ┌─────────────────────────────────────────────────────────────────────────┐
-│ 1. Metadata File (Raiz)        │ VERSION ("0.5.0")                      │
+│ 1. Metadata File (Raiz)        │ VERSION ("0.6.0")                      │
 │ (Equivalente ao pyproject.toml) │ Lido pelo Makefile, scripts e CI/CD   │
 ├─────────────────────────────────────────────────────────────────────────┤
 │ 2. Single Source of Truth em C │ HT_VERSION_MAJOR / MINOR / PATCH       │
-│ (code/include/core/ht_config.h)│ HT_VERSION_STRING ("0.5.0")            │
+│ (code/include/core/ht_config.h)│ HT_VERSION_STRING ("0.6.0")            │
 │                                │ HT_VERSION_CHECK(maj, min, patch)      │
 │                                │ const char *ht_version(void);          │
 ├─────────────────────────────────────────────────────────────────────────┤
-│ 3. Git Tags e GitHub Releases  │ v0.5.0 (Tags anotadas no Git)          │
+│ 3. Git Tags e GitHub Releases  │ v0.6.0 (Tags anotadas no Git)          │
 │                                │ GitHub Releases / Tarballs             │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
-1. **Arquivo de Metadados ([`VERSION`](../VERSION)):** Localizado na raiz do repositório, armazena a versão canônica (ex: `0.5.0`). É a referência única para automações, empacotadores e regras de build.
+1. **Arquivo de Metadados ([`VERSION`](../VERSION)):** Localizado na raiz do repositório, armazena a versão canônica (ex: `0.6.0`). É a referência única para automações, empacotadores e regras de build.
 2. **Macros e Símbolos em C ([`ht_config.h`](../code/include/core/ht_config.h) e [`ht_tree.h`](../code/include/core/ht_tree.h)):** Fornece constantes numéricas para o pré-processador e uma função estática de runtime (`ht_version()`).
 3. **Tags do Git (`vX.Y.Z`):** Conectam o histórico de commits do repositório com as versões públicas disponibilizadas no GitHub.
 
@@ -58,7 +58,7 @@ void print_system_info(void) {
 ### Via Linha de Comando / Build
 ```bash
 make version
-# Saida: kansho (libht) version 0.5.0
+# Saida: kansho (libht) version 0.6.0
 ```
 
 ---
@@ -78,24 +78,48 @@ O projeto adota o padrão [Semantic Versioning 2.0.0](https://semver.org/lang/pt
 Para lançar uma nova versão oficial no GitHub:
 
 1. Atualize a versão no arquivo [`VERSION`](../VERSION) e nas macros `HT_VERSION_*` em [`code/include/core/ht_config.h`](../code/include/core/ht_config.h).
-2. Execute a suíte de testes garantindo 100% de sucesso em precisão simples (`float`) e dupla (`double`):
+2. Execute a suíte de testes garantindo 100% de sucesso nos 3 perfis numéricos (`float32`, `double64` e `Q16.16` sem `-lm`):
    ```bash
-   make clean && make test && make clean && make test CFLAGS_EXTRA="-DHT_USE_DOUBLE"
+   make clean && make test && make clean && make test CFLAGS_EXTRA="-DHT_USE_DOUBLE" && make clean && make test-fixed
    ```
 3. Realize o commit das alterações de versão e crie uma **tag anotada**:
    ```bash
-   git tag -a v0.5.0 -m "Release v0.5.0: Embedded Federated Learning (Fed-Forest & Fed-VFDT)"
+   git tag -a v0.6.0 -m "Release v0.6.0: Q16.16 Zero-Libm Fixed-Point Arithmetic (-DHT_USE_FIXED_POINT)"
    ```
 4. Envie o commit e a tag para o repositório remoto no GitHub:
    ```bash
    git push origin main
-   git push origin v0.5.0
+   git push origin v0.6.0
    ```
-5. No GitHub, acesse a aba **Releases** $\rightarrow$ **Draft a new release** e selecione a tag `v0.5.0` recém-enviada para gerar as notas de lançamento e os pacotes `.tar.gz` e `.zip` correspondentes.
+5. No GitHub, acesse a aba **Releases** $\rightarrow$ **Draft a new release** e selecione a tag `v0.6.0` recém-enviada para gerar as notas de lançamento e os pacotes `.tar.gz` e `.zip` correspondentes.
 
 ---
 
 ## 4.1 Histórico de Releases (Changelog)
+
+### v0.6.0 (2026-11-27) — Aritmética de Ponto Fixo `Q16.16` Zero-Libm (`-DHT_USE_FIXED_POINT`) (Fase 8)
+- **Motor Matemático `Q16.16` Zero-Libm ([`ht_math_fixed`](../code/include/core/ht_math_fixed.h), Entrega 8.2):**
+  - Modo de compilação **`-DHT_USE_FIXED_POINT`** (mutuamente exclusivo com `-DHT_USE_DOUBLE`) que substitui `ht_float_t` por inteiro com sinal `int32_t` em formato `Q16.16` ($16$ bits inteiros + $16$ bits fracionários, faixa $[-32768{,}0,\; +32767{,}99998]$, passo $1/65536 \approx 1{,}53\times 10^{-5}$), com **0 bytes de alteração em `sizeof(ht_tree_t)`** (`496.024 B`, idêntico ao `float32`) e sentinela determinística `HT_NAN = INT32_MIN`.
+  - Operações saturantes em aritmética inteira 64-bit (`ht_mul`, `ht_div`, `ht_add`, `ht_sub`), raiz quadrada inteira exata (`ht_sqrt` por bit-shift binário), logaritmo natural (`ht_log` via `CLZ` + polinômio minimax), exponencial (`ht_exp` via redução em $\ln 2$), função erro (`ht_erf` / `ht_normal_cdf` via Abramowitz-Stegun 7.1.26) e distribuição de Poisson (`ht_poisson_knuth` via PRNG LCG 32-bit determinístico) — **sem incluir `<math.h>` e sem linkar `-lm`**.
+- **Estabilidade Numérica em Fluxos Contínuos (`ht_observer`, `ht_criterion`, `ht_prep`, Entrega 8.3):**
+  - **Block-Rescaling** em `ht_gaussian_obs_t` e `ht_var_stat_t` (divide `count` e `m2` por $2$ quando excedem `16384` / faixa segura, mantendo $\sigma^2 = M_2 / (n - 1)$ invariante em fluxos infinitos).
+  - **Variância em `Q26.6`** (`ht_var_value_q8`, escala `2^6`) e combinação exata em 64-bit (`ht_var64_t`) no cálculo de Redução de Variância (*Variance Reduction*), suportando regressão contínua de alta amplitude (ex: *NYC Taxi*, *Appliances Energy*) sem saturação de $M_2$ nem estagnação do `grace_period`.
+  - Proteção contra *underflow* sub-ULP de `m2` em `ht_gaussian_stddev` (fallback de dispersão uniforme `(max - min) / sqrt(12)` quando `m2 == 0` e `max_val > min_val`).
+- **Suporte Completo aos 12 Módulos e Compatibilidade Binária (`core/`, `ensemble/`, `federated/`, Entrega 8.4):**
+  - Campo `delta_neg_log10` em `ht_config_params_t` + helper `ht_params_set_delta_pow10(&params, 7)` e `ht_hoeffding_bound_ln` para preservar $\ln(1/\delta)$ com alta precisão mesmo para $\delta = 10^{-7}$ (abaixo do LSB do `Q16.16`).
+  - Flags binárias de representação (`HT_SERIAL_FLAG_FIXED`, `HT_COMPACT_FLAG_FIXED`, `HT_FED_FLAG_FIXED`) impedindo carregamento acidental de snapshots `float32`/`double64` em firmware `Q16.16` (e vice-versa).
+  - Proteção contra saturação de `faded_mse` em `ht_voting.c` e acumulação de peso imune a Block-Rescaling no `Fed-VFDT STATS-MERGE` (`ht_fed_vfdt.c`).
+  - Novos alvos no `Makefile`: **`make lib-fixed`** e **`make test-fixed`** com auditoria automática `nm -u build/libht.a` garantindo **0 símbolos `libm` / `soft-fp`**.
+- **Validação Experimental Completa (Entrega 8.5):**
+  - **Emulação Hardware-in-the-Loop ARM Cortex-M3 @ 50 MHz sem FPU (`emulation/cortex-m3/cortex_m3_fixed_point_report.md`):**
+    - Redução de Flash `.text` de **`66.220 B` para `49.264 B` (`-25,6%`)** e `.data` de `468 B` para `104 B`, mantendo `.bss = 57.000 B` (`0 B` heap).
+    - Auditoria `arm-none-eabi-nm` no `.elf` **APROVADA**: **0 símbolos** `__aeabi_f*`, `__aeabi_d*`, `_printf_float` ou `libm`.
+    - Speedup real via **SysTick** de **`1,86×` a `4,48×`** (média **`2,86×`**, até `133.690 amostras/s`), com paridade preditiva em todos os cenários (`Electricity` `64,26%` vs `64,34%` em `float32`, `-0,08 pp`, `2,51×` mais rápido).
+  - **Paridade Host (8 Datasets × 2 Tiers) e Federada (8 Datasets × Non-IID/IID × 7 Estratégias):**
+    - [`main_benchmark/fixed_point_benchmark_report.md`](../main_benchmark/fixed_point_benchmark_report.md): paridade preservada nos 8 datasets em High Tier e Tier 4 (incluindo *NYC Taxi* com `79` nós vs `75` em `float32`).
+    - [`main_benchmark/federated_fixed_point_report.md`](../main_benchmark/federated_fixed_point_report.md): 112/112 combinações válidas (`SEA Non-IID STATS-MERGE` `96,78%` idêntico; `Covertype Non-IID STATS-MERGE` `65,53%` vs `65,52%`; `Appliances IID Fed-Forest TOP_M` `MAE 28,73 / R² 0,7662`).
+  - **Zero Regressão em `float32` e `double64`:** Validação direta `main` vs `v0.6.0` nos 8 datasets × 2 tiers com **16/16 (`100%`)** de paridade exata em `double64` e `float32`, além de 100% de execução limpa no `tune_hyperparams --replay-report` (`180/180`), `main_benchmark` (`8/8`) e `federated_benchmark` (`112/112`).
+- **Suíte de Testes:** **143/143 testes aprovados em `Q16.16`** (`231.542` asserções, zero `-lm`), **138/138 em `float32`** e **138/138 em `double64`** (`231.718` asserções) com zero warnings sob `-std=c11 -Wall -Wextra -Werror -pedantic`.
 
 ### v0.5.0 (2026-11-26) — Aprendizado Federado Embarcado (`Fed-Forest` & `Fed-VFDT`) e Arquitetura Modular (Fase 11)
 - **Reestruturação Modular de `code/` (Entrega 11.2):**
@@ -190,17 +214,16 @@ Para lançar uma nova versão oficial no GitHub:
 
 ## 5. Possíveis Trabalhos Futuros e Extensões (Roadmap)
 
-Embora todas as fases entregues até a `v0.5.0` (**Fases 0 a 7 e Fase 11 — Aprendizado Federado**, incluindo Classificação, Adaptação a *Concept Drift* com `ADWIN2`/`HAT`, Regressão Contínua `FIMT-DD`/`HAT-R`, `libht_prep`, otimização extrema de SRAM com *slab* por feature e Aprendizado Federado `Fed-Forest` & `Fed-VFDT`) estejam 100% concluídas com zero heap dinâmico em runtime e perfis enxutos (`4,7 KB` a `18,9 KB` no núcleo), as análises teóricas e os resultados experimentais apontam duas prioridades estratégicas imediatas — além dos eixos detalhados a seguir — para fechar as lacunas restantes do nicho embarcado:
+Embora todas as fases entregues até a `v0.6.0` (**Fases 0 a 8 e Fase 11 — Aprendizado Federado**, incluindo Classificação, Adaptação a *Concept Drift* com `ADWIN2`/`HAT`, Regressão Contínua `FIMT-DD`/`HAT-R`, `libht_prep`, otimização extrema de SRAM com *slab* por feature, **aritmética de ponto fixo `Q16.16` Zero-Libm (`-DHT_USE_FIXED_POINT`)** para MCUs sem FPU e Aprendizado Federado `Fed-Forest` & `Fed-VFDT`) estejam 100% concluídas com zero heap dinâmico em runtime e perfis enxutos (`4,7 KB` a `18,9 KB` no núcleo), as análises teóricas e os resultados experimentais apontam prioridades estratégicas claras para as próximas entregas:
 
 ### 5.0 Prioridades Estratégicas: Consolidando a Liderança no Nicho Embarcado
 
 > [!TIP]
-> **Foco de Evolução (`v0.6.0+`):** Cobrir 100% do espectro de microcontroladores (incluindo *ultra-low-power* sem FPU) e competir mais próximo aos modelos *batch* em fluxos tabulares complexos preservando o teto estrito de SRAM.
+> **Foco de Evolução (`v0.7.0+`):** Competir ainda mais próximo aos modelos *batch* em fluxos tabulares complexos preservando o teto estrito de SRAM (`< 100 KB`), após a entrega completa da cobertura de MCUs sem FPU (`Q16.16` na `v0.6.0`).
 
-1. **Aritmética de Ponto Fixo (`Q16.16` / `int16`, `-DHT_USE_FIXED_POINT`) para MCUs sem FPU:**
-   - Hoje, o uso padrão de `float32` impõe penalidade severa de latência e energia em microcontroladores de baixíssimo custo sem unidade de ponto flutuante em hardware (como **ARM Cortex-M0 / M0+** e núcleos **RISC-V sem extensão `F`**), onde operações `float` são emuladas em software (`soft-fp`).
-   - A flag de compilação **`-DHT_USE_FIXED_POINT`** abrirá o mercado de sensores alimentados por bateria com autonomia de anos (detalhes técnicos no [Item #2](#51-plataformas-embarcadas-hardware-real-e-concorrência-multi-core)).
-2. **Micro-Ensembles com Observadores Compartilhados e Subespaços (`< 100 KB` de SRAM):**
+1. **Aritmética de Ponto Fixo (`Q16.16`, `-DHT_USE_FIXED_POINT`) para MCUs sem FPU — Concluído (`v0.6.0`):**
+   - Implementação completa em todos os 12 módulos (`core/`, `ensemble/`, `federated/`) sem `<math.h>` e sem `-lm`, validada em ARM Cortex-M3 @ 50 MHz (`-25,6%` de Flash `.text`, speedup de `1,86×–4,48×` via SysTick, `0` símbolos `soft-fp`/`libm`) e nos 8 datasets (local e federado).
+2. **Micro-Ensembles com Observadores Compartilhados e Subespaços (`< 100 KB` de SRAM) — Próxima Prioridade (`v0.7.0+`):**
    - Em vez de uma *Adaptive Random Forest* tradicional (que multiplicaria por $M$ o custo dos observadores de Welford/Histograma), implementar um **comitê de 3 a 5 árvores rasas (Tier 2 ou Tier 4)** que **compartilham estatísticas na raiz** ou particionam **subespaços aleatórios de features** sobre o `leaf_stride` dinâmico (`v0.4.0`), elevando drasticamente o Macro F1 no *Forest Covertype* e o $R^2$ nas regressões abaixo de **`100 KB`** (detalhes no [Item #18](#56-estabilidade-numérica-ecossistema-e-ensembles)).
 
 ---
@@ -211,9 +234,8 @@ Embora todas as fases entregues até a `v0.5.0` (**Fases 0 a 7 e Fase 11 — Apr
    - Criação de scripts e targets no Makefile para compilação cruzada com toolchains reais (`arm-none-eabi-gcc` para ARM Cortex-M4F / Cortex-M7, `riscv64-unknown-elf-gcc` para RISC-V e ESP-IDF para ESP32).
    - Validação direta em bancada com microcontroladores operando sob FreeRTOS ou Zephyr OS, medindo ciclos exatos de clock (`DWT->CYCCNT`) e consumo de corrente/energia por amostra.
 
-2. **Quantização e Aritmética de Ponto Fixo (`-DHT_USE_FIXED_POINT` — `Q16.16` / `int16`):**
-   - Suporte nativo via flag de compilação `-DHT_USE_FIXED_POINT` para microcontroladores de baixíssimo custo e ultrabaixo consumo desprovidos de FPU em hardware (**ARM Cortex-M0 / M0+**, **RISC-V `RV32I` / `RV32IMC` sem extensão `F`** e MCUs de 8/16 bits), eliminando a sobrecarga de emulação `soft-fp` de `float32`.
-   - Substituição de `ht_float_t` por aritmética inteira escalada em ponto fixo (`Q16.16`, ou perfil compacto `int16` para observadores quantizados) com tabelas de consulta (*LUT*) ou algoritmo CORDIC para aproximações determinísticas de $\ln(x)$, $\exp(x)$ e $\sqrt{x}$, viabilizando inferência e aprendizado em sensores de bateria com vida útil de anos.
+2. **Quantização e Aritmética de Ponto Fixo (`-DHT_USE_FIXED_POINT` — `Q16.16` Zero-Libm) — Concluído (`v0.6.0`):**
+   - Suporte nativo completo via flag `-DHT_USE_FIXED_POINT` (`int32_t` `Q16.16`, zero `<math.h>`, zero `-lm`, zero símbolos `soft-fp`) validado em ARM Cortex-M3 sem FPU (`-25,6%` Flash, speedup médio `2,86×` no SysTick) com Block-Rescaling, variância `Q26.6` + combinação 64-bit, `delta_neg_log10` e flags de segurança binária `HT_*_FLAG_FIXED`. *(Extensão futura opcional: perfil ultracompacto `int16` para MCUs de 8/16 bits).*
 
 3. **Validação Prática em ESP32 com Máquina de Estados Completa:**
    - Teste da biblioteca embarcada em uma placa **ESP32** com máquina de estados operacional completa para aplicações de borda:
